@@ -36,5 +36,5 @@ docker-build:
 update-sdk:
   stage: deploy
   only:
-    - $CI_DEFAULT_BRANCH
+    - rivos/main
   trigger: rv/it/rivos-sdk
