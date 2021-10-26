@@ -30,3 +30,11 @@ docker-build:
     - if: $CI_COMMIT_BRANCH
       exists:
         - rivos/Dockerfile
+
+# Rebuild the rivos-sdk image if this is the branch the SDK is using.
+# Currently the 'latest' tag from the 'rivos/main' branch.
+update-sdk:
+  stage: deploy
+  only:
+    - $CI_DEFAULT_BRANCH
+  trigger: rv/it/rivos-sdk
