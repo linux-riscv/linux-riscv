@@ -269,23 +269,14 @@ static bool lmk04832_regmap_rd_regs(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case LMK04832_REG_RST3W ... LMK04832_REG_ID_MASKREV:
-		fallthrough;
 	case LMK04832_REG_ID_VNDR_MSB:
-		fallthrough;
 	case LMK04832_REG_ID_VNDR_LSB:
-		fallthrough;
 	case LMK04832_REG_CLKOUT_CTRL0(0) ... LMK04832_REG_PLL2_DLD_CNT_LSB:
-		fallthrough;
 	case LMK04832_REG_PLL2_LD:
-		fallthrough;
 	case LMK04832_REG_PLL2_PD:
-		fallthrough;
 	case LMK04832_REG_PLL1R_RST:
-		fallthrough;
 	case LMK04832_REG_CLR_PLL_LOST ... LMK04832_REG_RB_DAC_VAL_LSB:
-		fallthrough;
 	case LMK04832_REG_RB_HOLDOVER:
-		fallthrough;
 	case LMK04832_REG_SPI_LOCK:
 		return true;
 	default:
@@ -297,27 +288,18 @@ static bool lmk04832_regmap_wr_regs(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case LMK04832_REG_RST3W:
-		fallthrough;
 	case LMK04832_REG_POWERDOWN:
 		return true;
 	case LMK04832_REG_ID_DEV_TYPE ... LMK04832_REG_ID_MASKREV:
-		fallthrough;
 	case LMK04832_REG_ID_VNDR_MSB:
-		fallthrough;
 	case LMK04832_REG_ID_VNDR_LSB:
 		return false;
 	case LMK04832_REG_CLKOUT_CTRL0(0) ... LMK04832_REG_PLL2_DLD_CNT_LSB:
-		fallthrough;
 	case LMK04832_REG_PLL2_LD:
-		fallthrough;
 	case LMK04832_REG_PLL2_PD:
-		fallthrough;
 	case LMK04832_REG_PLL1R_RST:
-		fallthrough;
 	case LMK04832_REG_CLR_PLL_LOST ... LMK04832_REG_RB_DAC_VAL_LSB:
-		fallthrough;
 	case LMK04832_REG_RB_HOLDOVER:
-		fallthrough;
 	case LMK04832_REG_SPI_LOCK:
 		return true;
 	default:
@@ -519,7 +501,7 @@ static long lmk04832_vco_round_rate(struct clk_hw *hw, unsigned long rate,
 
 	vco_rate = lmk04832_calc_pll2_params(*prate, rate, &n, &p, &r);
 	if (vco_rate < 0) {
-		dev_err(lmk->dev, "PLL2 parmeters out of range\n");
+		dev_err(lmk->dev, "PLL2 parameters out of range\n");
 		return vco_rate;
 	}
 
@@ -550,7 +532,7 @@ static int lmk04832_vco_set_rate(struct clk_hw *hw, unsigned long rate,
 
 	vco_rate = lmk04832_calc_pll2_params(prate, rate, &n, &p, &r);
 	if (vco_rate < 0) {
-		dev_err(lmk->dev, "failed to determine PLL2 parmeters\n");
+		dev_err(lmk->dev, "failed to determine PLL2 parameters\n");
 		return vco_rate;
 	}
 
@@ -573,7 +555,7 @@ static int lmk04832_vco_set_rate(struct clk_hw *hw, unsigned long rate,
 
 	/*
 	 * PLL2_N registers must be programmed after other PLL2 dividers are
-	 * programed to ensure proper VCO frequency calibration
+	 * programmed to ensure proper VCO frequency calibration
 	 */
 	ret = regmap_write(lmk->regmap, LMK04832_REG_PLL2_N_0,
 			   FIELD_GET(0x030000, n));
@@ -1120,7 +1102,7 @@ static int lmk04832_dclk_set_rate(struct clk_hw *hw, unsigned long rate,
 		return -EINVAL;
 	}
 
-	/* Enable Duty Cycle Corretion */
+	/* Enable Duty Cycle Correction */
 	if (dclk_div == 1) {
 		ret = regmap_update_bits(lmk->regmap,
 					 LMK04832_REG_CLKOUT_CTRL3(dclk->id),
@@ -1425,23 +1407,23 @@ static int lmk04832_probe(struct spi_device *spi)
 
 	lmk->dclk = devm_kcalloc(lmk->dev, info->num_channels >> 1,
 				 sizeof(struct lmk_dclk), GFP_KERNEL);
-	if (IS_ERR(lmk->dclk)) {
-		ret = PTR_ERR(lmk->dclk);
+	if (!lmk->dclk) {
+		ret = -ENOMEM;
 		goto err_disable_oscin;
 	}
 
 	lmk->clkout = devm_kcalloc(lmk->dev, info->num_channels,
 				   sizeof(*lmk->clkout), GFP_KERNEL);
-	if (IS_ERR(lmk->clkout)) {
-		ret = PTR_ERR(lmk->clkout);
+	if (!lmk->clkout) {
+		ret = -ENOMEM;
 		goto err_disable_oscin;
 	}
 
 	lmk->clk_data = devm_kzalloc(lmk->dev, struct_size(lmk->clk_data, hws,
 							   info->num_channels),
 				     GFP_KERNEL);
-	if (IS_ERR(lmk->clk_data)) {
-		ret = PTR_ERR(lmk->clk_data);
+	if (!lmk->clk_data) {
+		ret = -ENOMEM;
 		goto err_disable_oscin;
 	}
 

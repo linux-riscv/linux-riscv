@@ -244,6 +244,7 @@ nouveau_cli_init(struct nouveau_drm *drm, const char *sname,
 	ret = nvif_device_ctor(&cli->base.object, "drmDevice", 0, NV_DEVICE,
 			       &(struct nv_device_v0) {
 					.device = ~0,
+					.priv = true,
 			       }, sizeof(struct nv_device_v0),
 			       &cli->device);
 	if (ret) {
@@ -343,6 +344,9 @@ nouveau_accel_gr_init(struct nouveau_drm *drm)
 	struct nvif_device *device = &drm->client.device;
 	u32 arg0, arg1;
 	int ret;
+
+	if (device->info.family >= NV_DEVICE_INFO_V0_AMPERE)
+		return;
 
 	/* Allocate channel that has access to the graphics engine. */
 	if (device->info.family >= NV_DEVICE_INFO_V0_KEPLER) {
@@ -468,6 +472,7 @@ nouveau_accel_init(struct nouveau_drm *drm)
 		case PASCAL_CHANNEL_GPFIFO_A:
 		case VOLTA_CHANNEL_GPFIFO_A:
 		case TURING_CHANNEL_GPFIFO_A:
+		case AMPERE_CHANNEL_GPFIFO_B:
 			ret = nvc0_fence_create(drm);
 			break;
 		default:
@@ -552,8 +557,6 @@ nouveau_drm_device_init(struct drm_device *dev)
 	ret = nouveau_cli_init(drm, "DRM", &drm->client);
 	if (ret)
 		goto fail_master;
-
-	dev->irq_enabled = true;
 
 	nvxx_client(&drm->client.base)->debug =
 		nvkm_dbgopt(nouveau_debug, "DRM");
@@ -738,7 +741,7 @@ static int nouveau_drm_probe(struct pci_dev *pdev,
 	nvkm_device_del(&device);
 
 	/* Remove conflicting drivers (vesafb, efifb etc). */
-	ret = drm_aperture_remove_conflicting_pci_framebuffers(pdev, "nouveaufb");
+	ret = drm_aperture_remove_conflicting_pci_framebuffers(pdev, &driver_pci);
 	if (ret)
 		return ret;
 
@@ -795,7 +798,6 @@ nouveau_drm_device_remove(struct drm_device *dev)
 
 	drm_dev_unregister(dev);
 
-	dev->irq_enabled = false;
 	client = nvxx_client(&drm->client.base);
 	device = nvkm_device_find(client->device);
 
@@ -1085,8 +1087,6 @@ nouveau_drm_open(struct drm_device *dev, struct drm_file *fpriv)
 	ret = nouveau_cli_init(drm, name, cli);
 	if (ret)
 		goto done;
-
-	cli->base.super = false;
 
 	fpriv->driver_priv = cli;
 

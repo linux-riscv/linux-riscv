@@ -931,16 +931,13 @@ enum irdma_status_code irdma_uk_mw_bind(struct irdma_qp_uk *qp,
 enum irdma_status_code irdma_uk_post_receive(struct irdma_qp_uk *qp,
 					     struct irdma_post_rq_info *info)
 {
-	u32 total_size = 0, wqe_idx, i, byte_off;
+	u32 wqe_idx, i, byte_off;
 	u32 addl_frag_cnt;
 	__le64 *wqe;
 	u64 hdr;
 
 	if (qp->max_rq_frag_cnt < info->num_sges)
 		return IRDMA_ERR_INVALID_FRAG_COUNT;
-
-	for (i = 0; i < info->num_sges; i++)
-		total_size += info->sg_list[i].len;
 
 	wqe = irdma_qp_get_next_recv_wqe(qp, &wqe_idx);
 	if (!wqe)
@@ -1095,12 +1092,12 @@ irdma_uk_cq_poll_cmpl(struct irdma_cq_uk *cq, struct irdma_cq_poll_info *info)
 		if (cq->avoid_mem_cflct) {
 			ext_cqe = (__le64 *)((u8 *)cqe + 32);
 			get_64bit_val(ext_cqe, 24, &qword7);
-			polarity = (u8)FIELD_GET(IRDMA_CQ_VALID, qword3);
+			polarity = (u8)FIELD_GET(IRDMA_CQ_VALID, qword7);
 		} else {
 			peek_head = (cq->cq_ring.head + 1) % cq->cq_ring.size;
 			ext_cqe = cq->cq_base[peek_head].buf;
 			get_64bit_val(ext_cqe, 24, &qword7);
-			polarity = (u8)FIELD_GET(IRDMA_CQ_VALID, qword3);
+			polarity = (u8)FIELD_GET(IRDMA_CQ_VALID, qword7);
 			if (!peek_head)
 				polarity ^= 1;
 		}

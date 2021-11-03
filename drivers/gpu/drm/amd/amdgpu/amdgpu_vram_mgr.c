@@ -361,7 +361,7 @@ static void amdgpu_vram_mgr_virt_start(struct ttm_resource *mem,
  * @man: TTM memory type manager
  * @tbo: TTM BO we need this range for
  * @place: placement flags and restrictions
- * @mem: the resulting mem object
+ * @res: the resulting mem object
  *
  * Allocate VRAM for the given BO.
  */
@@ -463,6 +463,11 @@ static int amdgpu_vram_mgr_new(struct ttm_resource_manager *man,
 	if (i == 1)
 		node->base.placement |= TTM_PL_FLAG_CONTIGUOUS;
 
+	if (adev->gmc.xgmi.connected_to_cpu)
+		node->base.bus.caching = ttm_cached;
+	else
+		node->base.bus.caching = ttm_write_combined;
+
 	atomic64_add(vis_usage, &mgr->vis_usage);
 	*res = &node->base;
 	return 0;
@@ -482,7 +487,7 @@ error_sub:
  * amdgpu_vram_mgr_del - free ranges
  *
  * @man: TTM memory type manager
- * @mem: TTM memory object
+ * @res: TTM memory object
  *
  * Free the allocated VRAM again.
  */
@@ -517,7 +522,7 @@ static void amdgpu_vram_mgr_del(struct ttm_resource_manager *man,
  * amdgpu_vram_mgr_alloc_sgt - allocate and fill a sg table
  *
  * @adev: amdgpu device pointer
- * @mem: TTM memory object
+ * @res: TTM memory object
  * @offset: byte offset from the base of VRAM BO
  * @length: number of bytes to export in sg_table
  * @dev: the other device

@@ -38,7 +38,10 @@
 
 const struct dmub_srv_dcn31_regs dmub_srv_dcn31_regs = {
 #define DMUB_SR(reg) REG_OFFSET_EXP(reg),
-	{ DMUB_DCN31_REGS() },
+	{
+		DMUB_DCN31_REGS()
+		DMCUB_INTERNAL_REGS()
+	},
 #undef DMUB_SR
 
 #define DMUB_SF(reg, field) FD_MASK(reg, field),
@@ -80,7 +83,7 @@ static inline void dmub_dcn31_translate_addr(const union dmub_addr *addr_in,
 void dmub_dcn31_reset(struct dmub_srv *dmub)
 {
 	union dmub_gpint_data_register cmd;
-	const uint32_t timeout = 30;
+	const uint32_t timeout = 100;
 	uint32_t in_reset, scratch, i;
 
 	REG_GET(DMCUB_CNTL2, DMCUB_SOFT_RESET, &in_reset);
@@ -95,26 +98,22 @@ void dmub_dcn31_reset(struct dmub_srv *dmub)
 		/**
 		 * Timeout covers both the ACK and the wait
 		 * for remaining work to finish.
-		 *
-		 * This is mostly bound by the PHY disable sequence.
-		 * Each register check will be greater than 1us, so
-		 * don't bother using udelay.
 		 */
 
 		for (i = 0; i < timeout; ++i) {
 			if (dmub->hw_funcs.is_gpint_acked(dmub, cmd))
 				break;
+
+			udelay(1);
 		}
 
 		for (i = 0; i < timeout; ++i) {
 			scratch = dmub->hw_funcs.get_gpint_response(dmub);
 			if (scratch == DMUB_GPINT__STOP_FW_RESPONSE)
 				break;
-		}
 
-		/* Clear the GPINT command manually so we don't reset again. */
-		cmd.all = 0;
-		dmub->hw_funcs.set_gpint(dmub, cmd);
+			udelay(1);
+		}
 
 		/* Force reset in case we timed out, DMCUB is likely hung. */
 	}
@@ -127,6 +126,10 @@ void dmub_dcn31_reset(struct dmub_srv *dmub)
 	REG_WRITE(DMCUB_OUTBOX1_RPTR, 0);
 	REG_WRITE(DMCUB_OUTBOX1_WPTR, 0);
 	REG_WRITE(DMCUB_SCRATCH0, 0);
+
+	/* Clear the GPINT command manually so we don't send anything during boot. */
+	cmd.all = 0;
+	dmub->hw_funcs.set_gpint(dmub, cmd);
 }
 
 void dmub_dcn31_reset_release(struct dmub_srv *dmub)
@@ -267,11 +270,13 @@ void dmub_dcn31_set_outbox1_rptr(struct dmub_srv *dmub, uint32_t rptr_offset)
 
 bool dmub_dcn31_is_hw_init(struct dmub_srv *dmub)
 {
-	uint32_t is_hw_init;
+	union dmub_fw_boot_status status;
+	uint32_t is_enable;
 
-	REG_GET(DMCUB_CNTL, DMCUB_ENABLE, &is_hw_init);
+	status.all = REG_READ(DMCUB_SCRATCH0);
+	REG_GET(DMCUB_CNTL, DMCUB_ENABLE, &is_enable);
 
-	return is_hw_init != 0;
+	return is_enable != 0 && status.bits.dal_fw;
 }
 
 bool dmub_dcn31_is_supported(struct dmub_srv *dmub)
@@ -303,6 +308,21 @@ bool dmub_dcn31_is_gpint_acked(struct dmub_srv *dmub,
 uint32_t dmub_dcn31_get_gpint_response(struct dmub_srv *dmub)
 {
 	return REG_READ(DMCUB_SCRATCH7);
+}
+
+uint32_t dmub_dcn31_get_gpint_dataout(struct dmub_srv *dmub)
+{
+	uint32_t dataout = REG_READ(DMCUB_GPINT_DATAOUT);
+
+	REG_UPDATE(DMCUB_INTERRUPT_ENABLE, DMCUB_GPINT_IH_INT_EN, 0);
+
+	REG_WRITE(DMCUB_GPINT_DATAOUT, 0);
+	REG_UPDATE(DMCUB_INTERRUPT_ACK, DMCUB_GPINT_IH_INT_ACK, 1);
+	REG_UPDATE(DMCUB_INTERRUPT_ACK, DMCUB_GPINT_IH_INT_ACK, 0);
+
+	REG_UPDATE(DMCUB_INTERRUPT_ENABLE, DMCUB_GPINT_IH_INT_EN, 1);
+
+	return dataout;
 }
 
 union dmub_fw_boot_status dmub_dcn31_get_fw_boot_status(struct dmub_srv *dmub)
@@ -351,4 +371,64 @@ void dmub_dcn31_set_outbox0_rptr(struct dmub_srv *dmub, uint32_t rptr_offset)
 uint32_t dmub_dcn31_get_current_time(struct dmub_srv *dmub)
 {
 	return REG_READ(DMCUB_TIMER_CURRENT);
+}
+
+void dmub_dcn31_get_diagnostic_data(struct dmub_srv *dmub, struct dmub_diagnostic_data *diag_data)
+{
+	uint32_t is_dmub_enabled, is_soft_reset, is_sec_reset;
+	uint32_t is_traceport_enabled, is_cw0_enabled, is_cw6_enabled;
+
+	if (!dmub || !diag_data)
+		return;
+
+	memset(diag_data, 0, sizeof(*diag_data));
+
+	diag_data->dmcub_version = dmub->fw_version;
+
+	diag_data->scratch[0] = REG_READ(DMCUB_SCRATCH0);
+	diag_data->scratch[1] = REG_READ(DMCUB_SCRATCH1);
+	diag_data->scratch[2] = REG_READ(DMCUB_SCRATCH2);
+	diag_data->scratch[3] = REG_READ(DMCUB_SCRATCH3);
+	diag_data->scratch[4] = REG_READ(DMCUB_SCRATCH4);
+	diag_data->scratch[5] = REG_READ(DMCUB_SCRATCH5);
+	diag_data->scratch[6] = REG_READ(DMCUB_SCRATCH6);
+	diag_data->scratch[7] = REG_READ(DMCUB_SCRATCH7);
+	diag_data->scratch[8] = REG_READ(DMCUB_SCRATCH8);
+	diag_data->scratch[9] = REG_READ(DMCUB_SCRATCH9);
+	diag_data->scratch[10] = REG_READ(DMCUB_SCRATCH10);
+	diag_data->scratch[11] = REG_READ(DMCUB_SCRATCH11);
+	diag_data->scratch[12] = REG_READ(DMCUB_SCRATCH12);
+	diag_data->scratch[13] = REG_READ(DMCUB_SCRATCH13);
+	diag_data->scratch[14] = REG_READ(DMCUB_SCRATCH14);
+	diag_data->scratch[15] = REG_READ(DMCUB_SCRATCH15);
+
+	diag_data->undefined_address_fault_addr = REG_READ(DMCUB_UNDEFINED_ADDRESS_FAULT_ADDR);
+	diag_data->inst_fetch_fault_addr = REG_READ(DMCUB_INST_FETCH_FAULT_ADDR);
+	diag_data->data_write_fault_addr = REG_READ(DMCUB_DATA_WRITE_FAULT_ADDR);
+
+	diag_data->inbox1_rptr = REG_READ(DMCUB_INBOX1_RPTR);
+	diag_data->inbox1_wptr = REG_READ(DMCUB_INBOX1_WPTR);
+	diag_data->inbox1_size = REG_READ(DMCUB_INBOX1_SIZE);
+
+	diag_data->inbox0_rptr = REG_READ(DMCUB_INBOX0_RPTR);
+	diag_data->inbox0_wptr = REG_READ(DMCUB_INBOX0_WPTR);
+	diag_data->inbox0_size = REG_READ(DMCUB_INBOX0_SIZE);
+
+	REG_GET(DMCUB_CNTL, DMCUB_ENABLE, &is_dmub_enabled);
+	diag_data->is_dmcub_enabled = is_dmub_enabled;
+
+	REG_GET(DMCUB_CNTL2, DMCUB_SOFT_RESET, &is_soft_reset);
+	diag_data->is_dmcub_soft_reset = is_soft_reset;
+
+	REG_GET(DMCUB_SEC_CNTL, DMCUB_SEC_RESET_STATUS, &is_sec_reset);
+	diag_data->is_dmcub_secure_reset = is_sec_reset;
+
+	REG_GET(DMCUB_CNTL, DMCUB_TRACEPORT_EN, &is_traceport_enabled);
+	diag_data->is_traceport_en  = is_traceport_enabled;
+
+	REG_GET(DMCUB_REGION3_CW0_TOP_ADDRESS, DMCUB_REGION3_CW0_ENABLE, &is_cw0_enabled);
+	diag_data->is_cw0_enabled = is_cw0_enabled;
+
+	REG_GET(DMCUB_REGION3_CW6_TOP_ADDRESS, DMCUB_REGION3_CW6_ENABLE, &is_cw6_enabled);
+	diag_data->is_cw6_enabled = is_cw6_enabled;
 }

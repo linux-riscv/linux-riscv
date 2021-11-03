@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1 */
 /*
- *   fs/cifs/smb2pdu.h
  *
  *   Copyright (c) International Business Machines  Corp., 2009, 2013
  *                 Etersoft, 2012
@@ -13,7 +12,7 @@
 #define _SMB2PDU_H
 
 #include <net/sock.h>
-#include <cifsacl.h>
+#include "cifsacl.h"
 
 /*
  * Note that, due to trying to use names similar to the protocol specifications,
@@ -329,7 +328,7 @@ struct smb2_neg_context {
 	__le16	ContextType;
 	__le16	DataLength;
 	__le32	Reserved;
-	/* Followed by array of data */
+	/* Followed by array of data. NOTE: some servers require padding to 8 byte boundary */
 } __packed;
 
 #define SMB311_LINUX_CLIENT_SALT_SIZE			32
@@ -394,6 +393,8 @@ struct smb2_compression_capabilities_context {
 	__u16	Padding;
 	__u32	Flags;
 	__le16	CompressionAlgorithms[3];
+	__u16	Pad;  /* Some servers require pad to DataLen multiple of 8 */
+	/* Check if pad needed */
 } __packed;
 
 /*
@@ -420,6 +421,7 @@ struct smb2_transport_capabilities_context {
 	__le16  DataLength;
 	__u32	Reserved;
 	__le32	Flags;
+	__u32	Pad;
 } __packed;
 
 /*
@@ -458,6 +460,7 @@ struct smb2_signing_capabilities {
 	__u32	Reserved;
 	__le16	SigningAlgorithmCount;
 	__le16	SigningAlgorithms[];
+	/*  Followed by padding to 8 byte boundary (required by some servers) */
 } __packed;
 
 #define POSIX_CTXT_DATA_LEN	16

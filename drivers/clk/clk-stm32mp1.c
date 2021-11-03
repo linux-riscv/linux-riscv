@@ -1076,14 +1076,10 @@ static int clk_divider_rtc_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static int clk_divider_rtc_determine_rate(struct clk_hw *hw, struct clk_rate_request *req)
 {
-	unsigned long best_parent_rate = req->best_parent_rate;
+	if (req->best_parent_hw == clk_hw_get_parent_by_index(hw, HSE_RTC))
+		return clk_divider_ops.determine_rate(hw, req);
 
-	if (req->best_parent_hw == clk_hw_get_parent_by_index(hw, HSE_RTC)) {
-		req->rate = clk_divider_ops.round_rate(hw, req->rate, &best_parent_rate);
-		req->best_parent_rate = best_parent_rate;
-	} else {
-		req->rate = best_parent_rate;
-	}
+	req->rate = req->best_parent_rate;
 
 	return 0;
 }
@@ -2263,6 +2259,7 @@ static int stm32_rcc_reset_init(struct device *dev, void __iomem *base,
 	if (!reset_data)
 		return -ENOMEM;
 
+	spin_lock_init(&reset_data->lock);
 	reset_data->membase = base;
 	reset_data->rcdev.owner = THIS_MODULE;
 	reset_data->rcdev.ops = &stm32_reset_ops;

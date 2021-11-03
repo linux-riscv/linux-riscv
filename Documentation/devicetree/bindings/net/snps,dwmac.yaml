@@ -21,6 +21,7 @@ select:
       contains:
         enum:
           - snps,dwmac
+          - snps,dwmac-3.40a
           - snps,dwmac-3.50a
           - snps,dwmac-3.610
           - snps,dwmac-3.70a
@@ -28,6 +29,7 @@ select:
           - snps,dwmac-4.00
           - snps,dwmac-4.10a
           - snps,dwmac-4.20a
+          - snps,dwmac-5.10a
           - snps,dwxgmac
           - snps,dwxgmac-2.10
 
@@ -75,6 +77,7 @@ properties:
         - rockchip,rk3399-gmac
         - rockchip,rv1108-gmac
         - snps,dwmac
+        - snps,dwmac-3.40a
         - snps,dwmac-3.50a
         - snps,dwmac-3.610
         - snps,dwmac-3.70a
@@ -82,6 +85,7 @@ properties:
         - snps,dwmac-4.00
         - snps,dwmac-4.10a
         - snps,dwmac-4.20a
+        - snps,dwmac-5.10a
         - snps,dwxgmac
         - snps,dwxgmac-2.10
 
@@ -91,7 +95,6 @@ properties:
 
   interrupts:
     minItems: 1
-    maxItems: 3
     items:
       - description: Combined signal for various interrupt events
       - description: The interrupt to manage the remote wake-up packet detection
@@ -99,7 +102,6 @@ properties:
 
   interrupt-names:
     minItems: 1
-    maxItems: 3
     items:
       - const: macirq
       - const: eth_wake_irq
@@ -377,6 +379,7 @@ allOf:
               - snps,dwmac-4.00
               - snps,dwmac-4.10a
               - snps,dwmac-4.20a
+              - snps,dwmac-5.10a
               - snps,dwxgmac
               - snps,dwxgmac-2.10
               - st,spear600-gmac

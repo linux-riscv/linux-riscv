@@ -148,7 +148,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 		goto journal_err_out;
 	}
 
-	down_write(&EXT4_I(inode)->i_mmap_sem);
+	filemap_invalidate_lock(inode->i_mapping);
 	err = filemap_write_and_wait(inode->i_mapping);
 	if (err)
 		goto err_out;
@@ -256,7 +256,7 @@ err_out1:
 	ext4_double_up_write_data_sem(inode, inode_bl);
 
 err_out:
-	up_write(&EXT4_I(inode)->i_mmap_sem);
+	filemap_invalidate_unlock(inode->i_mapping);
 journal_err_out:
 	unlock_two_nondirectories(inode, inode_bl);
 	iput(inode_bl);
@@ -692,6 +692,13 @@ static long ext4_ioctl_group_add(struct file *file,
 	if (err)
 		return err;
 
+	if (ext4_has_feature_bigalloc(sb)) {
+		ext4_msg(sb, KERN_ERR,
+			 "Online resizing not supported with bigalloc");
+		err = -EOPNOTSUPP;
+		goto group_add_out;
+	}
+
 	err = mnt_want_write_file(file);
 	if (err)
 		goto group_add_out;
@@ -816,7 +823,7 @@ static int ext4_ioctl_checkpoint(struct file *filp, unsigned long arg)
 	if (!EXT4_SB(sb)->s_journal)
 		return -ENODEV;
 
-	if (flags & ~JBD2_JOURNAL_FLUSH_VALID)
+	if (flags & ~EXT4_IOC_CHECKPOINT_FLAG_VALID)
 		return -EINVAL;
 
 	q = bdev_get_queue(EXT4_SB(sb)->s_journal->j_dev);
@@ -911,6 +918,13 @@ setversion_out:
 
 		if (get_user(n_blocks_count, (__u32 __user *)arg)) {
 			err = -EFAULT;
+			goto group_extend_out;
+		}
+
+		if (ext4_has_feature_bigalloc(sb)) {
+			ext4_msg(sb, KERN_ERR,
+				 "Online resizing not supported with bigalloc");
+			err = -EOPNOTSUPP;
 			goto group_extend_out;
 		}
 
@@ -1140,7 +1154,9 @@ resizefs_out:
 				err = PTR_ERR(handle);
 				goto pwsalt_err_exit;
 			}
-			err = ext4_journal_get_write_access(handle, sbi->s_sbh);
+			err = ext4_journal_get_write_access(handle, sb,
+							    sbi->s_sbh,
+							    EXT4_JTR_NONE);
 			if (err)
 				goto pwsalt_err_journal;
 			lock_buffer(sbi->s_sbh);
