@@ -17,6 +17,8 @@
 #include <linux/sched_clock.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include <linux/of_irq.h>
 #include <linux/smp.h>
 #include <linux/timex.h>
@@ -31,6 +33,7 @@
 
 /* CLINT manages IPI and Timer for RISC-V M-mode  */
 static u32 __iomem *clint_ipi_base;
+static unsigned int clint_ipi_irq;
 static u64 __iomem *clint_timer_cmp;
 static u64 __iomem *clint_timer_val;
 static unsigned long clint_timer_freq;
@@ -41,7 +44,8 @@ u64 __iomem *clint_time_val;
 EXPORT_SYMBOL(clint_time_val);
 #endif
 
-static void clint_send_ipi(const struct cpumask *target)
+static void clint_send_ipi(unsigned int parent_virq, void *data,
+			   const struct cpumask *target)
 {
 	unsigned int cpu;
 
@@ -49,14 +53,14 @@ static void clint_send_ipi(const struct cpumask *target)
 		writel(1, clint_ipi_base + cpuid_to_hartid_map(cpu));
 }
 
-static void clint_clear_ipi(void)
+static void clint_clear_ipi(unsigned int parent_virq, void *data)
 {
 	writel(0, clint_ipi_base + cpuid_to_hartid_map(smp_processor_id()));
 }
 
-static struct riscv_ipi_ops clint_ipi_ops = {
-	.ipi_inject = clint_send_ipi,
-	.ipi_clear = clint_clear_ipi,
+static struct ipi_mux_ops clint_ipi_ops = {
+	.ipi_mux_pre_handle = clint_clear_ipi,
+	.ipi_mux_send = clint_send_ipi,
 };
 
 #ifdef CONFIG_64BIT
@@ -125,12 +129,15 @@ static int clint_timer_starting_cpu(unsigned int cpu)
 
 	enable_percpu_irq(clint_timer_irq,
 			  irq_get_trigger_type(clint_timer_irq));
+	enable_percpu_irq(clint_ipi_irq,
+			  irq_get_trigger_type(clint_ipi_irq));
 	return 0;
 }
 
 static int clint_timer_dying_cpu(unsigned int cpu)
 {
 	disable_percpu_irq(clint_timer_irq);
+	disable_percpu_irq(clint_ipi_irq);
 	return 0;
 }
 
@@ -146,7 +153,7 @@ static irqreturn_t clint_timer_interrupt(int irq, void *dev_id)
 
 static int __init clint_timer_init_dt(struct device_node *np)
 {
-	int rc;
+	int rc, virq;
 	u32 i, nr_irqs;
 	void __iomem *base;
 	struct of_phandle_args oirq;
@@ -170,6 +177,12 @@ static int __init clint_timer_init_dt(struct device_node *np)
 			return -ENODEV;
 		}
 
+		/* Find parent irq domain and map ipi irq */
+		if (!clint_ipi_irq &&
+		    oirq.args[0] == RV_IRQ_SOFT &&
+		    irq_find_host(oirq.np))
+			clint_ipi_irq = irq_of_parse_and_map(np, i);
+
 		/* Find parent irq domain and map timer irq */
 		if (!clint_timer_irq &&
 		    oirq.args[0] == RV_IRQ_TIMER &&
@@ -177,9 +190,9 @@ static int __init clint_timer_init_dt(struct device_node *np)
 			clint_timer_irq = irq_of_parse_and_map(np, i);
 	}
 
-	/* If CLINT timer irq not found then fail */
-	if (!clint_timer_irq) {
-		pr_err("%pOFP: timer irq not found\n", np);
+	/* If CLINT ipi or timer irq not found then fail */
+	if (!clint_ipi_irq || !clint_timer_irq) {
+		pr_err("%pOFP: ipi/timer irq not found\n", np);
 		return -ENODEV;
 	}
 
@@ -219,6 +232,14 @@ static int __init clint_timer_init_dt(struct device_node *np)
 		goto fail_iounmap;
 	}
 
+	virq = ipi_mux_create(clint_ipi_irq, BITS_PER_BYTE,
+			      &clint_ipi_ops, NULL);
+	if (virq <= 0) {
+		pr_err("unable to create muxed IPIs\n");
+		rc = (virq < 0) ? virq : -ENODEV;
+		goto fail_free_irq;
+	}
+
 	rc = cpuhp_setup_state(CPUHP_AP_CLINT_TIMER_STARTING,
 				"clockevents/clint/timer:starting",
 				clint_timer_starting_cpu,
@@ -228,8 +249,8 @@ static int __init clint_timer_init_dt(struct device_node *np)
 		goto fail_free_irq;
 	}
 
-	riscv_set_ipi_ops(&clint_ipi_ops);
-	clint_clear_ipi();
+	riscv_ipi_set_virq_range(virq, BITS_PER_BYTE);
+	clint_clear_ipi(clint_ipi_irq, NULL);
 
 	return 0;
 
