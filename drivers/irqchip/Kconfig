@@ -540,6 +540,7 @@ config TI_PRUSS_INTC
 config RISCV_INTC
 	bool "RISC-V Local Interrupt Controller"
 	depends on RISCV
+	select IRQ_DOMAIN_HIERARCHY
 	default y
 	help
 	   This enables support for the per-HART local interrupt controller
