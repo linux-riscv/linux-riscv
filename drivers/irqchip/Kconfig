@@ -29,7 +29,6 @@ config ARM_GIC_V2M
 
 config GIC_NON_BANKED
 	bool
-
 config ARM_GIC_V3
 	bool
 	select IRQ_DOMAIN_HIERARCHY
@@ -563,6 +562,25 @@ config SIFIVE_PLIC
 	   interrupt sources are subordinate to the PLIC.
 
 	   If you don't know what to do here, say Y.
+
+config RISCV_IMSIC
+	bool "RISC-V Incoming MSI Controller"
+	depends on RISCV
+	select IRQ_DOMAIN_HIERARCHY
+	select GENERIC_MSI_IRQ_DOMAIN
+	help
+	   This enables support for the IMSIC chip found in RISC-V systems.
+	   The IMSIC controls message signaled interrupts and forwards them
+	   to each core as wired local interrupt.
+
+	   If you don't know what to do here, say Y.
+
+config RISCV_IMSIC_PCI
+	bool
+	depends on RISCV_IMSIC
+	depends on PCI
+	depends on PCI_MSI
+	default RISCV_IMSIC
 
 config EXYNOS_IRQ_COMBINER
 	bool "Samsung Exynos IRQ combiner support" if COMPILE_TEST
