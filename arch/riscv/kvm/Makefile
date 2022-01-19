@@ -27,3 +27,4 @@ kvm-y += vcpu_sbi_hsm.o
 kvm-y += vcpu_timer.o
 kvm-y += aia.o
 kvm-y += aia_device.o
+kvm-y += aia_aplic.o
