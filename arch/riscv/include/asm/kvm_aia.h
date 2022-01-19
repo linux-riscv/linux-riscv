@@ -34,6 +34,10 @@ DECLARE_STATIC_KEY_FALSE(kvm_riscv_aia_available);
 #define kvm_riscv_aia_available() \
 	static_branch_unlikely(&kvm_riscv_aia_available)
 
+static inline void kvm_riscv_vcpu_aia_imsic_release(struct kvm_vcpu *vcpu)
+{
+}
+
 static inline void kvm_riscv_vcpu_aia_flush_interrupts(struct kvm_vcpu *vcpu)
 {
 }
@@ -122,21 +126,10 @@ static inline void kvm_riscv_aia_destroy_vm(struct kvm *kvm)
 {
 }
 
-static inline int kvm_riscv_aia_alloc_hgei(int cpu, struct kvm_vcpu *owner,
-					   void __iomem **hgei_va,
-					   phys_addr_t *hgei_pa)
-{
-	return 0;
-}
-
-static inline void kvm_riscv_aia_free_hgei(int cpu, int hgei)
-{
-}
-
-static inline void kvm_riscv_aia_wakeon_hgei(struct kvm_vcpu *owner,
-					     bool enable)
-{
-}
+int kvm_riscv_aia_alloc_hgei(int cpu, struct kvm_vcpu *owner,
+			     void __iomem **hgei_va, phys_addr_t *hgei_pa);
+void kvm_riscv_aia_free_hgei(int cpu, int hgei);
+void kvm_riscv_aia_wakeon_hgei(struct kvm_vcpu *owner, bool enable);
 
 void kvm_riscv_aia_enable(void);
 void kvm_riscv_aia_disable(void);
