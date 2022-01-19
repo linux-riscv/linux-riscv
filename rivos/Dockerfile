@@ -42,6 +42,31 @@ RUN make -C /src ARCH=riscv \
          INSTALL_PATH=/rivos/sysroot/riscv/boot \
          install
 
+### Stage 2: Create a .deb Ubuntu package
+FROM gitlab.ba.rivosinc.com:5050/rv/it/rivos-sdk/packager:latest as linux_packager
+
+COPY --from=linux_builder /rivos/sysroot/riscv/boot /rivos/sysroot/riscv/boot
+
+ARG UPVER
+ARG PKGVER
+ARG CI_JOB_TOKEN
+ARG CI_PROJECT_NAME
+ARG CI_PROJECT_URL
+ARG SECTION
+
+RUN ./build_upload_package --deb \
+  --arch all \
+  ${SECTION:+--component ${SECTION}} \
+  --description "Linux kernel image for RISCV64." \
+  --directory "/rivos/sysroot/riscv/boot" \
+  --license "GPL-2.0" \
+  --name "${CI_PROJECT_NAME}" \
+  --pkg_version "${PKGVER}" \
+  --token "${CI_JOB_TOKEN}" \
+  --url "${CI_PROJECT_URL}" \
+  --upstream_version "${UPVER}"
+
+### Stage 3: create a fresh container image with the built artifacts
 FROM ubuntu:20.04 as linux-kernel
 COPY --from=linux_builder /rivos/sysroot/riscv/boot /rivos/sysroot/riscv/boot
 COPY --from=linux_builder /rivos/linux /rivos/linux
