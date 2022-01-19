@@ -9,23 +9,31 @@ docker-build:
     - docker:dind
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - apk add git
   # Default branch leaves tag empty (= latest tag)
   # All other branches are tagged with the escaped branch name (commit ref slug)
   script:
     - |
-      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
-        tag=""
-        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
+      upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*')"
+      image="$CI_REGISTRY_IMAGE"
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]] ; then
+        section="main"
       else
-        tag=":$CI_COMMIT_REF_SLUG"
-        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $tag"
+        prio="~${CI_COMMIT_REF_SLUG//-/+}+"
+        image="${image}:${CI_COMMIT_REF_SLUG}"
       fi
+      pkg_version="${prio}$(date '+%Y%m%dT%H%M%S').g$(git rev-parse --short HEAD)"
+      echo "Running on branch '$CI_COMMIT_BRANCH': package = '$pkg_version' ; container = '$image'"
+    - docker network create sdk_build || echo "docker network already exists ?"
     - >
       docker build --pull \
-             --label "com.rivosinc.ba.gitlab.$CI_PROJECT_PATH_SLUG=$CI_COMMIT_SHA" \
-             --build-arg PARALLEL_JOBS=4 \
-             -f rivos/Dockerfile -t "$CI_REGISTRY_IMAGE${tag}" .
-    - docker push "$CI_REGISTRY_IMAGE${tag}"
+                   --network=sdk_build \
+                   --build-arg CI_PROJECT_NAME --build-arg CI_PROJECT_URL --build-arg CI_JOB_TOKEN \
+                   --build-arg UPVER="${upstream_version:1}" --build-arg PKGVER="${pkg_version}" \
+                   ${section:+--build-arg SECTION=${section}} \
+                   -f rivos/Dockerfile -t "${image}" .
+    # Export the container (mainly for build debugging purpose)
+    - docker push "${image}"
   # Run this job in a branch where a Rivos Dockerfile exists
   rules:
     - if: $CI_COMMIT_BRANCH
