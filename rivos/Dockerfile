@@ -1,7 +1,7 @@
 # Copyright (c) 2021 by Rivos Inc.
 # Licensed under the GPL version 2, see LICENSES/preferred/GPL-2.0 for details.
 # SPDX-License-Identifier: GPL-2.0
-FROM gitlab.ba.rivosinc.com:5050/ext/sw/riscv-gnu-toolchain:latest as linux_builder
+FROM gitlab.ba.rivosinc.com:5050/rv/sw/ext/riscv-gnu-toolchain/ubuntu.20.04:latest as linux_builder
 
 # Don't let debs run any interactive configuration scripts.
 ARG DEBIAN_FRONTEND=noninteractive
@@ -43,7 +43,7 @@ RUN make -C /src ARCH=riscv \
          install
 
 ### Stage 2: Create a .deb Ubuntu package
-FROM gitlab.ba.rivosinc.com:5050/rv/it/rivos-sdk/packager:latest as linux_packager
+FROM gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk/packager:latest as linux_packager
 
 COPY --from=linux_builder /rivos/sysroot/riscv/boot /rivos/sysroot/riscv/boot
 
