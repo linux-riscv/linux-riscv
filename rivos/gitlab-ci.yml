@@ -46,4 +46,4 @@ update-sdk:
   stage: deploy
   only:
     - rivos/main
-  trigger: rv/it/rivos-sdk
+  trigger: rv/it/int/rivos-sdk
