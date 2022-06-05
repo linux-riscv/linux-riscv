@@ -1,0 +1,6 @@
+# depend on PCI
+# MMU_NOTIFIER
+# HMM_MIRROR probably
+# DRM_TTM ?
+# DRM_TTM_HELPER ?
+# FW_LOADER ?
