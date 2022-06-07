@@ -53,27 +53,13 @@ typedef struct AccessInfoWrite {
 	uint64_t offset;
 } AccessInfoWrite;
 
-typedef struct __attribute__((packed)) DescriptorInput {
-	uint8_t opcode;
-	uint8_t ctrl;
-	uint16_t operand0;
-	uint32_t reserved;
-	uint64_t source;
-	uint64_t dest;
-	uint64_t completion;
-	uint64_t operand1;
-	uint64_t operand2;
-	uint64_t operand3;
-	uint64_t operand4;
-} DescriptorInput;
-
 typedef struct __attribute__((packed)) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
 	uint16_t operand0;
 	uint32_t pasid;
 	uint64_t source;
-	uint64_t dest;
+	uint64_t destination;
 	uint64_t completion;
 	uint64_t operand1;
 	uint64_t operand2;
@@ -173,6 +159,41 @@ static uint64_t get_pa_for_user_va(uint64_t va, uint64_t num_bytes, bool write)
 	return pa;
 }
 
+void parse_descriptor_based_on_opcode(struct DCEDescriptor * desc, struct DCEDescriptor * input) {
+	desc->opcode = input->opcode;
+	desc->ctrl = input->ctrl;
+	desc->operand0 = input->operand0;
+	desc->pasid = 0;
+
+	/* Default handling of operands */
+	desc->source = input->source;
+	desc->destination = input->destination;
+	desc->completion = input->completion;
+	desc->operand1 = input->operand1;
+	desc->operand2 = input->operand2;
+	desc->operand3 = input->operand3;
+	desc->operand4 = input->operand4;
+
+	/* Override based on opcode */
+	switch (desc->opcode)
+	{
+		case DCE_OPCODE_MEMCPY:
+			desc->source = get_pa_for_user_va(input->source, input->operand1, 0);
+			desc->destination = get_pa_for_user_va(input->destination, input->operand1, FOLL_WRITE);
+			desc->completion = get_pa_for_user_va(input->completion, 8, FOLL_WRITE);
+			break;
+		case DCE_OPCODE_MEMCMP:
+			desc->source = get_pa_for_user_va(input->source, input->operand1, 0);
+			desc->destination = get_pa_for_user_va(input->destination, input->operand1, FOLL_WRITE);
+			desc->completion = get_pa_for_user_va(input->completion, 8, FOLL_WRITE);
+			/* src2 */
+			desc->operand2 = get_pa_for_user_va(input->operand2, input->operand1, 0);
+			break;
+		default:
+			break;
+	}
+}
+
 static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct dce_driver_priv *priv = file->private_data;
@@ -209,27 +230,15 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 
 		case SUBMIT_DESCRIPTOR: {
-			struct DescriptorInput __user *__descriptor_input;
-			struct DescriptorInput descriptor_input;
+			struct DCEDescriptor __user *__descriptor_input;
+			struct DCEDescriptor descriptor_input;
 
-			__descriptor_input = (struct DescriptorInput __user*) arg;
+			__descriptor_input = (struct DCEDescriptor __user*) arg;
 			if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
 				return -EFAULT;
 
 			struct DCEDescriptor descriptor;
-			descriptor.opcode = descriptor_input.opcode;
-			descriptor.ctrl = descriptor_input.ctrl;
-			descriptor.operand0 = descriptor_input.operand0;
-			descriptor.pasid = 0;
-
-			descriptor.source = get_pa_for_user_va(descriptor_input.source, descriptor_input.operand1, 0);
-			descriptor.dest = get_pa_for_user_va(descriptor_input.dest, descriptor_input.operand1, 0);
-
-			descriptor.completion = descriptor_input.completion;
-			descriptor.operand1 = descriptor_input.operand1;
-			descriptor.operand2 = descriptor_input.operand2;
-			descriptor.operand3 = descriptor_input.operand3;
-			descriptor.operand4 = descriptor_input.operand4;
+			parse_descriptor_based_on_opcode(&descriptor, &descriptor_input);
 			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
 			dce_push_descriptor(priv, &descriptor);
 		}
