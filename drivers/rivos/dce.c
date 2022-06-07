@@ -44,20 +44,20 @@
 #define DCE_OPCODE_COMPRESS_ENCRYPT   11
 
 typedef struct AccessInfoRead {
-        uint64_t* value;
-        uint64_t  offset;
+	uint64_t* value;
+	uint64_t  offset;
 } AccessInfoRead;
 
 typedef struct AccessInfoWrite {
-        uint64_t value;
-        uint64_t offset;
+	uint64_t value;
+	uint64_t offset;
 } AccessInfoWrite;
 
 typedef struct __attribute__((packed)) DescriptorInput {
-        uint8_t opcode;
+	uint8_t opcode;
 	uint8_t ctrl;
 	uint16_t operand0;
-        uint32_t reserved;
+	uint32_t reserved;
 	uint64_t source;
 	uint64_t dest;
 	uint64_t completion;
@@ -68,25 +68,25 @@ typedef struct __attribute__((packed)) DescriptorInput {
 } DescriptorInput;
 
 typedef struct __attribute__((packed)) DCEDescriptor {
-    uint8_t  opcode;
-    uint8_t  ctrl;
-    uint16_t operand0;
-    uint32_t pasid;
-    uint64_t source;
-    uint64_t dest;
-    uint64_t completion;
-    uint64_t operand1;
-    uint64_t operand2;
-    uint64_t operand3;
-    uint64_t operand4;
+	uint8_t  opcode;
+	uint8_t  ctrl;
+	uint16_t operand0;
+	uint32_t pasid;
+	uint64_t source;
+	uint64_t dest;
+	uint64_t completion;
+	uint64_t operand1;
+	uint64_t operand2;
+	uint64_t operand3;
+	uint64_t operand4;
 } __attribute__((packed)) DCEDescriptor;
 
 
 typedef struct DescriptorRing {
-        DCEDescriptor* descriptors;
-        size_t length;
-        size_t tail;
-        int enabled;
+	DCEDescriptor* descriptors;
+	size_t length;
+	size_t tail;
+	int enabled;
 } DescriptorRing;
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
@@ -94,9 +94,9 @@ typedef struct DescriptorRing {
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
 // im surprised that this isn't already defined somewhere
 #define MIN(a, b) \
-        ({ __typeof__ (a) _a = (a); \
-           __typeof__ (b) _b = (b); \
-           _a < _b ? _a : _b; })
+	({ __typeof__ (a) _a = (a); \
+	   __typeof__ (b) _b = (b); \
+	   _a < _b ? _a : _b; })
 
 struct dce_driver_priv
 {
@@ -108,112 +108,134 @@ struct dce_driver_priv
 	u32* out;
 	u32* temp;
 
-        uint64_t mmio_start;
+	uint64_t mmio_start;
 
 	DescriptorRing descriptor_ring;
 };
 
 static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
-	return ioread64(priv->mmio_start + reg);
+	uint64_t result = ioread64(priv->mmio_start + reg);
+	printk(KERN_INFO "Read 0x%lx from address 0x%llx\n", result, priv->mmio_start + reg);
+	return result;
 }
 
 static void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
+	printk(KERN_INFO "Writing 0x%llx to address 0x%llx\n", value, priv->mmio_start + reg);
 	iowrite64(value, priv->mmio_start + reg);
 }
 
 static int dce_ops_open(struct inode *inode, struct file *file)
 {
-        file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
-        return 0;
+	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
+	return 0;
 }
 
 static ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos)
 {
-        return 0;
+	return 0;
 }
 
 static ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos)
 {
-        return 0;
+	return 0;
 }
 
 static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor)
 {
-        size_t head_offset_bytes = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_HEAD) - (uint64_t) priv->descriptor_ring.descriptors;
-        size_t tail_offset_bytes = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL) - (uint64_t) priv->descriptor_ring.descriptors;
-        size_t descriptor_size_bytes = priv->descriptor_ring.length * sizeof(DCEDescriptor);
+	uint64_t tail = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL);
+	uint64_t base = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_BASE);
+	size_t tail_offset_bytes = tail - base;
+	size_t descriptor_size_bytes = priv->descriptor_ring.length * sizeof(DCEDescriptor);
 
-        size_t next_offset = tail_offset_bytes + sizeof(DCEDescriptor);
+	uint64_t next_offset = tail_offset_bytes + sizeof(DCEDescriptor);
+	next_offset %= descriptor_size_bytes;
 
-        next_offset %= descriptor_size_bytes;
+	// TODO: something here with error handling
 
-        // TODO: something here with error handling
-        if (head_offset_bytes == next_offset) return;
+	memcpy((DCEDescriptor*)phys_to_virt(tail), descriptor, sizeof(DCEDescriptor));
 
-        memcpy((DCEDescriptor*) (priv->descriptor_ring.descriptors + next_offset), descriptor, sizeof(DCEDescriptor));
-	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, (uint64_t) priv->descriptor_ring.descriptors + next_offset);
+	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + next_offset);
+}
+
+static uint64_t get_pa_for_user_va(uint64_t va, uint64_t num_bytes, bool write)
+{
+	int flag = write ? FOLL_WRITE : 0;
+	int num_pages = (num_bytes / PAGE_SIZE) + 1;
+	uint64_t offset = va % PAGE_SIZE;
+	uint64_t offset_length = num_bytes % PAGE_SIZE;
+	if (offset + offset_length >= PAGE_SIZE) num_pages += 1;
+	struct page* page_ptr_array[num_pages];
+	uint64_t pa;
+
+	get_user_pages_fast(va, num_pages, flag, page_ptr_array);
+	pa = (uint64_t)page_to_phys(page_ptr_array[0]);
+	pa += offset;
+	return pa;
 }
 
 static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-        struct dce_driver_priv *priv = file->private_data;
+	struct dce_driver_priv *priv = file->private_data;
+		printk(KERN_INFO "Got to ioctl with cmd %u!\n", cmd);
 
-        switch (cmd) {
-                case RAW_READ: {
-                        struct AccessInfoRead __user *__access_info;
-                        struct AccessInfoRead access_info;
+	switch (cmd) {
+		case RAW_READ: {
+			struct AccessInfoRead __user *__access_info;
+			struct AccessInfoRead access_info;
 
-                        __access_info = (struct AccessInfoRead __user*) arg;
-                        if (copy_from_user(&access_info, __access_info, sizeof(access_info)))
-                                return -EFAULT;
+			__access_info = (struct AccessInfoRead __user*) arg;
+			if (copy_from_user(&access_info, __access_info, sizeof(access_info)))
+				return -EFAULT;
 
-                        uint64_t val = ioread64(priv->mmio_start + access_info.offset);
-                        if (copy_to_user(access_info.value, &val, 8)) {
-                                printk(KERN_INFO "error during ioctl!\n");
-                        }
+			uint64_t val = ioread64(priv->mmio_start + access_info.offset);
+			if (copy_to_user(access_info.value, &val, 8)) {
+				printk(KERN_INFO "error during ioctl!\n");
+			}
 
-                        break;
-                }
+			break;
+		}
 
-                case RAW_WRITE: {
-                        struct AccessInfoWrite __user *__access_info;
-                        struct AccessInfoWrite access_info;
+		case RAW_WRITE: {
+			struct AccessInfoWrite __user *__access_info;
+			struct AccessInfoWrite access_info;
 
-                        __access_info = (struct AccessInfoWrite __user*) arg;
-                        if (copy_from_user(&access_info, __access_info, sizeof(access_info)))
-                                return -EFAULT;
+			__access_info = (struct AccessInfoWrite __user*) arg;
+			if (copy_from_user(&access_info, __access_info, sizeof(access_info)))
+				return -EFAULT;
 
-                        iowrite64(access_info.value, priv->mmio_start + access_info.offset);
+			iowrite64(access_info.value, priv->mmio_start + access_info.offset);
 
-                        break;
-                }
+			break;
+		}
 
 		case SUBMIT_DESCRIPTOR: {
-                        struct DescriptorInput __user *__descriptor_input;
-                        struct DescriptorInput descriptor_input;
+			struct DescriptorInput __user *__descriptor_input;
+			struct DescriptorInput descriptor_input;
 
-                        __descriptor_input = (struct DescriptorInput __user*) arg;
-                        if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
-                                return -EFAULT;
+			__descriptor_input = (struct DescriptorInput __user*) arg;
+			if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
+				return -EFAULT;
 
 			struct DCEDescriptor descriptor;
 			descriptor.opcode = descriptor_input.opcode;
 			descriptor.ctrl = descriptor_input.ctrl;
 			descriptor.operand0 = descriptor_input.operand0;
 			descriptor.pasid = 0;
-			descriptor.source = descriptor_input.source;
-			descriptor.dest = descriptor_input.dest;
+
+			descriptor.source = get_pa_for_user_va(descriptor_input.source, descriptor_input.operand1, 0);
+			descriptor.dest = get_pa_for_user_va(descriptor_input.dest, descriptor_input.operand1, 0);
+
 			descriptor.completion = descriptor_input.completion;
 			descriptor.operand1 = descriptor_input.operand1;
 			descriptor.operand2 = descriptor_input.operand2;
 			descriptor.operand3 = descriptor_input.operand3;
 			descriptor.operand4 = descriptor_input.operand4;
-
+			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
 			dce_push_descriptor(priv, &descriptor);
 		}
-        }
+	}
 
-        return 0;
+	return 0;
 }
 
 static const struct file_operations dce_ops = {
@@ -221,7 +243,7 @@ static const struct file_operations dce_ops = {
 	.open           = dce_ops_open,
 	.read		= dce_ops_read,
 	.write          = dce_ops_write,
-        .unlocked_ioctl = dce_ioctl
+	.unlocked_ioctl = dce_ioctl
 };
 
 static struct class *dce_char_class;
@@ -232,28 +254,27 @@ static void free_resources(struct device *dev, struct dce_driver_priv *drv_priv)
 }
 
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv) {
-        memset(&drv_priv->descriptor_ring, 0, sizeof(DescriptorRing));
+	memset(&drv_priv->descriptor_ring, 0, sizeof(DescriptorRing));
 
-        dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | (1 << 1));
-        while (dce_reg_read(drv_priv, DCE_STATUS) & (1 << 1));
+	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | (1 << 1));
+	while (dce_reg_read(drv_priv, DCE_STATUS) & (1 << 1));
 }
 
 void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, size_t length)
 {
-        dce_reset_descriptor_ring(drv_priv);
+	dce_reset_descriptor_ring(drv_priv);
 
-        // added 1 because there can only ever be n - 1 valid entries in a descriptor ring.
-        // the +1 adjusts for that.
-        size_t adjusted_length = length + 1;
+	// added 1 because there can only ever be n - 1 valid entries in a descriptor ring.
+	// the +1 adjusts for that.
+	size_t adjusted_length = length + 1;
 
-        drv_priv->descriptor_ring.descriptors = devm_kzalloc(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor), GFP_KERNEL);
-        drv_priv->descriptor_ring.length      = adjusted_length;
-
-        dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) drv_priv->descriptor_ring.descriptors);
-        dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) drv_priv->descriptor_ring.descriptors + adjusted_length * sizeof(DCEDescriptor));
-
-        dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
-        while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
+	drv_priv->descriptor_ring.descriptors = devm_kzalloc(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor), GFP_KERNEL);
+	drv_priv->descriptor_ring.length      = adjusted_length;
+	printk(KERN_INFO "Allocated descriptors at 0x%lx\n", drv_priv->descriptor_ring.descriptors);
+	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) virt_to_phys(drv_priv->descriptor_ring.descriptors));
+	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) virt_to_phys(drv_priv->descriptor_ring.descriptors) + adjusted_length * sizeof(DCEDescriptor));
+	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
+	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -263,12 +284,12 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	unsigned long mmio_start,mmio_len;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev;
-        dev_t dev_num;
+	dev_t dev_num;
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-
-	printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
+	printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
 	err = pci_enable_device_mem(pdev);
 	if (err) goto disable_device_and_fail;
@@ -295,7 +316,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	drv_priv->dev = dev;
 	cdev_init(&drv_priv->cdev, &dce_ops);
 	drv_priv->cdev.owner = THIS_MODULE;
-        drv_priv->mmio_start = pci_iomap(pdev, 0, 0);
+	drv_priv->mmio_start = pci_iomap(pdev, 0, 0);
 
 	err = cdev_add(&drv_priv->cdev, MKDEV(MAJOR(dev_num), 0), 1);
 	if (err) goto free_resources_and_fail;
@@ -307,18 +328,18 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 	disable_device_and_fail:
-	        pci_disable_device(pdev);
-	        return err;
+		pci_disable_device(pdev);
+		return err;
 
 	free_resources_and_fail:
-	        pci_disable_device(pdev);
-                free_resources(dev, drv_priv);
-                return err;
+		pci_disable_device(pdev);
+		free_resources(dev, drv_priv);
+		return err;
 }
 
 static void dce_remove(struct pci_dev *pdev)
 {
-        free_resources(&pdev->dev, pci_get_drvdata(pdev));
+	free_resources(&pdev->dev, pci_get_drvdata(pdev));
 }
 
 static SIMPLE_DEV_PM_OPS(vmd_dev_pm_ops, vmd_suspend, vmd_resume);
@@ -357,8 +378,8 @@ static int __init dce_driver_init(void)
 
 	dce_char_class->devnode = pci_char_devnode;
 
-        err = pci_register_driver(&dce_driver);
-        return err;
+	err = pci_register_driver(&dce_driver);
+	return err;
 }
 
 static void __exit dce_driver_exit(void)

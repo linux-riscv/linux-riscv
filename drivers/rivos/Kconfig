@@ -1,5 +1,6 @@
 
 config RIVOS_DCE
-	tristate "SIOX GPIO bus driver"
+	tristate "Rivos DCE device"
+	default y
 	help
-	  SIOX bus driver that controls the four bus lines using GPIOs.
+	  Rivos DCE device
