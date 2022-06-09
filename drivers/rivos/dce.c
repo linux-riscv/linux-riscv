@@ -10,6 +10,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/pci_regs.h>
+#include <linux/of_device.h>
 
 #define DEVICE_NAME "dce"
 #define VENDOR_ID 0x1FED
@@ -67,9 +68,32 @@ typedef struct __attribute__((packed)) DCEDescriptor {
 	uint64_t operand4;
 } __attribute__((packed)) DCEDescriptor;
 
+typedef struct __attribute__((packed)) KernDCEDescriptor {
+	uint8_t  opcode;
+	uint8_t  ctrl;
+	uint16_t operand0;
+	uint32_t pasid;
+	uint64_t source;
+	uint64_t destination;
+	uint64_t completion;
+	uint64_t operand1;
+	uint64_t operand2;
+	uint64_t operand3;
+	uint64_t operand4;
+
+	// dma addresses
+	dma_addr_t dma_source;
+	dma_addr_t dma_destination;
+	dma_addr_t dma_completion;
+	dma_addr_t dma_operand1;
+	dma_addr_t dma_operand2;
+	dma_addr_t dma_operand3;
+	dma_addr_t dma_operand4;
+} __attribute__((packed)) KernDCEDescriptor;
 
 typedef struct DescriptorRing {
 	DCEDescriptor* descriptors;
+	dma_addr_t dma;
 	size_t length;
 	size_t tail;
 	int enabled;
@@ -89,6 +113,8 @@ struct dce_driver_priv
 	struct device* dev;
 	dev_t dev_num;
 	struct cdev cdev;
+
+	KernDCEDescriptor k_descriptor;
 
 	u32* in;
 	u32* out;
@@ -137,29 +163,23 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	next_offset %= descriptor_size_bytes;
 
 	// TODO: something here with error handling
-
+	// FIXME: get rid of phys_to_virt
 	memcpy((DCEDescriptor*)phys_to_virt(tail), descriptor, sizeof(DCEDescriptor));
 
 	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + next_offset);
 }
 
-static uint64_t get_pa_for_user_va(uint64_t va, uint64_t num_bytes, bool write)
+static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv, uint64_t * kern_ptr,
+											   uint8_t __user * user_ptr, size_t size, uint8_t dma_direction)
 {
-	int flag = write ? FOLL_WRITE : 0;
-	int num_pages = (num_bytes / PAGE_SIZE) + 1;
-	uint64_t offset = va % PAGE_SIZE;
-	uint64_t offset_length = num_bytes % PAGE_SIZE;
-	if (offset + offset_length >= PAGE_SIZE) num_pages += 1;
-	struct page* page_ptr_array[num_pages];
-	uint64_t pa;
-
-	get_user_pages_fast(va, num_pages, flag, page_ptr_array);
-	pa = (uint64_t)page_to_phys(page_ptr_array[0]);
-	pa += offset;
-	return pa;
+	*kern_ptr = kzalloc(size, GFP_KERNEL);
+	if (copy_from_user(*kern_ptr, user_ptr, size))
+		return -EFAULT;
+	return dma_map_single(drv_priv->dev, *kern_ptr, size, dma_direction);
 }
 
-void parse_descriptor_based_on_opcode(struct DCEDescriptor * desc, struct DCEDescriptor * input) {
+void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct DCEDescriptor * desc, struct DCEDescriptor * input)
+{
 	desc->opcode = input->opcode;
 	desc->ctrl = input->ctrl;
 	desc->operand0 = input->operand0;
@@ -174,24 +194,36 @@ void parse_descriptor_based_on_opcode(struct DCEDescriptor * desc, struct DCEDes
 	desc->operand3 = input->operand3;
 	desc->operand4 = input->operand4;
 
+	size_t size = desc->operand1;
 	/* Override based on opcode */
 	switch (desc->opcode)
 	{
-		case DCE_OPCODE_MEMCPY:
-			desc->source = get_pa_for_user_va(input->source, input->operand1, 0);
-			desc->destination = get_pa_for_user_va(input->destination, input->operand1, FOLL_WRITE);
-			desc->completion = get_pa_for_user_va(input->completion, 8, FOLL_WRITE);
-			break;
 		case DCE_OPCODE_MEMCMP:
-			desc->source = get_pa_for_user_va(input->source, input->operand1, 0);
-			desc->destination = get_pa_for_user_va(input->destination, input->operand1, FOLL_WRITE);
-			desc->completion = get_pa_for_user_va(input->completion, 8, FOLL_WRITE);
 			/* src2 */
-			desc->operand2 = get_pa_for_user_va(input->operand2, input->operand1, 0);
+			desc->operand2 = (uint64_t)copy_to_kernel_and_setup_dma(drv_priv, &drv_priv->k_descriptor.operand2,
+																  input->operand2, size, DMA_TO_DEVICE);
+		case DCE_OPCODE_MEMCPY:
+			desc->source = copy_to_kernel_and_setup_dma(drv_priv, &drv_priv->k_descriptor.source,
+																  input->source, size, DMA_TO_DEVICE);
+			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, &drv_priv->k_descriptor.destination,
+																  input->destination, size, DMA_FROM_DEVICE);
+
 			break;
 		default:
 			break;
 	}
+	desc->completion = copy_to_kernel_and_setup_dma(drv_priv, &drv_priv->k_descriptor.completion,
+																  input->completion, 8, DMA_FROM_DEVICE);
+}
+
+static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
+{
+	copy_to_user((void __user *) input->destination, (void *)priv->k_descriptor.destination, input->operand1);
+	copy_to_user((void __user *) input->completion, (void *)priv->k_descriptor.completion, input->operand1);
+
+	kfree((void *)priv->k_descriptor.source);
+	kfree((void *)priv->k_descriptor.destination);
+	kfree((void *)priv->k_descriptor.completion);
 }
 
 static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -238,9 +270,13 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			struct DCEDescriptor descriptor;
-			parse_descriptor_based_on_opcode(&descriptor, &descriptor_input);
+			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input);
 			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
 			dce_push_descriptor(priv, &descriptor);
+
+			// Free up resources when its done
+			while(!priv->k_descriptor.completion & (1 << 63)) {}
+			free_resources(priv, &descriptor_input);
 		}
 	}
 
@@ -257,11 +293,6 @@ static const struct file_operations dce_ops = {
 
 static struct class *dce_char_class;
 
-static void free_resources(struct device *dev, struct dce_driver_priv *drv_priv)
-{
-
-}
-
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv) {
 	memset(&drv_priv->descriptor_ring, 0, sizeof(DescriptorRing));
 
@@ -276,12 +307,18 @@ void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, size_t length)
 	// added 1 because there can only ever be n - 1 valid entries in a descriptor ring.
 	// the +1 adjusts for that.
 	size_t adjusted_length = length + 1;
-
-	drv_priv->descriptor_ring.descriptors = devm_kzalloc(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor), GFP_KERNEL);
+	of_dma_configure(drv_priv->dev, drv_priv->dev->of_node, true);
+	if (!drv_priv->dev->dma_mask)
+		drv_priv->dev->dma_mask = &drv_priv->dev->coherent_dma_mask;
+	if (!drv_priv->dev->coherent_dma_mask)
+		drv_priv->dev->coherent_dma_mask = 0xffffffff;
+	// Allcate the descriptors as coherent DMA memory
+	drv_priv->descriptor_ring.descriptors = dma_alloc_coherent(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor),
+															   &drv_priv->descriptor_ring.dma, GFP_KERNEL);
 	drv_priv->descriptor_ring.length      = adjusted_length;
 	printk(KERN_INFO "Allocated descriptors at 0x%lx\n", drv_priv->descriptor_ring.descriptors);
-	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) virt_to_phys(drv_priv->descriptor_ring.descriptors));
-	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) virt_to_phys(drv_priv->descriptor_ring.descriptors) + adjusted_length * sizeof(DCEDescriptor));
+	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) drv_priv->descriptor_ring.dma);
+	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) drv_priv->descriptor_ring.dma + adjusted_length * sizeof(DCEDescriptor));
 	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
 	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
@@ -312,7 +349,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// mmio_start = pci_resource_start(pdev, 0);
 	// mmio_len   = pci_resource_len  (pdev, 0);
 
-	dev_num;
 	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
 	if (err) goto disable_device_and_fail;
 
@@ -342,13 +378,13 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	free_resources_and_fail:
 		pci_disable_device(pdev);
-		free_resources(dev, drv_priv);
+		// free_resources(dev, drv_priv);
 		return err;
 }
 
 static void dce_remove(struct pci_dev *pdev)
 {
-	free_resources(&pdev->dev, pci_get_drvdata(pdev));
+	// free_resources(&pdev->dev, pci_get_drvdata(pdev));
 }
 
 static SIMPLE_DEV_PM_OPS(vmd_dev_pm_ops, vmd_suspend, vmd_resume);
