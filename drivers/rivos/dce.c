@@ -95,14 +95,13 @@ typedef struct DescriptorRing {
 	DCEDescriptor* descriptors;
 	dma_addr_t dma;
 	size_t length;
-	size_t tail;
 	int enabled;
 } DescriptorRing;
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-// im surprised that this isn't already defined somewhere
+
 #define MIN(a, b) \
 	({ __typeof__ (a) _a = (a); \
 	   __typeof__ (b) _b = (b); \
@@ -159,9 +158,11 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	int tail_offset = (tail - base) / sizeof(DCEDescriptor);
 	uint64_t next_offset = (tail_offset + 1) % priv->descriptor_ring.length;
 
+	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
 	memcpy(priv->descriptor_ring.descriptors + tail_offset, descriptor, sizeof(DCEDescriptor));
 	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + (next_offset * sizeof(DCEDescriptor)));
+	// TODO: release semantics here
 }
 
 static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv, void ** kern_ptr,
@@ -208,7 +209,10 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 																  (uint8_t __user *)input->source, size, DMA_TO_DEVICE);
 			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.destination,
 																  (uint8_t __user *)input->destination, size, DMA_FROM_DEVICE);
-
+			break;
+		case DCE_OPCODE_MEMSET:
+			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.destination,
+																  (uint8_t __user *)input->destination, size, DMA_FROM_DEVICE);
 			break;
 		default:
 			break;
