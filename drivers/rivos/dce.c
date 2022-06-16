@@ -156,17 +156,12 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 {
 	uint64_t tail = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL);
 	uint64_t base = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_BASE);
-	size_t tail_offset_bytes = tail - base;
-	size_t descriptor_size_bytes = priv->descriptor_ring.length * sizeof(DCEDescriptor);
-
-	uint64_t next_offset = tail_offset_bytes + sizeof(DCEDescriptor);
-	next_offset %= descriptor_size_bytes;
+	int tail_offset = (tail - base) / sizeof(DCEDescriptor);
+	uint64_t next_offset = (tail_offset + 1) % priv->descriptor_ring.length;
 
 	// TODO: something here with error handling
-	// FIXME: get rid of phys_to_virt
-	memcpy((DCEDescriptor*)phys_to_virt(tail), descriptor, sizeof(DCEDescriptor));
-
-	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + next_offset);
+	memcpy(priv->descriptor_ring.descriptors + tail_offset, descriptor, sizeof(DCEDescriptor));
+	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + (next_offset * sizeof(DCEDescriptor)));
 }
 
 static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv, void ** kern_ptr,
@@ -201,7 +196,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	{
 		case DCE_OPCODE_MEMCMP:
 			/* src2 */
-			desc->operand2 = (uint64_t)copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.operand2,
+			desc->operand2 = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.operand2,
 																  (uint8_t __user *)input->operand2, size, DMA_TO_DEVICE);
 			desc->source = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.source,
 																  (uint8_t __user *)input->source, size, DMA_TO_DEVICE);
