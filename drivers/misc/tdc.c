@@ -92,7 +92,7 @@ static int tdc_file_open(struct inode *inode, struct file *file) {
     return 0;
 }
 
-struct tdc_hashtable_entry* get_cached_entry(uint64_t va) {
+static struct tdc_hashtable_entry* get_cached_entry(uint64_t va) {
     struct tdc_hashtable_entry* entry;
     hash_for_each_possible(va_map, entry, ht_link, va) {
         if(entry->va==va){
@@ -103,7 +103,7 @@ struct tdc_hashtable_entry* get_cached_entry(uint64_t va) {
     return NULL;
 }
 
-uint64_t get_iova_cached_or_create(struct device* dev, uint64_t va, struct page* page, enum dma_data_direction dir, int create) {
+static uint64_t get_iova_cached_or_create(struct device* dev, uint64_t va, struct page* page, enum dma_data_direction dir, int create) {
     struct tdc_hashtable_entry* entry = get_cached_entry(va);
     if(entry != NULL) {
         return entry->iova;
@@ -129,7 +129,7 @@ uint64_t get_iova_cached_or_create(struct device* dev, uint64_t va, struct page*
 
 }
 
-long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+static long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
     switch(cmd) {
         case TDC_DMA_F: {
             printk(KERN_INFO "IOCTL TDC_DMA_F\n");
