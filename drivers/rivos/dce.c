@@ -80,15 +80,6 @@ typedef struct __attribute__((packed)) KernDCEDescriptor {
 	uint64_t operand2;
 	uint64_t operand3;
 	uint64_t operand4;
-
-	// dma addresses
-	dma_addr_t dma_source;
-	dma_addr_t dma_destination;
-	dma_addr_t dma_completion;
-	dma_addr_t dma_operand1;
-	dma_addr_t dma_operand2;
-	dma_addr_t dma_operand3;
-	dma_addr_t dma_operand4;
 } __attribute__((packed)) KernDCEDescriptor;
 
 typedef struct DescriptorRing {
@@ -107,6 +98,15 @@ typedef struct DescriptorRing {
 	   __typeof__ (b) _b = (b); \
 	   _a < _b ? _a : _b; })
 
+enum {
+	DEST,
+	SRC,
+	COMP,
+	OPERAND1,
+	OPERAND2,
+	NUM_SG_LISTS
+};
+
 struct dce_driver_priv
 {
 	struct device* dev;
@@ -122,6 +122,7 @@ struct dce_driver_priv
 	uint64_t mmio_start;
 
 	DescriptorRing descriptor_ring;
+	struct scatterlist * sg_list[NUM_SG_LISTS];
 };
 
 static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
@@ -174,6 +175,37 @@ static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv,
 	return dma_map_single(drv_priv->dev, *kern_ptr, size, dma_direction);
 }
 
+static dma_addr_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index,
+										   uint8_t __user * user_ptr, size_t size, uint8_t dma_direction) {
+	// TODO: fix for multiple pages
+	int i, count, nr_pages = (size / PAGE_SIZE) + 1;
+	struct page * pages[nr_pages];
+	struct scatterlist * sg;
+	struct scatterlist * sglist;
+	uint64_t hw_address[1];
+	int flag = (dma_direction == DMA_FROM_DEVICE) ? FOLL_WRITE : 0;
+
+	printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
+	int ret = get_user_pages_fast(user_ptr, nr_pages, flag, pages);
+	printk(KERN_INFO"get_user_pages_fast return value is %d, nrpages is %d\n", ret, nr_pages);
+
+	drv_priv->sg_list[index] = kzalloc(nr_pages * sizeof(struct scatterlist), GFP_KERNEL);
+	sglist = drv_priv->sg_list[index];
+	for (int i = 0; i < nr_pages; i++) {
+		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], size, (uint64_t)user_ptr % PAGE_SIZE);
+		sg_set_page(&sglist[i], pages[i], size, offset_in_page(user_ptr));
+	}
+	count = dma_map_sg(drv_priv->dev, sglist, 1, dma_direction);
+
+	for_each_sg(sglist, sg, count, i) {
+		hw_address[i] = sg_dma_address(sg);
+		//hw_len[i] = sg_dma_len(sg);
+	}
+
+	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
+	return hw_address[0];
+}
+
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct DCEDescriptor * desc, struct DCEDescriptor * input)
 {
 	size_t size;
@@ -197,22 +229,22 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	{
 		case DCE_OPCODE_MEMCMP:
 			/* src2 */
-			desc->operand2 = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.operand2,
-																  (uint8_t __user *)input->operand2, size, DMA_TO_DEVICE);
-			desc->source = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.source,
-																  (uint8_t __user *)input->source, size, DMA_TO_DEVICE);
-			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.destination,
-																  (uint8_t __user *)input->destination, size, DMA_FROM_DEVICE);
+			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->operand2,
+														  size, DMA_TO_DEVICE);
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->source,
+														  size, DMA_TO_DEVICE);
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
+														  size, DMA_FROM_DEVICE);
 			break;
 		case DCE_OPCODE_MEMCPY:
-			desc->source = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.source,
-																  (uint8_t __user *)input->source, size, DMA_TO_DEVICE);
-			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.destination,
-																  (uint8_t __user *)input->destination, size, DMA_FROM_DEVICE);
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->source,
+														  size, DMA_TO_DEVICE);
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
+														  size, DMA_FROM_DEVICE);
 			break;
 		case DCE_OPCODE_MEMSET:
-			desc->destination = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.destination,
-																  (uint8_t __user *)input->destination, size, DMA_FROM_DEVICE);
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
+														  size, DMA_FROM_DEVICE);
 			break;
 		default:
 			break;
@@ -223,12 +255,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 {
-	int ret = copy_to_user((void __user *) input->destination, (void *)priv->k_descriptor.destination, input->operand1);
-	ret = copy_to_user((void __user *) input->completion, (void *)priv->k_descriptor.completion, input->operand1);
-	if (ret) {}
-
-	kfree((void *)priv->k_descriptor.source);
-	kfree((void *)priv->k_descriptor.destination);
+	copy_to_user((void __user *) input->completion, (void *)priv->k_descriptor.completion, input->operand1);
 	kfree((void *)priv->k_descriptor.completion);
 }
 
