@@ -54,6 +54,11 @@ typedef struct AccessInfoWrite {
 	uint64_t offset;
 } AccessInfoWrite;
 
+typedef struct DataAddrNode {
+       uint64_t ptr;
+       uint64_t size;
+} DataAddrNode;
+
 typedef struct __attribute__((packed)) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
@@ -123,7 +128,7 @@ struct dce_driver_priv
 
 	DescriptorRing descriptor_ring;
 	struct sg_table sg_tables[NUM_SG_TBLS];
-	dma_addr_t * hw_addr[NUM_SG_TBLS];
+	DataAddrNode * hw_addr[NUM_SG_TBLS];
 };
 
 static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
@@ -176,15 +181,18 @@ static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv,
 	return dma_map_single(drv_priv->dev, *kern_ptr, size, dma_direction);
 }
 
-static dma_addr_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index,
-										   uint8_t __user * user_ptr, size_t size, uint8_t dma_direction) {
-	// TODO: fix for multiple pages
+static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index, bool * result_is_list,
+                                          uint8_t __user * user_ptr, size_t size, uint8_t dma_direction) {
 	int i, count;
-	int nr_pages = (offset_in_page(user_ptr) == 0 && (size % PAGE_SIZE == 0)) ?
-				   (size / PAGE_SIZE) : (size / PAGE_SIZE) + 1;
-	struct page * pages[nr_pages];
+	int first, last, nr_pages;
 	struct scatterlist * sg;
 	struct scatterlist * sglist;
+
+	first = ((uint64_t)user_ptr & PAGE_MASK) >> PAGE_SHIFT;
+	last  = (((uint64_t)user_ptr + size - 1) & PAGE_MASK) >> PAGE_SHIFT;
+	nr_pages = last - first + 1;
+	struct page * pages[nr_pages];
+
 	int flag = (dma_direction == DMA_FROM_DEVICE) ? FOLL_WRITE : 0;
 
 	printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
@@ -197,7 +205,6 @@ static dma_addr_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, in
 	sglist = drv_priv->sg_tables[index].sgl;
 	for (int i = 0; i < nr_pages; i++) {
 		uint64_t _size, _offset = 0;
-		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], size, (uint64_t)user_ptr % PAGE_SIZE);
 		if (i == 0) {
 			/* first page */
 			_size = offset_in_page(user_ptr) + size > PAGE_SIZE ?
@@ -211,24 +218,35 @@ static dma_addr_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, in
 			/* middle pages */
 			_size = PAGE_SIZE;
 		}
+		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], _size, _offset);
 		sg_set_page(&sglist[i], pages[i], _size, _offset);
 	}
-	count = dma_map_sg(drv_priv->dev, sglist, 1, dma_direction);
+	count = dma_map_sg(drv_priv->dev, sglist, nr_pages, dma_direction);
+	printk(KERN_INFO "Count is %d\n", count);
+	if (count > 1)
+		*result_is_list = true;
+
 	drv_priv->sg_tables[index].nents = count;
-	drv_priv->hw_addr[index] = kzalloc(count * sizeof(dma_addr_t), GFP_KERNEL);
+    drv_priv->hw_addr[index] = kzalloc(count * sizeof(DataAddrNode), GFP_KERNEL);
 
 	for_each_sg(sglist, sg, count, i) {
-		drv_priv->hw_addr[index][i] = sg_dma_address(sg);
-		//hw_len[i] = sg_dma_len(sg);
+		drv_priv->hw_addr[index][i].ptr = sg_dma_address(sg);
+		drv_priv->hw_addr[index][i].size = sg_dma_len(sg);
 	}
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
-	return drv_priv->hw_addr[index][0];
+	if (count > 1) return (uint64_t)dma_map_single(drv_priv->dev,
+									drv_priv->hw_addr[index],
+									count, dma_direction);
+	else return (uint64_t)(drv_priv->hw_addr[index][0].ptr);
 }
 
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct DCEDescriptor * desc, struct DCEDescriptor * input)
 {
 	size_t size;
+	bool src_is_list = false;
+	bool dest_is_list = false;
+
 	desc->opcode = input->opcode;
 	desc->ctrl = input->ctrl;
 	desc->operand0 = input->operand0;
@@ -249,25 +267,29 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	{
 		case DCE_OPCODE_MEMCMP:
 			/* src2 */
-			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->operand2,
+			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->operand2,
 														  size, DMA_TO_DEVICE);
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->source,
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
 														  size, DMA_TO_DEVICE);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  size, DMA_FROM_DEVICE);
 			break;
 		case DCE_OPCODE_MEMCPY:
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, (uint8_t __user *)input->source,
-														  size, DMA_TO_DEVICE);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
-														  size, DMA_FROM_DEVICE);
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
+														size, DMA_TO_DEVICE);
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
+														size, DMA_FROM_DEVICE);
 			break;
 		case DCE_OPCODE_MEMSET:
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, (uint8_t __user *)input->destination,
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  size, DMA_FROM_DEVICE);
 			break;
 		default:
 			break;
+	}
+	if (dest_is_list) {
+			// TODO: enum this
+			desc->ctrl |= (1 << 2);
 	}
 	desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
 													(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
@@ -275,10 +297,12 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 {
+	return;
 	for(int i = 0; i < NUM_SG_TBLS; i++) {
 		if (priv->sg_tables[i].sgl) {
 			/* free up the memory in DMA space and kernel space */
-			dma_unmap_sg(priv->dev, priv->sg_tables[i].sgl, priv->sg_tables[i].orig_nents, DMA_FROM_DEVICE);
+			dma_unmap_sg(priv->dev, priv->sg_tables[i].sgl,
+						 priv->sg_tables[i].orig_nents, DMA_FROM_DEVICE);
 			kfree((void *)priv->sg_tables[i].sgl);
 			/* zero out the entries */
 			priv->sg_tables[i].sgl = 0;
@@ -286,7 +310,8 @@ static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 			priv->sg_tables[i].nents = 0;
 		}
 	}
-	copy_to_user((void __user *) input->completion, (void *)priv->k_descriptor.completion, input->operand1);
+	copy_to_user((void __user *) input->completion,
+	             (void *)priv->k_descriptor.completion, input->operand1);
 	kfree((void *)priv->k_descriptor.completion);
 }
 
