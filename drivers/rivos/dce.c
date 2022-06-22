@@ -104,7 +104,7 @@ enum {
 	COMP,
 	OPERAND1,
 	OPERAND2,
-	NUM_SG_LISTS
+	NUM_SG_TBLS
 };
 
 struct dce_driver_priv
@@ -122,7 +122,8 @@ struct dce_driver_priv
 	uint64_t mmio_start;
 
 	DescriptorRing descriptor_ring;
-	struct scatterlist * sg_list[NUM_SG_LISTS];
+	struct sg_table sg_tables[NUM_SG_TBLS];
+	dma_addr_t * hw_addr[NUM_SG_TBLS];
 };
 
 static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
@@ -178,32 +179,51 @@ static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv,
 static dma_addr_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index,
 										   uint8_t __user * user_ptr, size_t size, uint8_t dma_direction) {
 	// TODO: fix for multiple pages
-	int i, count, nr_pages = (size / PAGE_SIZE) + 1;
+	int i, count;
+	int nr_pages = (offset_in_page(user_ptr) == 0 && (size % PAGE_SIZE == 0)) ?
+				   (size / PAGE_SIZE) : (size / PAGE_SIZE) + 1;
 	struct page * pages[nr_pages];
 	struct scatterlist * sg;
 	struct scatterlist * sglist;
-	uint64_t hw_address[1];
 	int flag = (dma_direction == DMA_FROM_DEVICE) ? FOLL_WRITE : 0;
 
 	printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
 	int ret = get_user_pages_fast(user_ptr, nr_pages, flag, pages);
 	printk(KERN_INFO"get_user_pages_fast return value is %d, nrpages is %d\n", ret, nr_pages);
 
-	drv_priv->sg_list[index] = kzalloc(nr_pages * sizeof(struct scatterlist), GFP_KERNEL);
-	sglist = drv_priv->sg_list[index];
+	drv_priv->sg_tables[index].sgl = kzalloc(nr_pages * sizeof(struct scatterlist), GFP_KERNEL);
+	drv_priv->sg_tables[index].orig_nents = nr_pages;
+
+	sglist = drv_priv->sg_tables[index].sgl;
 	for (int i = 0; i < nr_pages; i++) {
+		uint64_t _size, _offset = 0;
 		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], size, (uint64_t)user_ptr % PAGE_SIZE);
-		sg_set_page(&sglist[i], pages[i], size, offset_in_page(user_ptr));
+		if (i == 0) {
+			/* first page */
+			_size = offset_in_page(user_ptr) + size > PAGE_SIZE ?
+													  (PAGE_SIZE - offset_in_page(user_ptr)) :
+													  size;
+			_offset = offset_in_page(user_ptr);
+		} else if (i == nr_pages - 1) {
+			/* last page */
+			_size = offset_in_page(user_ptr + size);
+		} else {
+			/* middle pages */
+			_size = PAGE_SIZE;
+		}
+		sg_set_page(&sglist[i], pages[i], _size, _offset);
 	}
 	count = dma_map_sg(drv_priv->dev, sglist, 1, dma_direction);
+	drv_priv->sg_tables[index].nents = count;
+	drv_priv->hw_addr[index] = kzalloc(count * sizeof(dma_addr_t), GFP_KERNEL);
 
 	for_each_sg(sglist, sg, count, i) {
-		hw_address[i] = sg_dma_address(sg);
+		drv_priv->hw_addr[index][i] = sg_dma_address(sg);
 		//hw_len[i] = sg_dma_len(sg);
 	}
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
-	return hw_address[0];
+	return drv_priv->hw_addr[index][0];
 }
 
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct DCEDescriptor * desc, struct DCEDescriptor * input)
@@ -255,6 +275,17 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 {
+	for(int i = 0; i < NUM_SG_TBLS; i++) {
+		if (priv->sg_tables[i].sgl) {
+			/* free up the memory in DMA space and kernel space */
+			dma_unmap_sg(priv->dev, priv->sg_tables[i].sgl, priv->sg_tables[i].orig_nents, DMA_FROM_DEVICE);
+			kfree((void *)priv->sg_tables[i].sgl);
+			/* zero out the entries */
+			priv->sg_tables[i].sgl = 0;
+			priv->sg_tables[i].orig_nents = 0;
+			priv->sg_tables[i].nents = 0;
+		}
+	}
 	copy_to_user((void __user *) input->completion, (void *)priv->k_descriptor.completion, input->operand1);
 	kfree((void *)priv->k_descriptor.completion);
 }
