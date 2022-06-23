@@ -173,7 +173,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 }
 
 static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv, void ** kern_ptr,
-											   uint8_t __user * user_ptr, size_t size, uint8_t dma_direction)
+						uint8_t __user * user_ptr, size_t size, uint8_t dma_direction)
 {
 	*kern_ptr = kzalloc(size, GFP_KERNEL);
 	if (copy_from_user(*kern_ptr, user_ptr, size))
@@ -208,8 +208,8 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 		if (i == 0) {
 			/* first page */
 			_size = offset_in_page(user_ptr) + size > PAGE_SIZE ?
-													  (PAGE_SIZE - offset_in_page(user_ptr)) :
-													  size;
+								 (PAGE_SIZE - offset_in_page(user_ptr)) :
+								 size;
 			_offset = offset_in_page(user_ptr);
 		} else if (i == nr_pages - 1) {
 			/* last page */
@@ -236,14 +236,14 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
 	if (count > 1) return (uint64_t)dma_map_single(drv_priv->dev,
-									drv_priv->hw_addr[index],
-									count, dma_direction);
+					drv_priv->hw_addr[index],
+					count, dma_direction);
 	else return (uint64_t)(drv_priv->hw_addr[index][0].ptr);
 }
 
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct DCEDescriptor * desc, struct DCEDescriptor * input)
 {
-	size_t size;
+	size_t size, dest_size;
 	bool src_is_list = false;
 	bool dest_is_list = false;
 
@@ -261,7 +261,10 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	desc->operand3 = input->operand3;
 	desc->operand4 = input->operand4;
 
+
 	size = desc->operand1;
+	dest_size = (desc->opcode == DCE_OPCODE_MEMCMP && !(desc->operand0 & 1)) ?
+				8 : size;
 	/* Override based on opcode */
 	switch (desc->opcode)
 	{
@@ -272,7 +275,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
 														  size, DMA_TO_DEVICE);
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
-														  size, DMA_FROM_DEVICE);
+														  dest_size, DMA_FROM_DEVICE);
 			break;
 		case DCE_OPCODE_MEMCPY:
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
@@ -288,11 +291,14 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			break;
 	}
 	if (dest_is_list) {
-			// TODO: enum this
-			desc->ctrl |= (1 << 2);
+		// TODO: enum this
+		desc->ctrl |= (1 << 2);
+	}
+	if (src_is_list) {
+		desc->ctrl |= (1 << 1);
 	}
 	desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
-													(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
+							(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
 }
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
@@ -406,7 +412,7 @@ void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, size_t length)
 		drv_priv->dev->coherent_dma_mask = 0xffffffff;
 	// Allcate the descriptors as coherent DMA memory
 	drv_priv->descriptor_ring.descriptors = dma_alloc_coherent(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor),
-															   &drv_priv->descriptor_ring.dma, GFP_KERNEL);
+								  &drv_priv->descriptor_ring.dma, GFP_KERNEL);
 	drv_priv->descriptor_ring.length      = adjusted_length;
 	printk(KERN_INFO "Allocated descriptors at 0x%llx\n", (uint64_t)drv_priv->descriptor_ring.descriptors);
 	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) drv_priv->descriptor_ring.dma);
