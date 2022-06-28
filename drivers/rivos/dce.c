@@ -287,6 +287,10 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  size, DMA_FROM_DEVICE);
 			break;
+		case DCE_OPCODE_LOAD_KEY:
+			/* Keys are 32B */
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
+														32, DMA_TO_DEVICE);
 		default:
 			break;
 	}
