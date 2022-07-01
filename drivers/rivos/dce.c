@@ -232,12 +232,15 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 	for_each_sg(sglist, sg, count, i) {
 		drv_priv->hw_addr[index][i].ptr = sg_dma_address(sg);
 		drv_priv->hw_addr[index][i].size = sg_dma_len(sg);
+		printk(KERN_INFO "Address 0x%lx, Size 0x%lx\n", sg_dma_address(sg), sg_dma_len(sg));
 	}
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
-	if (count > 1) return (uint64_t)dma_map_single(drv_priv->dev,
+	if (count > 1) {
+		return dma_map_single(drv_priv->dev,
 					drv_priv->hw_addr[index],
 					count, dma_direction);
+	}
 	else return (uint64_t)(drv_priv->hw_addr[index][0].ptr);
 }
 
@@ -287,10 +290,18 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  size, DMA_FROM_DEVICE);
 			break;
+		case DCE_OPCODE_COMPRESS:
+		case DCE_OPCODE_DECOMPRESS:
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
+														size, DMA_TO_DEVICE);
+			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
+														desc->operand2, DMA_FROM_DEVICE);
+			break;
 		case DCE_OPCODE_LOAD_KEY:
 			/* Keys are 32B */
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
 														32, DMA_TO_DEVICE);
+			break;
 		default:
 			break;
 	}
@@ -301,8 +312,10 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	if (src_is_list) {
 		desc->ctrl |= (1 << 1);
 	}
-	desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
-							(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
+	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP, &src_is_list, (uint8_t __user *)input->completion,
+														8, DMA_FROM_DEVICE);
+	// desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
+	// 						(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
 }
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
@@ -373,10 +386,11 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input);
 			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
+			printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			dce_push_descriptor(priv, &descriptor);
 
 			// Free up resources when its done
-			while(!(priv->k_descriptor.completion & (1ULL << 63))) {}
+			// while(!(priv->k_descriptor.completion & (1ULL << 63))) {}
 			free_resources(priv, &descriptor_input);
 		}
 	}
