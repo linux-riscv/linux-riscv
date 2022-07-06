@@ -14,6 +14,7 @@
 #define VIRTIO_TDC_DEVICE_NAME "virtio-tdc"
 
 #define TDC_DMA_F 0x1
+#define TDC_UNMAP_ENTRY 0X4 //TODO: refactor into enum
 
 struct virttdc_info {
 	struct cdev cdev;
@@ -48,6 +49,13 @@ struct ioctl_dma_command {
 	uint64_t dst;
 	uint64_t size;
 } __attribute__((packed));
+
+struct ioctl_unmap_command {
+    void* addr;
+    void* size;
+}__attribute__((packed));
+
+
 
 static void dma_done(struct virtqueue *vq){
 	printk("DMA Done\n");
@@ -104,35 +112,30 @@ static struct tdc_hashtable_entry* get_cached_entry(uint64_t va)
 static uint64_t get_iova_cached_or_create(struct device* dev, uint64_t va, struct page* page,
 					  enum dma_data_direction dir, int create)
 {
-	//struct tdc_hashtable_entry* entry = get_cached_entry(va);
-	printk("get_iova_cached_or_create called with device: %p, va: %llx, page: %p\n", dev, va, page);
+    printk("get_iova_cached_or_create called with device: %lx, va: %lx, page: %lx\n", dev, va, page);
+    struct tdc_hashtable_entry* entry = get_cached_entry(va);
+    // return page_to_phys(page); //TEMPORARY
+    if(entry != NULL) {
+        return entry->iova;
+    }
 
-	return page_to_phys(page); //TEMPORARY
-
-#if 0
-	if(entry != NULL) {
-		return entry->iova;
-	}
-
-	printk("Could not find entry for va %llx\n", va);
-	if(create) {
-		entry = kmem_cache_alloc(tdc_hashtable_entry_cache, GFP_KERNEL);
-		if(!entry){
-			printk(KERN_INFO "Error: could not allocate hash table entry\n");
-			return -1;
-		}
-		entry->va = va;
-		printk("Page physical address is: %llx\n", page_to_phys(page));
-		entry->iova = dma_map_page(dev, page, 0, PAGE_SIZE, dir);
-		printk(KERN_INFO "Creaed new hash entry: va %llx -> iova %llx\n", entry->va, entry->iova);
-		hash_add(va_map, &entry->ht_link, va);
-		return entry->iova;
-	}
-	else {
-		return -1; //TODO: handle this better
-	}
-
-#endif
+    printk("Could not find entry for va %lx\n", va);
+    if(create) {
+        entry = kmem_cache_alloc(tdc_hashtable_entry_cache, GFP_KERNEL);
+        if(!entry){
+            printk(KERN_INFO "Error: could not allocate hash table entry\n");
+            return -1;
+        }
+        entry->va = va;
+        printk("Page physical address is: %lx\n", page_to_phys(page));
+        entry->iova = dma_map_page(dev, page, 0, PAGE_SIZE, dir);
+        printk(KERN_INFO "Creaed new hash entry: va %lx -> iova %lx\n", entry->va, entry->iova);
+        hash_add(va_map, &entry->ht_link, va);
+        return entry->iova;
+    }
+    else {
+        return -1; //TODO: handle this better
+    }
 }
 
 static long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -175,8 +178,10 @@ static long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		//TODO: use scatter gather list
 		for (n = 0; n < npages; n++) {
 			struct ioctl_dma_command* d_cmd = kmalloc(sizeof(*d_cmd), GFP_KERNEL);
-			uint64_t src_va = get_iova_cached_or_create(vi->dev, ioctl_dma_cmd.src + n * PAGE_SIZE, src_pages[n], DMA_TO_DEVICE, 1);
-			uint64_t dst_va = get_iova_cached_or_create(vi->dev, ioctl_dma_cmd.dst + n * PAGE_SIZE, dst_pages[n], DMA_FROM_DEVICE, 1);
+			uint64_t src_va = get_iova_cached_or_create(vi->dev, ioctl_dma_cmd.src + n * PAGE_SIZE,
+								    src_pages[n], DMA_BIDIRECTIONAL, 1);
+			uint64_t dst_va = get_iova_cached_or_create(vi->dev, ioctl_dma_cmd.dst + n * PAGE_SIZE,
+								    dst_pages[n], DMA_BIDIRECTIONAL, 1);
 
 			printk(KERN_INFO "src_va is: %llx, dst_va is: %llx\n", src_va, dst_va);
 
@@ -190,9 +195,40 @@ static long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	}
+	case TDC_UNMAP_ENTRY: {
+		//Remove from hashmap 
+		struct ioctl_unmap_command ioctl_unmap_cmd;
+		if(copy_from_user(&ioctl_unmap_cmd ,(struct ioctl_dma_cmd*) arg, sizeof(ioctl_unmap_cmd))) {
+			pr_err("Error in copying structure\n")       ;
+		}
+		uint64_t npages = 1; //TODO: actually handle npages 
+		
+		
+		for(uint64_t n = 0; n < npages; n++){
+			uint64_t va = (uint64_t) ioctl_unmap_cmd.addr + n * PAGE_SIZE;
+			struct tdc_hashtable_entry* entry = get_cached_entry(va);
+			if(entry==NULL){
+				pr_err("No va->iova mapping in request to unmap\n");
+			}
+			else{
+				uint64_t iova = entry->iova;
+				dma_unmap_page(vi->dev, iova, PAGE_SIZE, DMA_BIDIRECTIONAL); //TODO: better thing than bidirectoinal?
+				hash_del(&entry->ht_link);
+			}
+			
+			//TODO: need to unpin pages
+		}
+        }
+		break;
+		
 	}
 
 	return 0;
+
+
+    }
+
+    return 0;
 }
 
 static struct file_operations tdc_file_ops =
