@@ -280,6 +280,8 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  dest_size, DMA_FROM_DEVICE);
 			break;
+		case DCE_OPCODE_ENCRYPT:
+		case DCE_OPCODE_DECRYPT:
 		case DCE_OPCODE_MEMCPY:
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
 														size, DMA_TO_DEVICE);
@@ -292,6 +294,8 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 			break;
 		case DCE_OPCODE_COMPRESS:
 		case DCE_OPCODE_DECOMPRESS:
+		case DCE_OPCODE_COMPRESS_ENCRYPT:
+		case DCE_OPCODE_DECRYPT_DECOMPRESS:
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
 														size, DMA_TO_DEVICE);
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
