@@ -44,6 +44,10 @@
 #define DCE_OPCODE_DECRYPT_DECOMPRESS 10
 #define DCE_OPCODE_COMPRESS_ENCRYPT   11
 
+#define SRC_IS_LIST                 (1 << 1)
+#define SRC2_IS_LIST                (1 << 2)
+#define DEST_IS_LIST                (1 << 3)
+
 typedef struct AccessInfoRead {
 	uint64_t* value;
 	uint64_t  offset;
@@ -106,9 +110,8 @@ typedef struct DescriptorRing {
 enum {
 	DEST,
 	SRC,
+	SRC2,
 	COMP,
-	OPERAND1,
-	OPERAND2,
 	NUM_SG_TBLS
 };
 
@@ -248,6 +251,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 {
 	size_t size, dest_size;
 	bool src_is_list = false;
+	bool src2_is_list = false;
 	bool dest_is_list = false;
 
 	desc->opcode = input->opcode;
@@ -273,9 +277,9 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 	{
 		case DCE_OPCODE_MEMCMP:
 			/* src2 */
-			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->operand2,
-														  size, DMA_TO_DEVICE);
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC, &src_is_list, (uint8_t __user *)input->source,
+														  size, DMA_TO_DEVICE);
+			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC2, &src2_is_list, (uint8_t __user *)input->operand2,
 														  size, DMA_TO_DEVICE);
 			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST, &dest_is_list, (uint8_t __user *)input->destination,
 														  dest_size, DMA_FROM_DEVICE);
@@ -309,13 +313,14 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 		default:
 			break;
 	}
-	if (dest_is_list) {
-		// TODO: enum this
-		desc->ctrl |= (1 << 2);
-	}
-	if (src_is_list) {
-		desc->ctrl |= (1 << 1);
-	}
+
+	if (src_is_list)
+		desc->ctrl |= SRC_IS_LIST;
+	if (src2_is_list)
+		desc->ctrl |= SRC2_IS_LIST;
+	if (dest_is_list)
+		desc->ctrl |= DEST_IS_LIST;
+
 	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP, &src_is_list, (uint8_t __user *)input->completion,
 														8, DMA_FROM_DEVICE);
 	// desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
