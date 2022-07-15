@@ -115,6 +115,13 @@ enum {
 	NUM_SG_TBLS
 };
 
+static const struct pci_device_id pci_use_msi[] = {
+
+	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_ID,
+			 PCI_ANY_ID, PCI_ANY_ID) },
+	{ }
+};
+
 struct dce_driver_priv
 {
 	struct device* dev;
@@ -448,6 +455,11 @@ void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, size_t length)
 	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
 
+static irqreturn_t handle_dce(int irq, void *dev_id) {
+	printk(KERN_INFO "Got interrupt!\n");
+	return IRQ_HANDLED;
+}
+
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int bar, err;
@@ -495,6 +507,16 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dce_init_descriptor_ring(drv_priv, 0x100);
 
+	if (pci_match_id(pci_use_msi, pdev)) {
+		pci_dbg(pdev, "Using MSI(-X) interrupts\n");
+		pci_set_master(pdev);
+		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+
+		int vec = pci_irq_vector(pdev, 0);
+		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, pdev);
+	} else {
+		printk(KERN_INFO "DCE: MSI enable failed\n");
+	}
 	return 0;
 
 	disable_device_and_fail:
