@@ -12,134 +12,7 @@
 #include <linux/pci_regs.h>
 #include <linux/of_device.h>
 
-#define DEVICE_NAME "dce"
-#define VENDOR_ID 0x1FED
-#define DEVICE_ID 0x0001
-
-#define DCE_CTRL 0
-
-#define DCE_STATUS 8
-
-#define DCE_DESCRIPTOR_RING_CTRL_BASE  16
-#define DCE_DESCRIPTOR_RING_CTRL_LIMIT 24
-#define DCE_DESCRIPTOR_RING_CTRL_HEAD  32
-#define DCE_DESCRIPTOR_RING_CTRL_TAIL  40
-
-#define DCE_INTERRUPT_CONFIG_DESCRIPTOR_COMPLETION 48
-#define DCE_INTERRUPT_CONFIG_TIMEOUT               56
-#define DCE_INTERRUPT_CONFIG_ERROR_CONDITION       64
-#define DCE_INTERRUPT_STATUS                       72
-#define DCE_INTERRUPT_MASK                         80
-
-#define DCE_OPCODE_CLFLUSH            0
-#define DCE_OPCODE_MEMCPY             1
-#define DCE_OPCODE_MEMSET             2
-#define DCE_OPCODE_MEMCMP             3
-#define DCE_OPCODE_COMPRESS           4
-#define DCE_OPCODE_DECOMPRESS         5
-#define DCE_OPCODE_LOAD_KEY           6
-#define DCE_OPCODE_CLEAR_KEY          7
-#define DCE_OPCODE_ENCRYPT            8
-#define DCE_OPCODE_DECRYPT            9
-#define DCE_OPCODE_DECRYPT_DECOMPRESS 10
-#define DCE_OPCODE_COMPRESS_ENCRYPT   11
-
-#define SRC_IS_LIST                 (1 << 1)
-#define SRC2_IS_LIST                (1 << 2)
-#define DEST_IS_LIST                (1 << 3)
-
-typedef struct AccessInfoRead {
-	uint64_t* value;
-	uint64_t  offset;
-} AccessInfoRead;
-
-typedef struct AccessInfoWrite {
-	uint64_t value;
-	uint64_t offset;
-} AccessInfoWrite;
-
-typedef struct DataAddrNode {
-       uint64_t ptr;
-       uint64_t size;
-} DataAddrNode;
-
-typedef struct __attribute__((packed)) DCEDescriptor {
-	uint8_t  opcode;
-	uint8_t  ctrl;
-	uint16_t operand0;
-	uint32_t pasid;
-	uint64_t source;
-	uint64_t destination;
-	uint64_t completion;
-	uint64_t operand1;
-	uint64_t operand2;
-	uint64_t operand3;
-	uint64_t operand4;
-} __attribute__((packed)) DCEDescriptor;
-
-typedef struct __attribute__((packed)) KernDCEDescriptor {
-	uint8_t  opcode;
-	uint8_t  ctrl;
-	uint16_t operand0;
-	uint32_t pasid;
-	uint64_t source;
-	uint64_t destination;
-	uint64_t completion;
-	uint64_t operand1;
-	uint64_t operand2;
-	uint64_t operand3;
-	uint64_t operand4;
-} __attribute__((packed)) KernDCEDescriptor;
-
-typedef struct DescriptorRing {
-	DCEDescriptor* descriptors;
-	dma_addr_t dma;
-	size_t length;
-	int enabled;
-} DescriptorRing;
-
-#define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
-#define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
-#define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-
-#define MIN(a, b) \
-	({ __typeof__ (a) _a = (a); \
-	   __typeof__ (b) _b = (b); \
-	   _a < _b ? _a : _b; })
-
-enum {
-	DEST,
-	SRC,
-	SRC2,
-	COMP,
-	NUM_SG_TBLS
-};
-
-static const struct pci_device_id pci_use_msi[] = {
-
-	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_ID,
-			 PCI_ANY_ID, PCI_ANY_ID) },
-	{ }
-};
-
-struct dce_driver_priv
-{
-	struct device* dev;
-	dev_t dev_num;
-	struct cdev cdev;
-
-	KernDCEDescriptor k_descriptor;
-
-	u32* in;
-	u32* out;
-	u32* temp;
-
-	uint64_t mmio_start;
-
-	DescriptorRing descriptor_ring;
-	struct sg_table sg_tables[NUM_SG_TBLS];
-	DataAddrNode * hw_addr[NUM_SG_TBLS];
-};
+#include "dce.h"
 
 static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -330,28 +203,11 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 
 	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP, &src_is_list, (uint8_t __user *)input->completion,
 														8, DMA_FROM_DEVICE);
-	// desc->completion = copy_to_kernel_and_setup_dma(drv_priv, (void **)&drv_priv->k_descriptor.completion,
-	// 						(uint8_t __user *)input->completion, 8, DMA_FROM_DEVICE);
 }
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 {
 	return;
-	for(int i = 0; i < NUM_SG_TBLS; i++) {
-		if (priv->sg_tables[i].sgl) {
-			/* free up the memory in DMA space and kernel space */
-			dma_unmap_sg(priv->dev, priv->sg_tables[i].sgl,
-						 priv->sg_tables[i].orig_nents, DMA_FROM_DEVICE);
-			kfree((void *)priv->sg_tables[i].sgl);
-			/* zero out the entries */
-			priv->sg_tables[i].sgl = 0;
-			priv->sg_tables[i].orig_nents = 0;
-			priv->sg_tables[i].nents = 0;
-		}
-	}
-	copy_to_user((void __user *) input->completion,
-	             (void *)priv->k_descriptor.completion, input->operand1);
-	kfree((void *)priv->k_descriptor.completion);
 }
 
 static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -406,7 +262,6 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			dce_push_descriptor(priv, &descriptor);
 
 			// Free up resources when its done
-			// while(!(priv->k_descriptor.completion & (1ULL << 63))) {}
 			free_resources(priv, &descriptor_input);
 		}
 	}
@@ -431,33 +286,56 @@ void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv) {
 	while (dce_reg_read(drv_priv, DCE_STATUS) & (1 << 1));
 }
 
-void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, size_t length)
+void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, int DSCSZ)
 {
-	size_t adjusted_length = length + 1;
-
+	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
+	size_t length = 0x1000 * (1 << DSCSZ);
 	dce_reset_descriptor_ring(drv_priv);
 
-	// added 1 because there can only ever be n - 1 valid entries in a descriptor ring.
-	// the +1 adjusts for that.
-	of_dma_configure(drv_priv->dev, drv_priv->dev->of_node, true);
-	if (!drv_priv->dev->dma_mask)
-		drv_priv->dev->dma_mask = &drv_priv->dev->coherent_dma_mask;
-	if (!drv_priv->dev->coherent_dma_mask)
-		drv_priv->dev->coherent_dma_mask = 0xffffffff;
 	// Allcate the descriptors as coherent DMA memory
-	drv_priv->descriptor_ring.descriptors = dma_alloc_coherent(drv_priv->dev, adjusted_length * sizeof(DCEDescriptor),
+	drv_priv->descriptor_ring.descriptors = dma_alloc_coherent(drv_priv->dev, length * sizeof(DCEDescriptor),
 								  &drv_priv->descriptor_ring.dma, GFP_KERNEL);
-	drv_priv->descriptor_ring.length      = adjusted_length;
+	drv_priv->descriptor_ring.length      = length;
 	printk(KERN_INFO "Allocated descriptors at 0x%llx\n", (uint64_t)drv_priv->descriptor_ring.descriptors);
 	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) drv_priv->descriptor_ring.dma);
-	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) drv_priv->descriptor_ring.dma + adjusted_length * sizeof(DCEDescriptor));
+	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) drv_priv->descriptor_ring.dma + length * sizeof(DCEDescriptor));
 	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
 	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
-	printk(KERN_INFO "Got interrupt!\n");
+	printk(KERN_INFO "Got interrupt %d!\n", irq);
 	return IRQ_HANDLED;
+}
+
+static void setup_memory_regions(struct dce_driver_priv * drv_priv)
+{
+	of_dma_configure(drv_priv->dev, drv_priv->dev->of_node, true);
+	if (!drv_priv->dev->dma_mask)
+		drv_priv->dev->dma_mask = &drv_priv->dev->coherent_dma_mask;
+	if (!drv_priv->dev->coherent_dma_mask)
+		drv_priv->dev->coherent_dma_mask = 0xffffffff;
+
+	int DSCSZ = 0;
+	/* Supervisor memory setup */
+	dce_init_descriptor_ring(drv_priv, DSCSZ);
+
+	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, NUM_WQ * sizeof(WQITE),
+								  &drv_priv->WQIT_dma, GFP_KERNEL);
+
+	drv_priv->hti = dma_alloc_coherent(drv_priv->dev, sizeof(HeadTailIndex),
+								  &drv_priv->hti_dma, GFP_KERNEL);
+	drv_priv->hti->head = 0;
+	drv_priv->hti->tail = 0;
+
+	/* populate WQITE TODO: only first one for now*/
+	drv_priv->WQIT[0].DSCBA = drv_priv->descriptor_ring.dma;
+	drv_priv->WQIT[0].DSCSZ = DSCSZ;
+	drv_priv->WQIT[0].DSCPTA = drv_priv->hti_dma;
+
+	printk(KERN_INFO "Writing to DCE_WQITBA!\n");
+	dce_reg_write(drv_priv, DCE_WQITBA,
+				 (uint64_t) drv_priv->WQIT_dma);
 }
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -505,8 +383,10 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, drv_priv);
 
-	dce_init_descriptor_ring(drv_priv, 0x100);
+	/* priv mem regions setup */
+	setup_memory_regions(drv_priv);
 
+	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		pci_dbg(pdev, "Using MSI(-X) interrupts\n");
 		pci_set_master(pdev);
