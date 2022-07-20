@@ -5,18 +5,16 @@
 
 #define DCE_STATUS 8
 
-#define DCE_DESCRIPTOR_RING_CTRL_BASE  16
-#define DCE_DESCRIPTOR_RING_CTRL_LIMIT 24
-#define DCE_DESCRIPTOR_RING_CTRL_HEAD  32
-#define DCE_DESCRIPTOR_RING_CTRL_TAIL  40
-
 #define DCE_INTERRUPT_CONFIG_DESCRIPTOR_COMPLETION 48
 #define DCE_INTERRUPT_CONFIG_TIMEOUT               56
 #define DCE_INTERRUPT_CONFIG_ERROR_CONDITION       64
 #define DCE_INTERRUPT_STATUS                       72
 #define DCE_INTERRUPT_MASK                         80
 
-#define DCE_WQITBA                                 88
+/* TODO: fix offset */
+#define DCE_WQITBA	88
+#define DCE_WQCR	96
+
 
 #define DCE_OPCODE_CLFLUSH            0
 #define DCE_OPCODE_MEMCPY             1
@@ -54,7 +52,8 @@ typedef struct DataAddrNode {
        uint64_t size;
 } DataAddrNode;
 
-#define NUM_WQ  64
+#define NUM_WQ      64
+#define NUM_DSC_PER_WQ 64
 typedef struct __attribute__((packed)) WQITE {
     uint64_t DSCBA;
     uint8_t  DSCSZ;

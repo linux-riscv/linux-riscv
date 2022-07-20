@@ -43,15 +43,17 @@ static ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, lof
 
 static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor)
 {
-	uint64_t tail = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL);
-	uint64_t base = dce_reg_read(priv, DCE_DESCRIPTOR_RING_CTRL_BASE);
-	int tail_offset = (tail - base) / sizeof(DCEDescriptor);
-	uint64_t next_offset = (tail_offset + 1) % priv->descriptor_ring.length;
+	uint64_t tail_idx = priv->hti->tail;
+	uint64_t base = priv->descriptor_ring.descriptors;
+	uint64_t tail_ptr = base + ((tail_idx % NUM_DSC_PER_WQ) * sizeof(DCEDescriptor));
 
 	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
-	memcpy(priv->descriptor_ring.descriptors + tail_offset, descriptor, sizeof(DCEDescriptor));
-	dce_reg_write(priv, DCE_DESCRIPTOR_RING_CTRL_TAIL, base + (next_offset * sizeof(DCEDescriptor)));
+	memcpy(tail_ptr, descriptor, sizeof(DCEDescriptor));
+	/* increment tail index */
+	priv->hti->tail++;
+	/* notify DCE */
+	dce_reg_write(priv, DCE_WQCR, 1);
 	// TODO: release semantics here
 }
 
@@ -297,10 +299,8 @@ void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, int DSCSZ)
 								  &drv_priv->descriptor_ring.dma, GFP_KERNEL);
 	drv_priv->descriptor_ring.length      = length;
 	printk(KERN_INFO "Allocated descriptors at 0x%llx\n", (uint64_t)drv_priv->descriptor_ring.descriptors);
-	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_BASE,  (uint64_t) drv_priv->descriptor_ring.dma);
-	dce_reg_write(drv_priv, DCE_DESCRIPTOR_RING_CTRL_LIMIT, (uint64_t) drv_priv->descriptor_ring.dma + length * sizeof(DCEDescriptor));
-	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
-	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
+
+
 }
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
@@ -320,7 +320,8 @@ static void setup_memory_regions(struct dce_driver_priv * drv_priv)
 	/* Supervisor memory setup */
 	dce_init_descriptor_ring(drv_priv, DSCSZ);
 
-	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, NUM_WQ * sizeof(WQITE),
+	/* WQIT is 4KiB */
+	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, 0x4000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
 	drv_priv->hti = dma_alloc_coherent(drv_priv->dev, sizeof(HeadTailIndex),
@@ -336,6 +337,10 @@ static void setup_memory_regions(struct dce_driver_priv * drv_priv)
 	printk(KERN_INFO "Writing to DCE_WQITBA!\n");
 	dce_reg_write(drv_priv, DCE_WQITBA,
 				 (uint64_t) drv_priv->WQIT_dma);
+
+	/* TODO fix this to use WQCR.notify/status */
+	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
+	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
