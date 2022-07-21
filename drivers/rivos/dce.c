@@ -299,8 +299,6 @@ void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, int DSCSZ)
 								  &drv_priv->descriptor_ring.dma, GFP_KERNEL);
 	drv_priv->descriptor_ring.length      = length;
 	printk(KERN_INFO "Allocated descriptors at 0x%llx\n", (uint64_t)drv_priv->descriptor_ring.descriptors);
-
-
 }
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
