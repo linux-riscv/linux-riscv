@@ -142,8 +142,8 @@ struct dce_driver_priv
 	dma_addr_t hti_dma[NUM_WQ];
 	DescriptorRing descriptor_ring[NUM_WQ];
 
-	struct sg_table sg_tables[NUM_SG_TBLS];
-	DataAddrNode * hw_addr[NUM_SG_TBLS];
+	struct sg_table sg_tables[NUM_WQ][NUM_SG_TBLS];
+	DataAddrNode * hw_addr[NUM_WQ][NUM_SG_TBLS];
 };
 
 #endif
