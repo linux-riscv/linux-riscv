@@ -28,6 +28,22 @@ static void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value)
 static int dce_ops_open(struct inode *inode, struct file *file)
 {
 	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
+	struct dce_driver_priv *priv = file->private_data;
+	/* Assign a WQ to the file descriptor */
+	/* FIXME: lock , better assignemnt algo, error if full */
+	for(int slot = 0; slot < NUM_WQ; slot++) {
+		if (priv->wq_assignment[slot] == 0) {
+			priv->wq_assignment[slot] = file;
+			printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, slot);
+			break;
+		}
+	}
+	return 0;
+}
+
+static int dce_ops_close(struct inode *inode, struct file *file)
+{
+	printk(KERN_INFO "Closing file 0x%lx\n", file);
 	return 0;
 }
 
@@ -41,19 +57,20 @@ static ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, lof
 	return 0;
 }
 
-static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor)
+static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor, int wq_num)
 {
-	uint64_t tail_idx = priv->hti->tail;
-	uint64_t base = priv->descriptor_ring.descriptors;
+	uint64_t tail_idx = priv->hti[wq_num]->tail;
+	uint64_t base = priv->descriptor_ring[wq_num].descriptors;
 	uint64_t tail_ptr = base + ((tail_idx % NUM_DSC_PER_WQ) * sizeof(DCEDescriptor));
 
 	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
 	memcpy(tail_ptr, descriptor, sizeof(DCEDescriptor));
 	/* increment tail index */
-	priv->hti->tail++;
+	priv->hti[wq_num]->tail++;
 	/* notify DCE */
-	dce_reg_write(priv, DCE_WQCR, 1);
+	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
+	dce_reg_write(priv, WQCR_REG, 1);
 	// TODO: release semantics here
 }
 
@@ -207,6 +224,50 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv, struct D
 														8, DMA_FROM_DEVICE);
 }
 
+void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv) {
+	memset(&drv_priv->descriptor_ring, 0, sizeof(DescriptorRing));
+
+	// dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | (1 << 1));
+	// while (dce_reg_read(drv_priv, DCE_STATUS) & (1 << 1));
+}
+
+static void setup_memory_for_wq(struct dce_driver_priv * drv_priv, int wq_num)
+{
+	int DSCSZ = 0;
+	/* Supervisor memory setup */
+	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
+	size_t length = 0x1000 * (1 << DSCSZ);
+	dce_reset_descriptor_ring(drv_priv);
+
+	// Allcate the descriptors as coherent DMA memory
+	drv_priv->descriptor_ring[wq_num].descriptors =
+		dma_alloc_coherent(drv_priv->dev, length * sizeof(DCEDescriptor),
+						   &drv_priv->descriptor_ring[wq_num].dma, GFP_KERNEL);
+
+	drv_priv->descriptor_ring[wq_num].length      = length;
+	printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
+		(uint64_t)drv_priv->descriptor_ring[wq_num].descriptors);
+
+
+	drv_priv->hti[wq_num] = dma_alloc_coherent(drv_priv->dev, sizeof(HeadTailIndex),
+								  &drv_priv->hti_dma[wq_num], GFP_KERNEL);
+	drv_priv->hti[wq_num]->head = 0;
+	drv_priv->hti[wq_num]->tail = 0;
+
+	/* populate WQITE TODO: only first one for now*/
+	drv_priv->WQIT[wq_num].DSCBA = drv_priv->descriptor_ring[wq_num].dma;
+	drv_priv->WQIT[wq_num].DSCSZ = DSCSZ;
+	drv_priv->WQIT[wq_num].DSCPTA = drv_priv->hti_dma[wq_num];
+
+	/* set the enable bit in dce*/
+	uint64_t wq_enable = dce_reg_read(drv_priv, DCE_REG_WQENABLE);
+	wq_enable |= BIT(wq_num);
+	dce_reg_write(drv_priv, DCE_REG_WQENABLE, wq_enable);
+
+	/* mark the WQ as enabled in driver */
+	drv_priv->wq_enabled[wq_num] = true;
+}
+
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 {
 	return;
@@ -217,8 +278,6 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	uint64_t val;
 	struct DCEDescriptor descriptor;
 	struct dce_driver_priv *priv = file->private_data;
-		printk(KERN_INFO "Got to ioctl with cmd %u!\n", cmd);
-
 
 	switch (cmd) {
 		case RAW_READ: {
@@ -258,10 +317,26 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
 				return -EFAULT;
 
+			/* figure out WQ number, should have been assigned in open() */
+			bool wq_found = false;
+			int wq_num = 0;
+			for(wq_num = 0; wq_num < NUM_WQ; wq_num++) {
+				if (priv->wq_assignment[wq_num] == file) {
+					wq_found = true;
+					break;
+				}
+			}
+			/* error out if no WQ found */
+			if (!wq_found) return -1;
+			/* setup the memory for the WQ and enable it if not already */
+			if (priv->wq_enabled[wq_num] == false) {
+				setup_memory_for_wq(priv, wq_num);
+			}
+
 			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input);
 			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
 			printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
-			dce_push_descriptor(priv, &descriptor);
+			dce_push_descriptor(priv, &descriptor, wq_num);
 
 			// Free up resources when its done
 			free_resources(priv, &descriptor_input);
@@ -274,6 +349,7 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 static const struct file_operations dce_ops = {
 	.owner          = THIS_MODULE,
 	.open           = dce_ops_open,
+	// .close			= dce_ops_close,
 	.read		= dce_ops_read,
 	.write          = dce_ops_write,
 	.unlocked_ioctl = dce_ioctl
@@ -281,30 +357,12 @@ static const struct file_operations dce_ops = {
 
 static struct class *dce_char_class;
 
-void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv) {
-	memset(&drv_priv->descriptor_ring, 0, sizeof(DescriptorRing));
-
-	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | (1 << 1));
-	while (dce_reg_read(drv_priv, DCE_STATUS) & (1 << 1));
-}
-
-void dce_init_descriptor_ring(struct dce_driver_priv *drv_priv, int DSCSZ)
-{
-	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
-	size_t length = 0x1000 * (1 << DSCSZ);
-	dce_reset_descriptor_ring(drv_priv);
-
-	// Allcate the descriptors as coherent DMA memory
-	drv_priv->descriptor_ring.descriptors = dma_alloc_coherent(drv_priv->dev, length * sizeof(DCEDescriptor),
-								  &drv_priv->descriptor_ring.dma, GFP_KERNEL);
-	drv_priv->descriptor_ring.length      = length;
-	printk(KERN_INFO "Allocated descriptors at 0x%llx\n", (uint64_t)drv_priv->descriptor_ring.descriptors);
-}
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
 	printk(KERN_INFO "Got interrupt %d!\n", irq);
 	return IRQ_HANDLED;
 }
+
 
 static void setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
@@ -314,31 +372,13 @@ static void setup_memory_regions(struct dce_driver_priv * drv_priv)
 	if (!drv_priv->dev->coherent_dma_mask)
 		drv_priv->dev->coherent_dma_mask = 0xffffffff;
 
-	int DSCSZ = 0;
-	/* Supervisor memory setup */
-	dce_init_descriptor_ring(drv_priv, DSCSZ);
-
 	/* WQIT is 4KiB */
-	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, 0x4000,
+	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
-	drv_priv->hti = dma_alloc_coherent(drv_priv->dev, sizeof(HeadTailIndex),
-								  &drv_priv->hti_dma, GFP_KERNEL);
-	drv_priv->hti->head = 0;
-	drv_priv->hti->tail = 0;
-
-	/* populate WQITE TODO: only first one for now*/
-	drv_priv->WQIT[0].DSCBA = drv_priv->descriptor_ring.dma;
-	drv_priv->WQIT[0].DSCSZ = DSCSZ;
-	drv_priv->WQIT[0].DSCPTA = drv_priv->hti_dma;
-
-	printk(KERN_INFO "Writing to DCE_WQITBA!\n");
-	dce_reg_write(drv_priv, DCE_WQITBA,
+	printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
+	dce_reg_write(drv_priv, DCE_REG_WQITBA,
 				 (uint64_t) drv_priv->WQIT_dma);
-
-	/* TODO fix this to use WQCR.notify/status */
-	dce_reg_write(drv_priv, DCE_CTRL, dce_reg_read(drv_priv, DCE_CTRL) | 1);
-	while (!(dce_reg_read(drv_priv, DCE_STATUS) & 1));
 }
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
