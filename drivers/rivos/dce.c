@@ -31,6 +31,7 @@ static int dce_ops_open(struct inode *inode, struct file *file)
 	struct dce_driver_priv *priv = file->private_data;
 	/* Assign a WQ to the file descriptor */
 	/* FIXME: lock , better assignemnt algo, error if full */
+	mutex_lock(&priv->lock);
 	for(int slot = 0; slot < NUM_WQ; slot++) {
 		if (priv->wq_assignment[slot] == 0) {
 			priv->wq_assignment[slot] = file;
@@ -38,11 +39,23 @@ static int dce_ops_open(struct inode *inode, struct file *file)
 			break;
 		}
 	}
+	mutex_unlock(&priv->lock);
 	return 0;
 }
 
-static int dce_ops_close(struct inode *inode, struct file *file)
+static int dce_ops_release(struct inode *inode, struct file *file)
 {
+	struct dce_driver_priv *priv = file->private_data;
+	/* FIXME: do we need lock here? */
+	mutex_lock(&priv->lock);
+	for(int slot = 0; slot < NUM_WQ; slot++) {
+		if (priv->wq_assignment[slot] == file) {
+			priv->wq_assignment[slot] = 0;
+			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, slot);
+			break;
+		}
+	}
+	mutex_unlock(&priv->lock);
 	printk(KERN_INFO "Closing file 0x%lx\n", file);
 	return 0;
 }
@@ -347,12 +360,12 @@ static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 static const struct file_operations dce_ops = {
-	.owner          = THIS_MODULE,
-	.open           = dce_ops_open,
-	// .close			= dce_ops_close,
+	.owner		= THIS_MODULE,
+	.open		= dce_ops_open,
+	.release	= dce_ops_release,
 	.read		= dce_ops_read,
-	.write          = dce_ops_write,
-	.unlocked_ioctl = dce_ioctl
+	.write		= dce_ops_write,
+	.unlocked_ioctl	= dce_ioctl
 };
 
 static struct class *dce_char_class;

@@ -1,6 +1,8 @@
 #ifndef DCE_H
 #define DCE_H
 
+#include "linux/mutex.h"
+
 #define DCE_CTRL 0
 
 #define DCE_STATUS 8
@@ -125,6 +127,8 @@ struct dce_driver_priv
 	u32* in;
 	u32* out;
 	u32* temp;
+
+	struct mutex lock;
 
 	uint64_t mmio_start;
 
