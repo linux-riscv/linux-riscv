@@ -306,6 +306,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	/* XXX need DRM init */
 	dpa->drm_minor = 128;
+	// LIST_HEAD_INIT(&dpa->buffers);
 
 	if ((ret = dpa_kfd_chardev_init()))
 		goto unmap;
@@ -491,6 +492,89 @@ static int dpa_kfd_ioctl_acquire_vm(struct file *filep,
 				    struct dpa_kfd_process *p, void *data)
 {
 	dev_warn(dpa_device, "%s: doing nothing\n", __func__);
+	// we do the PASID allocation in the open call
+	return 0;
+}
+
+
+static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
+					     u64 size, u32 flags)
+{
+	struct device *dev = p->dev->dev;
+	struct dpa_kfd_buffer *buf;
+
+	buf = devm_kzalloc(dev, sizeof(*buf),  GFP_KERNEL);
+	if (!buf)
+		return NULL;
+
+	buf->type = flags;
+	buf->size = size;
+	// XXX need to alloc from reserved HBM region not system memory
+	buf->page = dma_alloc_pages(dev, size, &buf->dma_addr, DMA_BIDIRECTIONAL,
+				    GFP_KERNEL);
+
+	if (!buf->page) {
+		dev_warn(dev, "%s: unable to alloc size 0x%llx\n", __func__, size);
+		devm_kfree(dev, buf);
+		return NULL;
+	}
+	buf->buf = page_to_virt(buf->page);
+
+	return buf;
+}
+
+static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
+				    struct dpa_kfd_process *p, void *data)
+{
+	struct kfd_ioctl_alloc_memory_of_gpu_args *args = data;
+	struct device *dev = p->dev->dev;
+	struct dpa_kfd_buffer *buf;
+
+	dev_warn(dev, "%s: flags 0x%x size 0x%llx\n", __func__,
+		 args->flags, args->size);
+
+	if (args->gpu_id != DPA_GPU_ID)
+		return -ENODEV;
+
+	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+		buf = dpa_alloc_vram(p, args->size, args->flags);
+		// XXX HACK if we don't have iommu wtih svm pass the address back via
+		// mmap
+		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+
+		// for now just support one page
+		if (args->size > PAGE_SIZE)
+			return -ENOTSUPP;
+
+		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
+		if (!buf)
+			return -ENOMEM;
+		buf->type = args->flags;
+		buf->size = args->size;
+		if (get_user_pages(args->va_addr, 1, 0, &buf->page, NULL) != 1) {
+			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
+			devm_kfree(dev, buf);
+			return -ENOMEM;
+		}
+		buf->buf = page_to_virt(buf->page);
+		buf->dma_addr = dma_map_single(dev, buf->buf, PAGE_SIZE, DMA_BIDIRECTIONAL);
+		if (buf->dma_addr == DMA_MAPPING_ERROR) {
+			dev_warn(dev, "%s: dma_map_single failed\n", __func__);
+			devm_kfree(dev, buf);
+			return -ENOMEM;
+		}
+	}
+
+	mutex_lock(&p->dev->lock);
+	// XXX use an IDR/IDA for this
+	buf->id = ++p->alloc_count;
+	list_add_tail(&buf->process_alloc_list, &p->buffers);
+	mutex_unlock(&p->dev->lock);
+
+	// use a macro for this
+	args->handle = (u64)DPA_GPU_ID << 32 | buf->id;
+
 	return 0;
 }
 
@@ -565,8 +649,7 @@ static const struct kfd_ioctl_desc amdkfd_ioctls[] = {
 			dpa_kfd_ioctl_acquire_vm, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU,
-		      dpa_kfd_ioctl_not_implemented, 0),
-			/* dpa_kfd_ioctl_alloc_memory_of_gpu, 0), */
+		      dpa_kfd_ioctl_alloc_memory_of_gpu, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_FREE_MEMORY_OF_GPU,
 		      dpa_kfd_ioctl_not_implemented, 0),
@@ -777,6 +860,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	dpa_app->mm = current->mm;
 	mmget(dpa_app->mm);
 	mutex_init(&dpa_app->lock);
+	INIT_LIST_HEAD(&dpa_app->buffers);
 
 	// only one DPA for now
 	dpa_app->dev = dpa;
