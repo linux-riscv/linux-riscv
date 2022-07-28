@@ -12,8 +12,11 @@
 #define DCE_INTERRUPT_MASK                         80
 
 /* TODO: fix offset */
-#define DCE_WQITBA	88
-#define DCE_WQCR	96
+#define DCE_REG_WQITBA      0x0
+#define DCE_REG_WQRUNSTS    0x10
+#define DCE_REG_WQENABLE    0x18
+#define DCE_REG_WQIRQSTS    0x20
+#define DCE_REG_WQCR        0x0
 
 
 #define DCE_OPCODE_CLFLUSH            0
@@ -125,13 +128,16 @@ struct dce_driver_priv
 
 	uint64_t mmio_start;
 
+	bool wq_enabled[NUM_WQ];
+	struct file * wq_assignment[NUM_WQ];
+
     WQITE * WQIT;
     dma_addr_t WQIT_dma;
 
-	HeadTailIndex * hti;
-	dma_addr_t hti_dma;
+	HeadTailIndex * hti[NUM_WQ];
+	dma_addr_t hti_dma[NUM_WQ];
+	DescriptorRing descriptor_ring[NUM_WQ];
 
-	DescriptorRing descriptor_ring;
 	struct sg_table sg_tables[NUM_SG_TBLS];
 	DataAddrNode * hw_addr[NUM_SG_TBLS];
 };
