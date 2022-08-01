@@ -14,7 +14,7 @@ docker-build:
   # All other branches are tagged with the escaped branch name (commit ref slug)
   script:
     - |
-      upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*')"
+      upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
       image="$CI_REGISTRY_IMAGE"
       if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]] ; then
         section="main"
@@ -23,7 +23,7 @@ docker-build:
         image="${image}:${CI_COMMIT_REF_SLUG}"
       fi
       pkg_version="${prio}$(date '+%Y%m%dT%H%M%S').g$(git rev-parse --short HEAD)"
-      echo "Running on branch '$CI_COMMIT_BRANCH': package = '$pkg_version' ; container = '$image'"
+      echo "Running on branch '$CI_COMMIT_BRANCH': package = '$pkg_version' (upstream='$upstream_version') ; container = '$image'"
     - docker network create sdk_build || echo "docker network already exists ?"
     - >
       docker build --pull \
