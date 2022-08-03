@@ -6,8 +6,8 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
-
-
+#include <uapi/linux/virtio_ids.h>
+#include <linux/virtio_pci_modern.h>
 
 
 #ifndef PCI_VENDOR_ID_RIVOS
@@ -45,16 +45,21 @@
 #define TDC_UNMAP_ENTRY 0X4 //TODO: refactor into enum
 
 static const struct pci_device_id tdc_pci_tbl[] = {
-	{PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_TDC,
+	{PCI_VENDOR_ID_REDHAT_QUMRANET, 0x1040 + VIRTIO_ID_TDC,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{ 0, }
 };
 
 struct tdc_dev {
-	struct device *dev;
-	struct cdev cdev;
-
-	unsigned char __iomem *regs;
+    struct device *dev;
+    struct pci_dev *pdev;
+    struct cdev cdev;
+    struct virtio_pci_common_cfg __iomem *common;
+    void __iomem *device;
+	/* Base of vq notifications (non-legacy mode). */
+	void __iomem *notify_base;
+    unsigned char __iomem *regs;
+    int modern_bars;
 };
 
 static struct tdc_dev* tdev;
@@ -224,10 +229,114 @@ static struct file_operations tdc_file_ops =
 MODULE_DEVICE_TABLE(pci, tdc_pci_table);
 
 
+static void tdc_setup_virtqueue(struct tdc_dev *tdev, u64 desc, u64 used, u64 avail) {
+    vp_iowrite16(0, &tdev->common->queue_select);
+    
+    vp_iowrite16(8, &tdev->common->queue_size);
+    vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
+    vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
+    vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
 
+    vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
+    vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
+    vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
+
+    vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
+    vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
+    vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
+    vp_iowrite16(1, &tdev->common->queue_enable);
+    
+
+}
+
+/* Mostly a copy of vp_modern_map_capability within virtio_pci_modern_dev.c, couldn't use it directly because it expects a virtio_pci_modern_device*/
+static void __iomem *
+vp_modern_map_capability(struct tdc_dev *tdev, int off,
+			 size_t minlen, u32 align, u32 start, u32 size,
+			 size_t *len, resource_size_t *pa)
+{
+	
+	struct pci_dev* dev  = tdev->pdev;
+    u8 bar;
+	u32 offset, length;
+	void __iomem *p;
+
+	pci_read_config_byte(dev, off + offsetof(struct virtio_pci_cap,
+						 bar),
+			     &bar);
+	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, offset),
+			     &offset);
+	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, length),
+			      &length);
+
+	/* Check if the BAR may have changed since we requested the region. */
+	if (bar >= PCI_STD_NUM_BARS || !(tdev->modern_bars & (1 << bar))) {
+		dev_err(&dev->dev,
+			"virtio_pci: bar unexpectedly changed to %u\n", bar);
+		return NULL;
+	}
+
+	if (length <= start) {
+		dev_err(&dev->dev,
+			"virtio_pci: bad capability len %u (>%u expected)\n",
+			length, start);
+		return NULL;
+	}
+
+	if (length - start < minlen) {
+		dev_err(&dev->dev,
+			"virtio_pci: bad capability len %u (>=%zu expected)\n",
+			length, minlen);
+		return NULL;
+	}
+
+	length -= start;
+
+	if (start + offset < offset) {
+		dev_err(&dev->dev,
+			"virtio_pci: map wrap-around %u+%u\n",
+			start, offset);
+		return NULL;
+	}
+
+	offset += start;
+
+	if (offset & (align - 1)) {
+		dev_err(&dev->dev,
+			"virtio_pci: offset %u not aligned to %u\n",
+			offset, align);
+		return NULL;
+	}
+
+	if (length > size)
+		length = size;
+
+	if (len)
+		*len = length;
+
+	if (minlen + offset < minlen ||
+	    minlen + offset > pci_resource_len(dev, bar)) {
+		dev_err(&dev->dev,
+			"virtio_pci: map virtio %zu@%u "
+			"out of range on bar %i length %lu\n",
+			minlen, offset,
+			bar, (unsigned long)pci_resource_len(dev, bar));
+		return NULL;
+	}
+
+	p = pci_iomap_range(dev, bar, offset, length);
+	if (!p)
+		dev_err(&dev->dev,
+			"virtio_pci: unable to map virtio %u@%u on bar %i\n",
+			length, offset, bar);
+	else if (pa)
+		*pa = pci_resource_start(dev, bar) + offset;
+
+	return p;
+}
 
 static int tdc_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
-	int err;
+	int err, common;
 	u16 vendor, device;
 	dev_t dev_num;
 	struct device* dev = &pdev->dev;
@@ -242,16 +351,41 @@ static int tdc_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		return -ENOMEM;
 	tdev->dev = dev;
 	dev_set_drvdata(dev, tdev);
+	common = virtio_pci_find_capability(pdev, VIRTIO_PCI_CAP_COMMON_CFG,
+					    IORESOURCE_IO | IORESOURCE_MEM,
+					    &tdev->modern_bars);
+	if (!common) {
+		devm_kfree(dev, tdev);
+		printk("Capability common not found\n");
+		return -ENODEV;
+	}
+
+	err = pci_request_selected_regions(pdev, tdev->modern_bars,
+					   "virtio-pci-modern");
+	if (err)
+		return err;
+	
+	err = -EINVAL;
+	tdev->pdev = pdev;
+	tdev->common = vp_modern_map_capability(tdev, common,
+						sizeof(struct virtio_pci_common_cfg), 4,
+						0, sizeof(struct virtio_pci_common_cfg),
+						NULL, NULL);
+	
+	if (!tdev->common)
+		printk("Couldn't map capability\n");
+	tdc_setup_virtqueue(tdev, 0x1234, 0x1234, 0x1234);
+	vp_iowrite8(0x4, &tdev->common->device_status); //Setting status
 
 
 	err = pci_enable_device_mem(pdev);
 	if (err) goto disable_device_and_fail;
 
-	if(pci_request_mem_regions(pdev, DRV_NAME))
-		goto disable_device_and_fail;
-	tdev->regs = pci_iomap(pdev, 0, TDC_REGS_MIN_SIZE);
+	/* if (pci_request_mem_regions(pdev, DRV_NAME)) */
+	/* 	goto disable_device_and_fail; */
+	/* tdev->regs = pci_iomap(pdev, 0, TDC_REGS_MIN_SIZE); */
 
-	if (err) goto free_resources_and_fail;
+	/* if (err) goto free_resources_and_fail; */
 
 	pci_set_drvdata(pdev, tdev);
 	err = alloc_chrdev_region(&dev_num, 0, 1, TDC_DEVICE_NAME);
