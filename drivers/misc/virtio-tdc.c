@@ -30,11 +30,11 @@ static struct kmem_cache *tdc_hashtable_entry_cache;
 static struct class *tdc_class;
 
 #define TDC_HASHTABLE_BITS 4
-//static DEFINE_HASHTABLE(va_map, TDC_HASHTABLE_BITS); //TODO: this should be per process
+static DEFINE_HASHTABLE(va_map, TDC_HASHTABLE_BITS); //TODO: this should be per process
 static DEFINE_IDA(tdc_index_ida);
 
 static const struct virtio_device_id id_table[] = {
-	{ VIRTIO_ID_TDC, VIRTIO_DEV_ANY_ID },
+	// { VIRTIO_ID_TDC, VIRTIO_DEV_ANY_ID },
 	{ 0 },
 };
 
@@ -66,7 +66,6 @@ static void dma_done(struct virtqueue *vq){
 		return;
 	}
 
-
 	complete(&vi->dma_completion);
 }
 
@@ -95,7 +94,6 @@ static int tdc_file_open(struct inode *inode, struct file *file)
 }
 
 
-#if 0
 static struct tdc_hashtable_entry* get_cached_entry(uint64_t va)
 {
 	struct tdc_hashtable_entry* entry;
@@ -107,7 +105,6 @@ static struct tdc_hashtable_entry* get_cached_entry(uint64_t va)
 	}
 	return NULL;
 }
-#endif
 
 static uint64_t get_iova_cached_or_create(struct device* dev, uint64_t va, struct page* page,
 					  enum dma_data_direction dir, int create)
@@ -224,11 +221,6 @@ static long tdc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 
 	return 0;
-
-
-    }
-
-    return 0;
 }
 
 static struct file_operations tdc_file_ops =
