@@ -229,24 +229,20 @@ static struct file_operations tdc_file_ops =
 MODULE_DEVICE_TABLE(pci, tdc_pci_table);
 
 
-static void tdc_setup_virtqueue(struct tdc_dev *tdev, u64 desc, u64 used, u64 avail) {
+static void tdc_setup_virtqueue(struct tdc_dev *tdev, dma_addr_t desc, dma_addr_t used, dma_addr_t avail)
+{
+
     vp_iowrite16(0, &tdev->common->queue_select);
+    vp_iowrite16(0x1000, &tdev->common->queue_size);
+    vp_iowrite16(0xabcd, &tdev->common->queue_msix_vector);
+    vp_iowrite16(0xbcde, &tdev->common->queue_notify_off);
     
-    vp_iowrite16(8, &tdev->common->queue_size);
     vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
-    vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
-    vp_iowrite64_twopart(desc, &tdev->common->queue_desc_lo, &tdev->common->queue_desc_hi);
-
     vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
-    vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
-    vp_iowrite64_twopart(used, &tdev->common->queue_used_lo, &tdev->common->queue_used_hi);
-
     vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
-    vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
-    vp_iowrite64_twopart(avail, &tdev->common->queue_avail_lo, &tdev->common->queue_avail_hi);
+    printk("%s: desc 0x%llx used 0x%llx avail 0x%llx\n", __func__,
+	   desc, used, avail);
     vp_iowrite16(1, &tdev->common->queue_enable);
-    
-
 }
 
 /* Mostly a copy of vp_modern_map_capability within virtio_pci_modern_dev.c, couldn't use it directly because it expects a virtio_pci_modern_device*/
@@ -340,6 +336,8 @@ static int tdc_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	u16 vendor, device;
 	dev_t dev_num;
 	struct device* dev = &pdev->dev;
+	void *qaddr;
+	dma_addr_t qdma_addr;
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
@@ -374,8 +372,25 @@ static int tdc_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	
 	if (!tdev->common)
 		printk("Couldn't map capability\n");
-	tdc_setup_virtqueue(tdev, 0x1234, 0x1234, 0x1234);
-	vp_iowrite8(0x4, &tdev->common->device_status); //Setting status
+
+	qaddr = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!qaddr) {
+		dev_warn(dev, "cannot alloc qaddr\n");
+		devm_kfree(dev, tdev);
+		return -ENOMEM;
+					      
+	}
+	snprintf(qaddr, PAGE_SIZE, "Hello from Sentinel!\n");
+	qdma_addr = dma_map_single(dev, qaddr, PAGE_SIZE, DMA_BIDIRECTIONAL);
+	if (qdma_addr == DMA_MAPPING_ERROR) {
+		dev_warn(dev, "cannot map qaddr\n");
+		kfree(qaddr);
+		devm_kfree(dev, tdev);
+		return -ENOMEM;
+	}
+	
+	tdc_setup_virtqueue(tdev, qdma_addr, qdma_addr, qdma_addr);
+	vp_iowrite8(0xF, &tdev->common->device_status); //Setting status
 
 
 	err = pci_enable_device_mem(pdev);
