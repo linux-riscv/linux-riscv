@@ -4,18 +4,22 @@
 #include <linux/kernel.h>
 #include <linux/virtio.h>
 
-#define DPA_FW_QUEUE_MAGIC (0xF00FADE5)
-#define DPA_FW_QUEUE_PAGE_SIZE (4 * 1024)
-struct dpa_fw_queue {
-	u32 magic;
-	u32 size;
-	u32 read_ptr;
-	u32 write_ptr;
-	u64 ring_base_ptr;
-};
+#include "dpa_daffy.h"
 
-struct dpa_fw_queue_pkt {
-	u8 buf[64];
+// contains info about the queue to fw
+struct dpa_fwq_info {
+
+	// one page allocated for queue to fw
+	struct dpa_fw_queue_desc *fw_queue;
+
+	// convinience pointers to the rings
+	struct dpa_fw_queue_pkt *h_ring;
+	struct dpa_fw_queue_pkt *d_ring;
+
+	// dma address of the q
+	dma_addr_t fw_queue_dma_addr;
+	// XXX lock? use big lock?
+	// XXX need to add wait event if q is full
 };
 
 struct dpa_device {
@@ -35,9 +39,7 @@ struct dpa_device {
 	// just keep it per process for now
 	//struct list_head buffers;
 
-	// one page allocated for queue to fw
-	struct dpa_fw_queue *fw_queue;
-	dma_addr_t fw_queue_dma_addr;
+	struct dpa_fwq_info qinfo;
 
 	// for virtio demo
 	struct virtio_pci_common_cfg __iomem *common;

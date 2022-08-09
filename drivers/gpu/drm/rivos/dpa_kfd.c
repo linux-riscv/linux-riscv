@@ -368,17 +368,17 @@ static void setup_queue(struct dpa_device *dpa_dev)
 	vp_iowrite16(0, &dpa_dev->common->queue_msix_vector);
 	vp_iowrite16(0, &dpa_dev->common->queue_notify_off);
 
-	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+	vp_iowrite64_twopart(dpa_dev->qinfo.fw_queue_dma_addr,
 			     &dpa_dev->common->queue_desc_lo,
 			     &dpa_dev->common->queue_desc_hi);
-	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+	vp_iowrite64_twopart(dpa_dev->qinfo.fw_queue_dma_addr,
 			     &dpa_dev->common->queue_used_lo,
 			     &dpa_dev->common->queue_used_hi);
-	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+	vp_iowrite64_twopart(dpa_dev->qinfo.fw_queue_dma_addr,
 			     &dpa_dev->common->queue_avail_lo,
 			     &dpa_dev->common->queue_avail_hi);
 	printk("%s: sending 0x%llx\n", __func__,
-	       dpa_dev->fw_queue_dma_addr);
+	       dpa_dev->qinfo.fw_queue_dma_addr);
 	vp_iowrite16(1, &dpa_dev->common->queue_enable);
 
 }
@@ -401,39 +401,6 @@ static const struct pci_device_id dpa_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 #endif
-
-static int alloc_fw_queue(struct dpa_device *dpa_dev)
-{
-	dpa_dev->fw_queue = kzalloc(DPA_FW_QUEUE_PAGE_SIZE, GFP_KERNEL);
-	if (!dpa_dev->fw_queue)
-		return -ENOMEM;
-
-	dpa_dev->fw_queue_dma_addr = dma_map_single(dpa_dev->dev,
-						    dpa_dev->fw_queue,
-						    DPA_FW_QUEUE_PAGE_SIZE,
-						    DMA_BIDIRECTIONAL);
-	if (dpa_dev->fw_queue_dma_addr == DMA_MAPPING_ERROR) {
-		kfree(dpa_dev->fw_queue);
-		return -EIO;
-	}
-	dpa_dev->fw_queue->magic = DPA_FW_QUEUE_MAGIC;
-	dpa_dev->fw_queue->size  = DPA_FW_QUEUE_PAGE_SIZE;
-	// start at +64b
-	dpa_dev->fw_queue->ring_base_ptr =
-		((u64)(dpa_dev->fw_queue_dma_addr) +
-		 sizeof(struct dpa_fw_queue_pkt));
-
-	return 0;
-}
-
-static void free_fw_queue(struct dpa_device *dpa_dev)
-{
-	dma_unmap_single(dpa_dev->dev,
-			 dpa_dev->fw_queue_dma_addr,
-			 DPA_FW_QUEUE_PAGE_SIZE,
-			 DMA_BIDIRECTIONAL);
-	kfree(dpa_dev->fw_queue);
-}
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
@@ -485,7 +452,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return err;
 	}
 
-	err = alloc_fw_queue(dpa);
+	err = daffy_alloc_fw_queue(dpa);
 	if (err) {
 		devm_kfree(dev, dpa);
 		printk("Unable to allocate shared queue memory\n");
@@ -501,7 +468,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	// needed? we can't request mem regions
 	if ((ret = pci_enable_device_mem(pdev))) {
-		free_fw_queue(dpa);
+		daffy_free_fw_queue(dpa);
 		printk("%s: pci_enable_device_mem() failed %d\n",
 		       __func__, ret);
 		goto disable_device;
@@ -523,7 +490,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto disable_device;
 	}
 
-	err = alloc_fw_queue(dpa);
+	err = daffy_alloc_fw_queue(dpa);
 	if (err) {
 		dev_warn(dpa_device, "%s: unable to allocate memory\n", __func__);
 		goto unmap;
@@ -545,9 +512,11 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 free_queue:
-	free_fw_queue(dpa);
+	daffy_free_fw_queue(dpa);
 
+#ifndef VIRTIO_DEMO
 unmap:
+#endif
 	iounmap(dpa->regs);
 
 disable_device:
@@ -561,7 +530,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 {
 	if (dpa) {
 		// XXX other stuff
-		free_fw_queue(dpa);
+		daffy_free_fw_queue(dpa);
 		// unmap regs
 		iounmap(dpa->regs);
 		pci_disable_device(pdev);
@@ -582,7 +551,8 @@ static struct pci_driver dpa_pci_driver = {
 
 /* Ioctl handlers */
 
-static int dpa_kfd_ioctl_get_version(struct file *filep, struct dpa_kfd_process *p, void *data)
+static int dpa_kfd_ioctl_get_version(struct file *filep,
+				     struct dpa_kfd_process *p, void *data)
 {
 	struct kfd_ioctl_get_version_args *args = data;
 
