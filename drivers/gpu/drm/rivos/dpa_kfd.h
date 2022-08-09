@@ -4,6 +4,20 @@
 #include <linux/kernel.h>
 #include <linux/virtio.h>
 
+#define DPA_FW_QUEUE_MAGIC (0xF00FADE5)
+#define DPA_FW_QUEUE_PAGE_SIZE (4 * 1024)
+struct dpa_fw_queue {
+	u32 magic;
+	u32 size;
+	u32 read_ptr;
+	u32 write_ptr;
+	u64 ring_base_ptr;
+};
+
+struct dpa_fw_queue_pkt {
+	u8 buf[64];
+};
+
 struct dpa_device {
 	/* big lock for device data structures */
 	struct mutex lock;
@@ -14,11 +28,19 @@ struct dpa_device {
 
 	int drm_minor;
 
+	// XXX use explicit 4k
 #define DPA_MMIO_SIZE (PAGE_SIZE)
 	volatile char *regs;
 
 	// just keep it per process for now
 	//struct list_head buffers;
+
+	// one page allocated for queue to fw
+	struct dpa_fw_queue *fw_queue;
+	dma_addr_t fw_queue_dma_addr;
+
+	// for virtio demo
+	struct virtio_pci_common_cfg __iomem *common;
 };
 
 struct dpa_kfd_process {

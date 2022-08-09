@@ -15,6 +15,13 @@
 #include <uapi/linux/kfd_ioctl.h>
 #include "dpa_kfd.h"
 
+#define VIRTIO_DEMO 1
+
+#ifdef VIRTIO_DEMO
+#include <uapi/linux/virtio_ids.h>
+#include <linux/virtio_pci_modern.h>
+#endif
+
 static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 static int dpa_kfd_open(struct inode *inode, struct file *filep);
 static int dpa_kfd_release(struct inode *inode, struct file *filep);
@@ -261,6 +268,122 @@ static void dpa_kfd_sysfs_destroy(void)
 	}
 }
 
+#ifdef VIRTIO_DEMO
+static const struct pci_device_id dpa_pci_table[] = {
+	{PCI_VENDOR_ID_REDHAT_QUMRANET, 0x1040 + VIRTIO_ID_TDC,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ 0, }
+};
+
+/* Mostly a copy of vp_modern_map_capability within virtio_pci_modern_dev.c, couldn't use it directly because it expects a virtio_pci_modern_device*/
+static void __iomem *
+vp_modern_map_capability(struct pci_dev *dev, int modern_bars, int off,
+			 size_t minlen, u32 align, u32 start, u32 size,
+			 size_t *len, resource_size_t *pa)
+{
+
+
+	u8 bar;
+	u32 offset, length;
+	void __iomem *p;
+
+	pci_read_config_byte(dev, off + offsetof(struct virtio_pci_cap,
+						 bar),
+			     &bar);
+	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, offset),
+			     &offset);
+	pci_read_config_dword(dev, off + offsetof(struct virtio_pci_cap, length),
+			      &length);
+
+	/* Check if the BAR may have changed since we requested the region. */
+	if (bar >= PCI_STD_NUM_BARS || !(modern_bars & (1 << bar))) {
+		dev_err(&dev->dev,
+			"virtio_pci: bar unexpectedly changed to %u\n", bar);
+		return NULL;
+	}
+
+	if (length <= start) {
+		dev_err(&dev->dev,
+			"virtio_pci: bad capability len %u (>%u expected)\n",
+			length, start);
+		return NULL;
+	}
+
+	if (length - start < minlen) {
+		dev_err(&dev->dev,
+			"virtio_pci: bad capability len %u (>=%zu expected)\n",
+			length, minlen);
+		return NULL;
+	}
+
+	length -= start;
+
+	if (start + offset < offset) {
+		dev_err(&dev->dev,
+			"virtio_pci: map wrap-around %u+%u\n",
+			start, offset);
+		return NULL;
+	}
+
+	offset += start;
+
+	if (offset & (align - 1)) {
+		dev_err(&dev->dev,
+			"virtio_pci: offset %u not aligned to %u\n",
+			offset, align);
+		return NULL;
+	}
+
+	if (length > size)
+		length = size;
+
+	if (len)
+		*len = length;
+
+	if (minlen + offset < minlen ||
+	    minlen + offset > pci_resource_len(dev, bar)) {
+		dev_err(&dev->dev,
+			"virtio_pci: map virtio %zu@%u "
+			"out of range on bar %i length %lu\n",
+			minlen, offset,
+			bar, (unsigned long)pci_resource_len(dev, bar));
+		return NULL;
+	}
+
+	p = pci_iomap_range(dev, bar, offset, length);
+	if (!p)
+		dev_err(&dev->dev,
+			"virtio_pci: unable to map virtio %u@%u on bar %i\n",
+			length, offset, bar);
+	else if (pa)
+		*pa = pci_resource_start(dev, bar) + offset;
+
+	return p;
+}
+
+static void setup_queue(struct dpa_device *dpa_dev)
+{
+	vp_iowrite16(0, &dpa_dev->common->queue_select);
+	vp_iowrite16(0x1000, &dpa_dev->common->queue_size);
+	vp_iowrite16(0, &dpa_dev->common->queue_msix_vector);
+	vp_iowrite16(0, &dpa_dev->common->queue_notify_off);
+
+	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+			     &dpa_dev->common->queue_desc_lo,
+			     &dpa_dev->common->queue_desc_hi);
+	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+			     &dpa_dev->common->queue_used_lo,
+			     &dpa_dev->common->queue_used_hi);
+	vp_iowrite64_twopart(dpa_dev->fw_queue_dma_addr,
+			     &dpa_dev->common->queue_avail_lo,
+			     &dpa_dev->common->queue_avail_hi);
+	printk("%s: sending 0x%llx\n", __func__,
+	       dpa_dev->fw_queue_dma_addr);
+	vp_iowrite16(1, &dpa_dev->common->queue_enable);
+
+}
+
+#else
 /* PCI Stuff */
 
 #ifndef PCI_VENDOR_ID_RIVOS
@@ -277,11 +400,47 @@ static const struct pci_device_id dpa_pci_table[] = {
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, dpa_pci_table);
+#endif
+
+static int alloc_fw_queue(struct dpa_device *dpa_dev)
+{
+	dpa_dev->fw_queue = kzalloc(DPA_FW_QUEUE_PAGE_SIZE, GFP_KERNEL);
+	if (!dpa_dev->fw_queue)
+		return -ENOMEM;
+
+	dpa_dev->fw_queue_dma_addr = dma_map_single(dpa_dev->dev,
+						    dpa_dev->fw_queue,
+						    DPA_FW_QUEUE_PAGE_SIZE,
+						    DMA_BIDIRECTIONAL);
+	if (dpa_dev->fw_queue_dma_addr == DMA_MAPPING_ERROR) {
+		kfree(dpa_dev->fw_queue);
+		return -EIO;
+	}
+	dpa_dev->fw_queue->magic = DPA_FW_QUEUE_MAGIC;
+	dpa_dev->fw_queue->size  = DPA_FW_QUEUE_PAGE_SIZE;
+	// start at +64b
+	dpa_dev->fw_queue->ring_base_ptr =
+		((u64)(dpa_dev->fw_queue_dma_addr) +
+		 sizeof(struct dpa_fw_queue_pkt));
+
+	return 0;
+}
+
+static void free_fw_queue(struct dpa_device *dpa_dev)
+{
+	dma_unmap_single(dpa_dev->dev,
+			 dpa_dev->fw_queue_dma_addr,
+			 DPA_FW_QUEUE_PAGE_SIZE,
+			 DMA_BIDIRECTIONAL);
+	kfree(dpa_dev->fw_queue);
+}
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int ret = 0;
 	struct device *dev = &pdev->dev;
+	int modern_bars, common, err;
+	u16 vendor, device;
 
 	dev_warn(dev, "%s: start\n", __func__);
 	dpa = devm_kzalloc(dev, sizeof(*dpa_device), GFP_KERNEL);
@@ -290,6 +449,65 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dpa->dev = dev;
 	dev_set_drvdata(dev, dpa);
 
+#ifdef VIRTIO_DEMO
+	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
+	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
+	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO |
+			      PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
+	printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+
+	common = virtio_pci_find_capability(pdev, VIRTIO_PCI_CAP_COMMON_CFG,
+					    IORESOURCE_IO | IORESOURCE_MEM,
+					    &modern_bars);
+	if (!common) {
+		devm_kfree(dev, dpa);
+		printk("Capability common not found\n");
+		return -ENODEV;
+	}
+
+	err = pci_request_selected_regions(pdev, modern_bars,
+					   "virtio-pci-modern");
+	if (err) {
+		devm_kfree(dev, dpa);
+		return err;
+	}
+
+	err = -EINVAL;
+	dpa->common =
+		vp_modern_map_capability(pdev, modern_bars, common,
+					 sizeof(struct virtio_pci_common_cfg), 4,
+					 0, sizeof(struct virtio_pci_common_cfg),
+					 NULL, NULL);
+
+	if (!dpa->common) {
+		devm_kfree(dev, dpa);
+		printk("Couldn't map capability\n");
+		return err;
+	}
+
+	err = alloc_fw_queue(dpa);
+	if (err) {
+		devm_kfree(dev, dpa);
+		printk("Unable to allocate shared queue memory\n");
+		return err;
+	}
+
+	// write the queue parameters to the shared area
+	setup_queue(dpa);
+
+	// Sets "status" with the enable bit
+	// this causes qemu vhost to send parameters across
+	vp_iowrite8(0xF, &dpa->common->device_status);
+
+	// needed? we can't request mem regions
+	if ((ret = pci_enable_device_mem(pdev))) {
+		free_fw_queue(dpa);
+		printk("%s: pci_enable_device_mem() failed %d\n",
+		       __func__, ret);
+		goto disable_device;
+	}
+
+#else
 	if ((ret = pci_enable_device_mem(pdev)))
 		goto disable_device;
 
@@ -304,12 +522,20 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		ret = -EIO;
 		goto disable_device;
 	}
+
+	err = alloc_fw_queue(dpa);
+	if (err) {
+		dev_warn(dpa_device, "%s: unable to allocate memory\n", __func__);
+		goto unmap;
+	}
+
+#endif
 	/* XXX need DRM init */
 	dpa->drm_minor = 128;
 	// LIST_HEAD_INIT(&dpa->buffers);
 
 	if ((ret = dpa_kfd_chardev_init()))
-		goto unmap;
+		goto free_queue;
 
 	if ((ret = dpa_kfd_sysfs_init())) {
 		dev_err(dpa_device, "%s: Error creating sysfs nodes: %d\n",
@@ -317,6 +543,9 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	return 0;
+
+free_queue:
+	free_fw_queue(dpa);
 
 unmap:
 	iounmap(dpa->regs);
@@ -332,6 +561,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 {
 	if (dpa) {
 		// XXX other stuff
+		free_fw_queue(dpa);
 		// unmap regs
 		iounmap(dpa->regs);
 		pci_disable_device(pdev);
