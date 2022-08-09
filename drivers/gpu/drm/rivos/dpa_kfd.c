@@ -408,6 +408,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device *dev = &pdev->dev;
 	int modern_bars, common, err;
 	u16 vendor, device;
+	u32 version;
 
 	dev_warn(dev, "%s: start\n", __func__);
 	dpa = devm_kzalloc(dev, sizeof(*dpa_device), GFP_KERNEL);
@@ -508,6 +509,17 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_err(dpa_device, "%s: Error creating sysfs nodes: %d\n",
 			__func__, ret);
 	}
+
+#ifdef VIRTIO_DEMO
+	if ((ret = daffy_get_version_cmd(dpa, &version))) {
+		dev_err(dpa_device, "%s: get version failed %d\n",
+			__func__, ret);
+	} else {
+		dev_warn(dpa_device, "%s: got version %u\n", __func__,
+			 version);
+	}
+
+#endif
 
 	return 0;
 
