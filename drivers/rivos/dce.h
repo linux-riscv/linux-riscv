@@ -39,8 +39,14 @@
 #define DEST_IS_LIST                (1 << 3)
 
 #define DEVICE_NAME "dce"
-#define VENDOR_ID 0x1FED
+#define DEVICE_VF_NAME "dcevf"
+#define VENDOR_ID 0x1EFD
 #define DEVICE_ID 0x0001
+#define DEVICE_VF_ID 0x0002
+#define DCE_MINOR 0x0
+#define DCE_NR_DEVS  2
+#define DCE_NR_VIRTFN 7
+
 
 typedef struct AccessInfoRead {
 	uint64_t* value;
@@ -120,7 +126,9 @@ static const struct pci_device_id pci_use_msi[] = {
 
 struct dce_driver_priv
 {
+	struct pci_dev *pdev;
 	struct device* dev;
+	struct device devvf;
 	dev_t dev_num;
 	struct cdev cdev;
 
@@ -144,6 +152,16 @@ struct dce_driver_priv
 
 	struct sg_table sg_tables[NUM_WQ][NUM_SG_TBLS];
 	DataAddrNode * hw_addr[NUM_WQ][NUM_SG_TBLS];
+
+	/* VF only */
+	int vf_number
 };
 
+
+uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg);
+void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value);
+int dce_ops_open(struct inode *inode, struct file *file);
+int dce_ops_release(struct inode *inode, struct file *file);
+ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos);
+ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos);
 #endif
