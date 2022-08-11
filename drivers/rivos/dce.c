@@ -14,19 +14,20 @@
 
 #include "dce.h"
 
-static uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
+uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
 	printk(KERN_INFO "Read 0x%llx from address 0x%llx\n", result, priv->mmio_start + reg);
 	return result;
 }
 
-static void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
+void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
 	printk(KERN_INFO "Writing 0x%llx to address 0x%llx\n", value, priv->mmio_start + reg);
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
 }
 
-static int dce_ops_open(struct inode *inode, struct file *file)
+int dce_ops_open(struct inode *inode, struct file *file)
 {
+	printk(KERN_INFO"opened pf\n");
 	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
 	struct dce_driver_priv *priv = file->private_data;
 	/* Assign a WQ to the file descriptor */
@@ -43,7 +44,7 @@ static int dce_ops_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int dce_ops_release(struct inode *inode, struct file *file)
+int dce_ops_release(struct inode *inode, struct file *file)
 {
 	struct dce_driver_priv *priv = file->private_data;
 	/* FIXME: do we need lock here? */
@@ -60,12 +61,12 @@ static int dce_ops_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos)
+ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos)
 {
 	return 0;
 }
 
-static ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos)
+ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos)
 {
 	return 0;
 }
@@ -405,6 +406,11 @@ static void setup_memory_regions(struct dce_driver_priv * drv_priv)
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int bar, err;
+
+	printk(KERN_INFO " in %s\n", __func__);
+	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
+	printk(KERN_INFO "return code %d\n", err);
+
 	u16 vendor, device;
 	// unsigned long mmio_start,mmio_len;
 	struct dce_driver_priv *drv_priv;
@@ -416,7 +422,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 	printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
-	err = pci_enable_device_mem(pdev);
+	err = pci_enable_device(pdev);
 	if (err) goto disable_device_and_fail;
 
 	bar = pci_select_bars(pdev, IORESOURCE_MEM);
@@ -441,6 +447,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	cdev_init(&drv_priv->cdev, &dce_ops);
 	drv_priv->cdev.owner = THIS_MODULE;
 	drv_priv->mmio_start = (uint64_t)pci_iomap(pdev, 0, 0);
+	printk(KERN_INFO "PF MMIO: 0x%x\n", drv_priv->mmio_start);
 
 	err = cdev_add(&drv_priv->cdev, MKDEV(MAJOR(dev_num), 0), 1);
 	if (err) goto free_resources_and_fail;
@@ -473,6 +480,19 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return err;
 }
 
+static int dev_sriov_configure(struct pci_dev *dev, int numvfs)
+{
+        if (numvfs > 0) {
+                pci_enable_sriov(dev, numvfs);
+                return numvfs;
+        }
+        if (numvfs == 0) {
+                pci_disable_sriov(dev);
+                return 0;
+        }
+		return 0;
+}
+
 static void dce_remove(struct pci_dev *pdev)
 {
 	// free_resources(&pdev->dev, pci_get_drvdata(pdev));
@@ -491,7 +511,7 @@ static struct pci_driver dce_driver = {
 	.id_table = dce_id_table,
 	.probe    = dce_probe,
 	.remove   = dce_remove,
-
+	.sriov_configure = dev_sriov_configure,
 	.driver	= {
 		.pm = &vmd_dev_pm_ops,
 	},
@@ -505,7 +525,6 @@ static char *pci_char_devnode(struct device *dev, umode_t *mode)
 static int __init dce_driver_init(void)
 {
 	int err;
-
 	dce_char_class = class_create(THIS_MODULE, DEVICE_NAME);
 	if (IS_ERR(dce_char_class)) {
 		err = PTR_ERR(dce_char_class);
