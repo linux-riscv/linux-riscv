@@ -14,6 +14,8 @@
 
 #include "dce.h"
 
+static dev_t dev_num;
+
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
 	printk(KERN_INFO "Read 0x%llx from address 0x%llx\n", result, priv->mmio_start + reg);
@@ -27,7 +29,6 @@ void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
 
 int dce_ops_open(struct inode *inode, struct file *file)
 {
-	printk(KERN_INFO"opened pf\n");
 	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
 	struct dce_driver_priv *priv = file->private_data;
 	/* Assign a WQ to the file descriptor */
@@ -94,7 +95,7 @@ static dma_addr_t copy_to_kernel_and_setup_dma(struct dce_driver_priv *drv_priv,
 	*kern_ptr = kzalloc(size, GFP_KERNEL);
 	if (copy_from_user(*kern_ptr, user_ptr, size))
 		return -EFAULT;
-	return dma_map_single(drv_priv->dev, *kern_ptr, size, dma_direction);
+	return dma_map_single(&drv_priv->dev, *kern_ptr, size, dma_direction);
 }
 
 static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index, bool * result_is_list,
@@ -137,7 +138,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], _size, _offset);
 		sg_set_page(&sglist[i], pages[i], _size, _offset);
 	}
-	count = dma_map_sg(drv_priv->dev, sglist, nr_pages, dma_direction);
+	count = dma_map_sg(&drv_priv->dev, sglist, nr_pages, dma_direction);
 	printk(KERN_INFO "Count is %d\n", count);
 	if (count > 1)
 		*result_is_list = true;
@@ -153,7 +154,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
 	if (count > 1) {
-		return dma_map_single(drv_priv->dev,
+		return dma_map_single(&drv_priv->dev,
 					drv_priv->hw_addr[wq_num][index],
 					count, dma_direction);
 	}
@@ -263,7 +264,7 @@ static void setup_memory_for_wq(struct dce_driver_priv * drv_priv, int wq_num)
 
 	// Allcate the descriptors as coherent DMA memory
 	drv_priv->descriptor_ring[wq_num].descriptors =
-		dma_alloc_coherent(drv_priv->dev, length * sizeof(DCEDescriptor),
+		dma_alloc_coherent(&drv_priv->dev, length * sizeof(DCEDescriptor),
 			&drv_priv->descriptor_ring[wq_num].dma, GFP_KERNEL);
 
 	drv_priv->descriptor_ring[wq_num].length = length;
@@ -271,7 +272,7 @@ static void setup_memory_for_wq(struct dce_driver_priv * drv_priv, int wq_num)
 		(uint64_t)drv_priv->descriptor_ring[wq_num].descriptors);
 
 
-	drv_priv->hti[wq_num] = dma_alloc_coherent(drv_priv->dev,
+	drv_priv->hti[wq_num] = dma_alloc_coherent(&drv_priv->dev,
 		sizeof(HeadTailIndex), &drv_priv->hti_dma[wq_num], GFP_KERNEL);
 	drv_priv->hti[wq_num]->head = 0;
 	drv_priv->hti[wq_num]->tail = 0;
@@ -295,7 +296,7 @@ static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
 	return;
 }
 
-static long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	uint64_t val;
 	struct DCEDescriptor descriptor;
@@ -386,16 +387,17 @@ static irqreturn_t handle_dce(int irq, void *dev_id) {
 }
 
 
-static void setup_memory_regions(struct dce_driver_priv * drv_priv)
+void setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
-	of_dma_configure(drv_priv->dev, drv_priv->dev->of_node, true);
-	if (!drv_priv->dev->dma_mask)
-		drv_priv->dev->dma_mask = &drv_priv->dev->coherent_dma_mask;
-	if (!drv_priv->dev->coherent_dma_mask)
-		drv_priv->dev->coherent_dma_mask = 0xffffffff;
+	struct device * dev = &drv_priv->dev;
+	of_dma_configure(dev, dev->of_node, true);
+	if (!dev->dma_mask)
+		dev->dma_mask = dev->coherent_dma_mask;
+	if (!dev->coherent_dma_mask)
+		dev->coherent_dma_mask = 0xffffffff;
 
 	/* WQIT is 4KiB */
-	drv_priv->WQIT = dma_alloc_coherent(drv_priv->dev, 0x1000,
+	drv_priv->WQIT = dma_alloc_coherent(dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
 	printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
@@ -415,7 +417,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// unsigned long mmio_start,mmio_len;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev;
-	dev_t dev_num;
+	struct cdev *cdev;
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
@@ -434,28 +436,34 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// mmio_start = pci_resource_start(pdev, 0);
 	// mmio_len   = pci_resource_len  (pdev, 0);
 
-	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
-	if (err) goto disable_device_and_fail;
+	drv_priv = kzalloc_node(sizeof(struct dce_driver_priv), GFP_KERNEL,
+			     dev_to_node(&pdev->dev));
+	if (!drv_priv) goto disable_device_and_fail;
 
-	dev = device_create(dce_char_class, &pdev->dev, MKDEV(MAJOR(dev_num), 0), NULL, DEVICE_NAME);
-	if (IS_ERR(dev)) goto disable_device_and_fail;
+	drv_priv->pdev = pdev;
+	dev = &drv_priv->dev;
 
-	drv_priv = devm_kzalloc(dev, sizeof(struct dce_driver_priv), GFP_KERNEL);
-	if (!drv_priv) goto free_resources_and_fail;
+	device_initialize(dev);
+	dev->class = dce_char_class;
+	dev->parent = &pdev->dev;
 
-	drv_priv->dev = dev;
-	cdev_init(&drv_priv->cdev, &dce_ops);
-	drv_priv->cdev.owner = THIS_MODULE;
+	dev->devt = MKDEV(MAJOR(dev_num), 0);
+	dev_set_name(dev, "dce");
+	cdev = &drv_priv->cdev;
+	cdev_init(cdev, &dce_ops);
+	cdev->owner = THIS_MODULE;
+
 	drv_priv->mmio_start = (uint64_t)pci_iomap(pdev, 0, 0);
-	printk(KERN_INFO "PF MMIO: 0x%x\n", drv_priv->mmio_start);
-
-	err = cdev_add(&drv_priv->cdev, MKDEV(MAJOR(dev_num), 0), 1);
-	if (err) goto free_resources_and_fail;
 
 	pci_set_drvdata(pdev, drv_priv);
 
 	/* priv mem regions setup */
 	setup_memory_regions(drv_priv);
+
+	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
+	if (err) {
+		printk(KERN_INFO "cdev add failed\n");
+	}
 
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
@@ -525,6 +533,9 @@ static char *pci_char_devnode(struct device *dev, umode_t *mode)
 static int __init dce_driver_init(void)
 {
 	int err;
+	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
+	if (err) return -err;
+
 	dce_char_class = class_create(THIS_MODULE, DEVICE_NAME);
 	if (IS_ERR(dce_char_class)) {
 		err = PTR_ERR(dce_char_class);

@@ -127,8 +127,7 @@ static const struct pci_device_id pci_use_msi[] = {
 struct dce_driver_priv
 {
 	struct pci_dev *pdev;
-	struct device* dev;
-	struct device devvf;
+	struct device dev;
 	dev_t dev_num;
 	struct cdev cdev;
 
@@ -164,4 +163,8 @@ int dce_ops_open(struct inode *inode, struct file *file);
 int dce_ops_release(struct inode *inode, struct file *file);
 ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos);
 ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos);
+long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+
+void setup_memory_regions(struct dce_driver_priv * drv_priv);
+
 #endif

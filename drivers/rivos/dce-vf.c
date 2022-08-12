@@ -16,31 +16,13 @@
 static struct class *dcevf_char_class;
 static dev_t dev_num;
 
-int dcevf_ops_open(struct inode *inode, struct file *file)
-{
-	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
-	struct dce_driver_priv *priv = file->private_data;
-	printk(KERN_INFO"opened vf %d\n", priv->vf_number);
-	/* Assign a WQ to the file descriptor */
-	/* FIXME: lock , better assignemnt algo, error if full */
-	mutex_lock(&priv->lock);
-	for(int slot = 0; slot < NUM_WQ; slot++) {
-		if (priv->wq_assignment[slot] == 0) {
-			priv->wq_assignment[slot] = file;
-			printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, slot);
-			break;
-		}
-	}
-	mutex_unlock(&priv->lock);
-	return 0;
-}
-
 static const struct file_operations dcevf_ops = {
 	.owner		= THIS_MODULE,
-	.open		= dcevf_ops_open,
+	.open		= dce_ops_open,
 	.release	= dce_ops_release,
 	.read		= dce_ops_read,
 	.write		= dce_ops_write,
+	.unlocked_ioctl = dce_ioctl,
 };
 // FIXME: clean up ida
 static DEFINE_IDA(dce_minor_ida);
@@ -74,7 +56,7 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	if (!drv_priv) goto disable_device_and_fail;
 
 	drv_priv->pdev = pdev;
-	dev = &drv_priv->devvf;
+	dev = &drv_priv->dev;
 
 	device_initialize(dev);
 	dev->class = dcevf_char_class;
@@ -94,7 +76,10 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 	pci_set_drvdata(pdev, drv_priv);
 
-	err = cdev_device_add(&drv_priv->cdev, &drv_priv->devvf);
+	/* priv mem regions setup */
+	setup_memory_regions(drv_priv);
+
+	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
 		printk(KERN_INFO "cdev add failed\n");
 	}
