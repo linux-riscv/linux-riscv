@@ -2006,11 +2006,13 @@ static struct l2cap_chan *l2cap_global_chan_by_psm(int state, __le16 psm,
 			}
 
 			/* Closest match */
-			src_any = !bacmp(&c->src, BDADDR_ANY);
-			dst_any = !bacmp(&c->dst, BDADDR_ANY);
-			if ((src_match && dst_any) || (src_any && dst_match) ||
-			    (src_any && dst_any))
-				c1 = c;
+			if (c) {
+				src_any = !bacmp(&c->src, BDADDR_ANY);
+				dst_any = !bacmp(&c->dst, BDADDR_ANY);
+				if ((src_match && dst_any) || (src_any && dst_match) ||
+				    (src_any && dst_any))
+					c1 = c;
+			}
 		}
 	}
 
