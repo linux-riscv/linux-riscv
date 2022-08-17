@@ -390,12 +390,14 @@ static irqreturn_t handle_dce(int irq, void *dev_id) {
 void setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
 	struct device * dev = &drv_priv->dev;
-	of_dma_configure(dev, dev->of_node, true);
-	if (!dev->dma_mask)
-		dev->dma_mask = dev->coherent_dma_mask;
 	if (!dev->coherent_dma_mask)
 		dev->coherent_dma_mask = 0xffffffff;
+	of_dma_configure(dev, dev->of_node, true);
 
+	int err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	if (err) printk(KERN_INFO "DMA set mask failed: %d\n", err);
+
+	// printk(KERN_INFO"dma_mask: 0x%lx\n",dev->dma_mask);
 	/* WQIT is 4KiB */
 	drv_priv->WQIT = dma_alloc_coherent(dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
