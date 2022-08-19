@@ -731,7 +731,6 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 		devm_kfree(dev, buf);
 		return NULL;
 	}
-	buf->buf = page_to_virt(buf->page);
 
 	return buf;
 }
@@ -759,6 +758,7 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	struct kfd_ioctl_alloc_memory_of_gpu_args *args = data;
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
+	int ret;
 
 	dev_warn(dev, "%s: flags 0x%x size 0x%llx\n", __func__,
 		 args->flags, args->size);
@@ -772,31 +772,59 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		// mmap
 		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-
-		// for now just support one page
-		if (args->size > PAGE_SIZE)
-			return -ENOTSUPP;
-
 		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
 		buf->type = args->flags;
 		buf->size = args->size;
+		buf->page_count = buf->size >> PAGE_SHIFT;
+		buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+		if (!buf->pages) {
+			dev_warn(dev, "%s: cannot alloc pages\n", __func__);
+			devm_kfree(dev, buf);
+		}
+
+
+		buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
+		if (!buf->sgt) {
+			dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf);
+			return -ENOMEM;
+		}
+
 		mmap_read_lock(current->mm);
-		if (get_user_pages(args->va_addr, 1, 0, &buf->page, NULL) != 1) {
+		if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
 			mmap_read_unlock(current->mm);
 			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf->sgt);
 			devm_kfree(dev, buf);
 			return -ENOMEM;
 		}
 		mmap_read_unlock(current->mm);
 
-		buf->buf = page_to_virt(buf->page);
-		buf->dma_addr = dma_map_single(dev, buf->buf, PAGE_SIZE, DMA_BIDIRECTIONAL);
-		if (buf->dma_addr == DMA_MAPPING_ERROR) {
-			dev_warn(dev, "%s: dma_map_single failed\n", __func__);
+		if ((ret = sg_alloc_table_from_pages(buf->sgt, buf->pages, buf->page_count, 0,
+						     buf->size, GFP_KERNEL))) {
+			dev_warn(dev, "%s: sg_alloc_table_from_pages ret %d\n", __func__, ret);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf->sgt);
 			devm_kfree(dev, buf);
 			return -ENOMEM;
+		}
+
+		if ((ret = dma_map_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0))) {
+			dev_warn(dev, "%s: dma_map_sgtable() failed %d\n", __func__, ret);
+			sg_free_table(buf->sgt);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf->sgt);
+			devm_kfree(dev, buf);
+		}
+		if (buf->sgt->nents != 1) {
+			dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
+				 __func__, buf->sgt->nents);
+		} else {
+			buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
 		}
 	}
 
@@ -855,10 +883,29 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 	struct device *dev = buf->p->dev->dev;
 	dev_warn(dev, "%s: freeing buf id %u\n",
 		 __func__, buf->id);
-	if (buf->dma_addr)
-		dma_unmap_single(dev, buf->dma_addr, buf->size, DMA_BIDIRECTIONAL);
-	if (buf->page)
-		put_page(buf->page);
+
+	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)  {
+		if (buf->dma_addr) {
+			dma_free_pages(dev, buf->size, buf->page,
+				       buf->dma_addr, DMA_BIDIRECTIONAL);
+		}
+	}
+
+	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+		if (buf->sgt) {
+			dma_unmap_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0);
+			sg_free_table(buf->sgt);
+			devm_kfree(dev, buf->sgt);
+		}
+		if (buf->page_count) {
+			int i;
+			for (i = 0; i < buf->page_count; i++) {
+				put_page(buf->pages[i]);
+			}
+			devm_kfree(dev, buf->pages);
+		}
+
+	}
 	devm_kfree(dev, buf);
 
 }
