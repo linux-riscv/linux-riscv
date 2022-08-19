@@ -735,6 +735,23 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 	return buf;
 }
 
+
+static struct dpa_kfd_buffer *find_buffer(struct dpa_kfd_process *p, u64 id)
+{
+	struct dpa_kfd_buffer *buf, *tmp;
+
+	mutex_lock(&p->dev->lock);
+	list_for_each_entry_safe(buf, tmp, &p->buffers, process_alloc_list) {
+		if (buf->id == id) {
+			mutex_unlock(&p->dev->lock);
+			return buf;
+		}
+	}
+	mutex_unlock(&p->dev->lock);
+
+	return NULL;
+}
+
 static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 				    struct dpa_kfd_process *p, void *data)
 {
@@ -764,11 +781,15 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			return -ENOMEM;
 		buf->type = args->flags;
 		buf->size = args->size;
+		mmap_read_lock(current->mm);
 		if (get_user_pages(args->va_addr, 1, 0, &buf->page, NULL) != 1) {
+			mmap_read_unlock(current->mm);
 			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
 			devm_kfree(dev, buf);
 			return -ENOMEM;
 		}
+		mmap_read_unlock(current->mm);
+
 		buf->buf = page_to_virt(buf->page);
 		buf->dma_addr = dma_map_single(dev, buf->buf, PAGE_SIZE, DMA_BIDIRECTIONAL);
 		if (buf->dma_addr == DMA_MAPPING_ERROR) {
@@ -780,6 +801,7 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 
 	mutex_lock(&p->dev->lock);
 	// XXX use an IDR/IDA for this
+	buf->p = p;
 	buf->id = ++p->alloc_count;
 	list_add_tail(&buf->process_alloc_list, &p->buffers);
 	mutex_unlock(&p->dev->lock);
@@ -790,6 +812,73 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	return 0;
 }
 
+static int dpa_kfd_ioctl_map_memory_to_gpu(struct file *filep,
+				    struct dpa_kfd_process *p, void *data)
+{
+	struct kfd_ioctl_map_memory_to_gpu_args *args = data;
+
+	// XXX loop over gpu id verify ID passed in matches
+	// XXX check gpu id
+	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle & 0xFFFFFFFF);
+	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
+		 __func__, args->handle, (u64)buf);
+	if (buf) {
+		// XXX do mapping here?
+		if (buf->dma_addr)
+			args->n_success = 1;
+	}
+
+	return 0;
+}
+
+static int dpa_kfd_ioctl_unmap_memory_from_gpu(struct file *filep,
+					       struct dpa_kfd_process *p,
+					       void *data)
+{
+	struct kfd_ioctl_unmap_memory_from_gpu_args *args = data;
+
+	// XXX loop over gpu id verify ID passed in matches
+	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
+	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
+		 __func__, args->handle, (u64)buf);
+	if (buf) {
+		// XXX unmap it
+		args->n_success = 1;
+	}
+
+	return 0;
+}
+
+static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
+{
+	struct device *dev = buf->p->dev->dev;
+	dev_warn(dev, "%s: freeing buf id %u\n",
+		 __func__, buf->id);
+	if (buf->dma_addr)
+		dma_unmap_single(dev, buf->dma_addr, buf->size, DMA_BIDIRECTIONAL);
+	if (buf->page)
+		put_page(buf->page);
+	devm_kfree(dev, buf);
+
+}
+
+static int dpa_kfd_ioctl_free_memory_of_gpu(struct file *filep,
+					    struct dpa_kfd_process *p,
+					    void *data)
+{
+	struct kfd_ioctl_free_memory_of_gpu_args *args = data;
+	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
+	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
+		 __func__, args->handle, (u64)buf);
+	if (buf) {
+		mutex_lock(&p->dev->lock);
+		list_del(&buf->process_alloc_list);
+		mutex_unlock(&p->dev->lock);
+		dpa_kfd_free_buffer(buf);
+	}
+
+	return 0;
+}
 
 #define KFD_IOCTL_DEF(ioctl, _func, _flags) \
 	[_IOC_NR(ioctl)] = {.cmd = ioctl, .func = _func, .flags = _flags, \
@@ -864,16 +953,13 @@ static const struct kfd_ioctl_desc amdkfd_ioctls[] = {
 		      dpa_kfd_ioctl_alloc_memory_of_gpu, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_FREE_MEMORY_OF_GPU,
-		      dpa_kfd_ioctl_not_implemented, 0),
-			/* dpa_kfd_ioctl_free_memory_of_gpu, 0), */
+		      dpa_kfd_ioctl_free_memory_of_gpu, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_MAP_MEMORY_TO_GPU,
-		      dpa_kfd_ioctl_not_implemented, 0),
-			/* dpa_kfd_ioctl_map_memory_to_gpu, 0), */
+		      dpa_kfd_ioctl_map_memory_to_gpu, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU,
-		      dpa_kfd_ioctl_not_implemented, 0),
-			/* dpa_kfd_ioctl_unmap_memory_from_gpu, 0), */
+		      dpa_kfd_ioctl_unmap_memory_from_gpu, 0),
 #if 0
 	AMDKFD_IOCTL_DEF(AMDKFD_IOC_SET_CU_MASK,
 			kfd_ioctl_set_cu_mask, 0),
@@ -1082,17 +1168,6 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	filep->private_data = dpa_app;
 
 	return 0;
-}
-
-static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
-{
-	struct device *dev = buf->p->dev->dev;
-	dev_warn(dev, "%s: freeing buf id %u\n",
-		 __func__, buf->id);
-	dma_unmap_single(dev, buf->dma_addr, buf->size, DMA_BIDIRECTIONAL);
-	put_page(buf->page);
-	devm_kfree(dev, buf);
-
 }
 
 static void dpa_kfd_release_process_buffers(struct dpa_kfd_process *p)
