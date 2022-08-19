@@ -74,11 +74,15 @@ struct dpa_kfd_buffer {
 	unsigned int id;
 	unsigned int type;
 
-	// only contiguous pages for now
-	void *buf;
+	// used by vram single page
+	struct page *page;
+
 
 	u64 size;
-	struct page *page;
+	unsigned page_count;
+	struct sg_table *sgt;
+	struct page **pages;
+
 	dma_addr_t dma_addr;
 
 	//unsigned num_pages;
