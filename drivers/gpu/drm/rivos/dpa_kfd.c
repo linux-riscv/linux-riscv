@@ -1084,12 +1084,39 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	return 0;
 }
 
+static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
+{
+	struct device *dev = buf->p->dev->dev;
+	dev_warn(dev, "%s: freeing buf id %u\n",
+		 __func__, buf->id);
+	dma_unmap_single(dev, buf->dma_addr, buf->size, DMA_BIDIRECTIONAL);
+	put_page(buf->page);
+	devm_kfree(dev, buf);
+
+}
+
+static void dpa_kfd_release_process_buffers(struct dpa_kfd_process *p)
+{
+	struct dpa_kfd_buffer *buf, *tmp;
+	mutex_lock(&p->dev->lock);
+	list_for_each_entry_safe(buf, tmp, &p->buffers, process_alloc_list) {
+		if (buf->p == p) {
+			list_del(&buf->process_alloc_list);
+			dpa_kfd_free_buffer(buf);
+		} else {
+			dev_warn(p->dev->dev, "%s: mismatched buffer?", __func__);
+		}
+	}
+	mutex_unlock(&p->dev->lock);
+}
+
 static int dpa_kfd_release(struct inode *inode, struct file *filep)
 {
 	struct dpa_kfd_process *p = filep->private_data;
 	if (p) {
 		dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 			 current->tgid);
+		dpa_kfd_release_process_buffers(p);
 		mmput(p->mm);
 		// XXX single process hack, clear the singleton
 		if (p == dpa_app)
