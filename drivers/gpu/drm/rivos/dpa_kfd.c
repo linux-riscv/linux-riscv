@@ -820,12 +820,31 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			devm_kfree(dev, buf->sgt);
 			devm_kfree(dev, buf);
 		}
-		if (buf->sgt->nents != 1) {
-			dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
-				 __func__, buf->sgt->nents);
-		} else {
-			buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
+		if (buf->sgt->nents > 1) {
+			int d;
+			int contig = 1;
+			dma_addr_t next_addr = sg_dma_address(&buf->sgt->sgl[0]);
+			for (d = 0; d < buf->sgt->nents; d++) {
+				if (sg_dma_address(&buf->sgt->sgl[d]) != next_addr)
+					contig = 0;
+				next_addr = sg_dma_address(&buf->sgt->sgl[d]) +
+					sg_dma_len(&buf->sgt->sgl[d]);
+				dev_warn(dev, "%s: sgl[%d] = 0x%llx len %x contig %d\n", __func__, d,
+					 sg_dma_address(&buf->sgt->sgl[d]), sg_dma_len(&buf->sgt->sgl[d]),
+					 contig);
+			}
+			if (!contig)
+				dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
+					 __func__, buf->sgt->nents);
+
+
 		}
+		buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
+		// XXX HACK if we don't have iommu wtih svm pass the address back via
+		// mmap
+		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+
+
 	}
 
 	mutex_lock(&p->dev->lock);
