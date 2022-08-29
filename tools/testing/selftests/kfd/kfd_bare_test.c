@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/kfd_ioctl.h>
+#include <elf.h>
 
 #define KFD_DEV "/dev/kfd"
 static int kfd;
@@ -26,6 +27,10 @@ static uint32_t gpu_id;
 
 #define NUM_DEV_APERTURES NUM_OF_SUPPORTED_GPUS
 struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
+
+// ELF Section Header type values
+#define SYMTAB 0x2
+#define STRTAB 0x3
 
 static void open_kfd(void)
 {
@@ -268,6 +273,61 @@ static void map_memory_to_gpu(uint64_t handle)
 
 }
 
+static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
+{
+    if (elf_base == NULL) {
+        perror("Missing ELF header");
+        exit(1);
+    }
+
+    Elf64_Ehdr *e_header = (Elf64_Ehdr *) elf_base;
+    Elf64_Off sh_off = e_header->e_shoff;
+    uint64_t sh_num = e_header->e_shnum;
+    uint64_t sh_entrysize = e_header->e_shentsize;
+
+    Elf64_Shdr *sh_header = (Elf64_Shdr *) (elf_base + sh_off);
+    Elf64_Shdr *sh_end = (Elf64_Shdr *) (elf_base + sh_off + (sh_num * sh_entrysize));
+    Elf64_Off symtab_off, strtab_off;
+    uint64_t sh_size;
+    if (sh_header == NULL) {
+        perror("Missing section header table");
+        exit(1);
+    }
+
+    while (sh_header < sh_end) {
+        switch (sh_header->sh_type) {
+            case SYMTAB:
+                symtab_off = sh_header->sh_offset;
+                sh_size = sh_header->sh_size;
+
+            case STRTAB:
+                strtab_off = sh_header->sh_offset;
+        }
+
+        sh_header++;
+    }
+
+    Elf64_Sym *sym_entry = (Elf64_Sym *) (elf_base + symtab_off);
+    Elf64_Sym *symtab_end = (Elf64_Sym *) (elf_base + symtab_off + sh_size);
+    if (sym_entry == NULL) {
+        perror("Missing symbol table");
+        exit(1);
+    }
+
+    while (sym_entry < symtab_end) {
+        char *str_addr = (char *) (elf_base + strtab_off + sym_entry->st_name);
+        fprintf(stderr, "Curr symbol: %s\n", str_addr);
+        if (!strncmp(str_addr, "_Z", 2)) {
+            *kern_start_offset = sym_entry->st_value + 4096;
+            return 0;
+        }
+        sym_entry++;
+    }
+
+    perror("No kernel offset found\n");
+    exit(1);
+}
+
 static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 				uint32_t *event_id, uint32_t *event_slot_index)
 {
@@ -374,7 +434,8 @@ int main(int argc, char *argv[])
 	int kern_fd = -1;
 	struct stat kstat;
 	// hack, hardcoded entry point offset
-	unsigned kern_start_offset = 0x1730;
+	// unsigned kern_start_offset = 0x1730;
+    unsigned int kern_start_offset;
 
 	uint64_t *queue_head;
 
@@ -402,8 +463,10 @@ int main(int argc, char *argv[])
 		// hack -- need to properly read the ELF header and
 		// load sections and find the correct entry point
 		// let user override the hard coded entry point
-		if (argc > 2)
-			kern_start_offset = strtoul(argv[2], NULL, 16);
+		// if (argc > 2)
+		// 	kern_start_offset = strtoul(argv[2], NULL, 16);
+
+        parse_kernels(kern_ptr, &kern_start_offset);
 	}
 
 	open_kfd();
