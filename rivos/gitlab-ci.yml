@@ -46,4 +46,8 @@ update-sdk:
   stage: deploy
   only:
     - rivos/main
+  inherit:
+    variables: false
+  variables:
+    TRIGGER_ROOTFS: "true"
   trigger: rv/it/int/rivos-sdk
