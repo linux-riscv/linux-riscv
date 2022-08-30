@@ -56,6 +56,7 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	if (!drv_priv) goto disable_device_and_fail;
 
 	drv_priv->pdev = pdev;
+	drv_priv->pci_dev = &pdev->dev;
 	dev = &drv_priv->dev;
 
 	device_initialize(dev);
