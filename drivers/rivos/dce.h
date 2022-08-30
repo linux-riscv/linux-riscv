@@ -37,6 +37,8 @@
 #define SRC_IS_LIST                 (1 << 1)
 #define SRC2_IS_LIST                (1 << 2)
 #define DEST_IS_LIST                (1 << 3)
+#define PASID_VALID                 (1 << 4)
+
 
 #define DEVICE_NAME "dce"
 #define DEVICE_VF_NAME "dcevf"
@@ -47,6 +49,10 @@
 #define DCE_NR_DEVS  2
 #define DCE_NR_VIRTFN 7
 
+/* TRANSCTL fields */
+#define TRANSCTL_SUPV		BIT(31)
+#define TRANSCTL_PASID_V	BIT(30)
+#define TRANSCTL_PASID		GENMASK(19, 0)
 
 typedef struct AccessInfoRead {
 	uint64_t* value;
@@ -69,7 +75,7 @@ typedef struct __attribute__((packed)) WQITE {
     uint64_t DSCBA;
     uint8_t  DSCSZ;
     uint64_t DSCPTA;
-    uint32_t Descriptor_transctl;
+    uint32_t TRANSCTL;
     uint64_t WQ_CTX_SAVE_BA;
     // TBA: key slot management
 } __attribute__((packed)) WQITE;
@@ -100,9 +106,16 @@ typedef struct DescriptorRing {
 	int enabled;
 } DescriptorRing;
 
+typedef struct UserArea {
+	HeadTailIndex * hti;
+	DCEDescriptor * descriptors;
+	int numDescs;
+} UserArea;
+
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
+#define INITIALIZE_USER_MEM _IOW(0xAA, 3, struct UserArea*)
 
 #define MIN(a, b) \
 	({ __typeof__ (a) _a = (a); \
@@ -113,6 +126,8 @@ enum {
 	DEST,
 	SRC,
 	SRC2,
+	IV,
+	AAD,
 	COMP,
 	NUM_SG_TBLS
 };
@@ -127,6 +142,7 @@ static const struct pci_device_id pci_use_msi[] = {
 struct dce_driver_priv
 {
 	struct pci_dev *pdev;
+	struct device * pci_dev;
 	struct device dev;
 	dev_t dev_num;
 	struct cdev cdev;
@@ -138,6 +154,7 @@ struct dce_driver_priv
 	struct mutex lock;
 
 	uint64_t mmio_start;
+	uint64_t mmio_start_phys;
 
 	bool wq_enabled[NUM_WQ];
 	struct file * wq_assignment[NUM_WQ];
@@ -153,7 +170,10 @@ struct dce_driver_priv
 	DataAddrNode * hw_addr[NUM_WQ][NUM_SG_TBLS];
 
 	/* VF only */
-	int vf_number
+	int vf_number;
+
+	/* PASID / SVA */
+	bool sva_enabled;
 };
 
 
