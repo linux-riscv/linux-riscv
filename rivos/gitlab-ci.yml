@@ -1,44 +1,53 @@
+include:
+  - project: 'rv/it/int/rivos-sdk'
+    ref: rivos/main
+    file: '/packager/gitlab-ci-packaging-helper.yml'
+
 variables:
-  DOCKER_TLS_CERTDIR: ""
+  INSTALL_PATH: "/rivos/sysroot/riscv/boot"
+
+# Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
+prepare-version:
+  after_script:
+    - upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
+    - sed -i -e "s@GIT_TAG=.\+@GIT_TAG=${upstream_version:1}@" gitvars.env
+    # Debugging helper
+    - cat gitvars.env
 
 docker-build:
-  # Use the official docker image.
-  image: docker:latest
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
   stage: build
-  services:
-    - docker:dind
-  before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-    - apk add git
-  # Default branch leaves tag empty (= latest tag)
-  # All other branches are tagged with the escaped branch name (commit ref slug)
   script:
-    - |
-      upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
-      image="$CI_REGISTRY_IMAGE"
-      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]] ; then
-        section="main"
-      else
-        prio="0~${CI_COMMIT_REF_SLUG//-/+}+"
-        image="${image}:${CI_COMMIT_REF_SLUG}"
-      fi
-      pkg_version="${prio}$(date '+%Y%m%dT%H%M%S').g$(git rev-parse --short HEAD)"
-      echo "Running on branch '$CI_COMMIT_BRANCH': package = '$pkg_version' (upstream='$upstream_version') ; container = '$image'"
-    - docker network create sdk_build || echo "docker network already exists ?"
-    - >
-      docker build --pull \
-                   --network=sdk_build \
-                   --build-arg CI_PROJECT_NAME --build-arg CI_PROJECT_URL --build-arg CI_JOB_TOKEN \
-                   --build-arg UPVER="${upstream_version:1}" --build-arg PKGVER="${pkg_version}" \
-                   ${section:+--build-arg SECTION=${section}} \
-                   -f rivos/Dockerfile -t "${image}" .
-    # Export the container (mainly for build debugging purpose)
-    - docker push "${image}"
-  # Run this job in a branch where a Rivos Dockerfile exists
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      exists:
-        - rivos/Dockerfile
+    # For now, build only a monolithic kernel for our VM
+    # and a rudimentary install
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build defconfig
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build Image -j $(nproc)
+    # Prepare installation for packaging
+    - rm -rf "${INSTALL_PATH}"
+    - mkdir -p "${INSTALL_PATH}"
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build INSTALL_PATH="${INSTALL_PATH}" install
+    - tar czf linux.tar.gz "${INSTALL_PATH}"
+  artifacts:
+    paths:
+      - linux.tar.gz
+    expire_in: 3 hours
+
+package-deb:
+  extends: .deploy-deb
+  dependencies:
+    - prepare-version
+    - docker-build
+  variables:
+    PKG_ARCH: "all"
+    PKG_DESCRIPTION: "Linux kernel image for RISCV64."
+    PKG_DIRECTORIES: "${INSTALL_PATH}"
+    PKG_LICENSE: "GPL-2.0"
+    PKG_UPSTREAM_VERSION: "${GIT_TAG}"
+  before_script:
+    # clean up pre-built binaries from the rivos-sdk
+    - rm -rf "${INSTALL_PATH}"
+    - tar -C/ -xzf linux.tar.gz
 
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
@@ -46,6 +55,8 @@ update-sdk:
   stage: deploy
   only:
     - rivos/main
+  except:
+    - pipelines
   inherit:
     variables: false
   variables:
