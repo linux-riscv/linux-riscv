@@ -954,9 +954,9 @@ static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long ar
 	unsigned int nr = _IOC_NR(cmd);
 	unsigned int usize, asize;
 	int retcode = -EINVAL;
-	void *kdata;
 	struct dpa_kfd_process *process = filep->private_data;
 	char stack_kdata[128];
+	void *kdata = stack_kdata;
 
 //	if (nr >= AMDKFD_CORE_IOCTL_COUNT)
 //		return ret;
