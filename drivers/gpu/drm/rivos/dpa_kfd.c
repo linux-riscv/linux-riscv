@@ -322,7 +322,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if ((ret = pci_request_mem_regions(pdev, kfd_dev_name)))
 		goto disable_device;
 
-	
+
 
 	dpa->regs = ioremap(pci_resource_start(pdev, 0), DPA_MMIO_SIZE);
 	if (!dpa->regs) {
@@ -361,7 +361,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 
-	
+
 	return 0;
 
 free_queue:
@@ -480,33 +480,141 @@ static int dpa_kfd_ioctl_update_queue(struct file *filep, struct dpa_kfd_process
 	return -ENOSYS;
 }
 
-static int dpa_kfd_ioctl_create_event(struct file *filep, struct dpa_kfd_process *p,
+/* appropriate locks should already be taken for idr, event page */
+static struct dpa_kfd_event *dpa_kfd_alloc_event(struct dpa_kfd_process *p,
+						 int type,
+						 uint64_t *event_page_offset,
+						 uint32_t *event_slot_index)
+{
+	struct dpa_kfd_event *ev = devm_kzalloc(p->dev->dev,
+						sizeof(struct dpa_kfd_event),
+						GFP_KERNEL);
+	if (ev) {
+		unsigned max = INT_MAX;
+		bool is_signal = (type == KFD_EVENT_TYPE_SIGNAL ||
+				  type == KFD_EVENT_TYPE_DEBUG);
+		if (is_signal)
+			max = DPA_MAX_SIGNAL_EVENTS;
+
+		ev->id = idr_alloc(&p->event_idr, ev, 0, max,
+				   GFP_KERNEL);
+		if (ev->id < 0) {
+			dev_warn(p->dev->dev, "Unable to alloc event id\n");
+			devm_kfree(p->dev->dev, ev);
+			return NULL;
+		}
+		if (is_signal) {
+			*event_page_offset = KFD_MMAP_TYPE_EVENTS;
+			*event_slot_index = ev->id;
+		}
+		spin_lock_init(&ev->lock);
+		init_waitqueue_head(&ev->wq);
+		INIT_LIST_HEAD(&ev->events);
+
+		list_add(&ev->events, &p->event_list);
+	}
+	return ev;
+}
+
+static int dpa_kfd_ioctl_create_event(struct file *filep,
+				      struct dpa_kfd_process *p,
 				      void *data)
 {
-	return -ENOSYS;
+	struct kfd_ioctl_create_event_args *args = data;
+	struct dpa_kfd_event *ev;
+
+	dev_warn(p->dev->dev, "%s: type %u event_page_offset 0x%llx\n", __func__,
+		 args->event_type, args->event_page_offset);
+
+	/* if args->event_page_offset is set, userspace is trying to supply a page */
+	if (args->event_page_offset) {
+		dev_warn(p->dev->dev, "%s: unexpected event_page_offset\n", __func__);
+		return -EINVAL;
+	}
+
+	mutex_lock(&p->lock);
+	if (!p->event_page) {
+		p->event_page = devm_kzalloc(p->dev->dev, PAGE_SIZE, GFP_KERNEL);
+		if (!p->event_page) {
+			mutex_unlock(&p->lock);
+			return -ENOMEM;
+		}
+		memset(p->event_page, -1, PAGE_SIZE);
+		/* XXX need to do daffy register event page or similar */
+	}
+	ev = dpa_kfd_alloc_event(p, args->event_type, &args->event_page_offset,
+		&args->event_slot_index);
+	if (!ev) {
+		mutex_unlock(&p->lock);
+		return -ENOMEM;
+	}
+	args->event_id = ev->id;
+	/* XXX trigger data needs to be set? */
+	mutex_unlock(&p->lock);
+
+	dev_warn(p->dev->dev, "%s: created event id %u\n", __func__, args->event_id);
+
+	return 0;
+}
+
+static void dpa_kfd_destroy_event(struct dpa_kfd_process *p, struct dpa_kfd_event *ev)
+{
+	spin_lock(&ev->lock);
+	// XXX,  list_for_each_entry() null out waiter event?
+	wake_up_all(&ev->wq);
+	spin_unlock(&ev->lock);
+
+	list_del(&ev->events);
+	idr_remove(&p->event_idr, ev->id);
+	devm_kfree(p->dev->dev, ev);
 }
 
 static int dpa_kfd_ioctl_destroy_event(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
-	return -ENOSYS;
+	struct kfd_ioctl_destroy_event_args *args = data;
+	struct dpa_kfd_event *ev;
+	int ret = -EINVAL;
+
+	dev_warn(p->dev->dev, "%s: destroy id %u\n", __func__, args->event_id);
+
+	mutex_lock(&p->lock);
+	ev = idr_find(&p->event_idr, args->event_id);
+	if (ev) {
+		dpa_kfd_destroy_event(p, ev);
+		ret = 0;
+	}
+	mutex_unlock(&p->lock);
+	return ret;
+}
+
+static void dpa_kfd_release_process_events(struct dpa_kfd_process *p)
+{
+	struct list_head *cur, *tmp;
+	list_for_each_safe(cur, tmp, &p->event_list) {
+		dpa_kfd_destroy_event(p, container_of(cur, struct dpa_kfd_event, events));
+	}
 }
 
 static int dpa_kfd_ioctl_set_event(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
+	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
+
 	return -ENOSYS;
 }
 
 static int dpa_kfd_ioctl_reset_event(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
+	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
 	return -ENOSYS;
 }
 
 static int dpa_kfd_ioctl_wait_events(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
+	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
 	return -ENOSYS;
 }
 
@@ -1067,6 +1175,8 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	mmget(dpa_app->mm);
 	mutex_init(&dpa_app->lock);
 	INIT_LIST_HEAD(&dpa_app->buffers);
+	idr_init(&dpa_app->event_idr);
+	INIT_LIST_HEAD(&dpa_app->event_list);
 
 	// only one DPA for now
 	dpa_app->dev = dpa;
@@ -1099,8 +1209,13 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 	if (p) {
 		dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 			 current->tgid);
+		// XXX mutex lock on process lock ?
 		dpa_kfd_release_process_buffers(p);
 		mmput(p->mm);
+		dpa_kfd_release_process_events(p);
+		idr_destroy(&p->event_idr);
+		if (p->event_page)
+			devm_kfree(p->dev->dev, p->event_page);
 		// XXX single process hack, clear the singleton
 		if (p == dpa_app)
 			dpa_app = NULL;
@@ -1110,8 +1225,15 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 	return 0;
 }
 
-static int dpa_kfd_mmap(struct file *filp, struct vm_area_struct *vma)
+static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 {
+	struct dpa_kfd_process *p = filep->private_data;
+	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
+	unsigned int type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
+
+	dev_warn(p->dev->dev, "%s: offset 0x%lx gpu 0x%x type %u\n", __func__,
+		 mmap_offset, gpu_id, type);
 	return 0;
 }
 
