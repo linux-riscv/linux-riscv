@@ -60,12 +60,16 @@ struct dpa_kfd_process {
 	unsigned alloc_count;
 	// hack for now -- just maintain a list of allocations in vram
 	struct list_head buffers;
+
+	// event stuff
+	u64 *event_page;
+	struct idr event_idr;
+	struct list_head event_list;
 };
 
 // tracks buffers -- especially vram allocations
 struct dpa_kfd_buffer {
 	struct list_head process_alloc_list;
-	//struct list_head dev_alloc_list;
 
 	unsigned int id;
 	unsigned int type;
@@ -105,5 +109,37 @@ struct kfd_ioctl_desc {
 
 /* For now let userspace allocate anything within a 48-bit address space */
 #define DPA_GPUVM_ADDR_LIMIT ((1ULL << 48) - 1)
+
+/* per process max on signals based on a page */
+#define DPA_MAX_SIGNAL_EVENTS (PAGE_SIZE / sizeof(u64))
+
+/* HSA Event types */
+#define KFD_EVENT_TYPE_SIGNAL (0)
+#define KFD_EVENT_TYPE_HW_EXCEPTION (3)
+#define KFD_EVENT_TYPE_DEBUG (5)
+#define KFD_EVENT_TYPE_MEMORY (8)
+
+struct dpa_kfd_event {
+	unsigned id;
+	int type;
+	spinlock_t lock;
+	wait_queue_head_t wq;
+	bool auto_reset;
+	bool signaled;
+
+	struct list_head events;
+};
+
+/* offsets to MMAP calls for different things */
+#define KFD_MMAP_TYPE_SHIFT (62)
+#define KFD_MMAP_TYPE_EVENTS (0x2ULL << KFD_MMAP_TYPE_SHIFT)
+
+#define KFD_GPU_ID_HASH_WIDTH (4)
+#define KFD_MMAP_GPU_ID_SHIFT (48)
+#define KFD_MMAP_GPU_ID_MASK ((1ULL << KFD_GPU_ID_HASH_WIDTH) - 1) \
+				<< KFD_MMAP_GPU_ID_SHIFT)
+
+#define KFD_MMAP_GET_GPU_ID(offset) (((offset) >> KFD_MMAP_GPU_ID_SHIFT) & \
+				     (KFD_GPU_ID_HASH_WIDTH - 1))
 
 #endif /* _DPA_KFD_H_ */
