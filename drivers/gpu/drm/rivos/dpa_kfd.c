@@ -297,7 +297,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int ret = 0;
 	struct device *dev = &pdev->dev;
-	int modern_bars, common, err;
+	int err;
 	u16 vendor, device;
 	u32 version;
 

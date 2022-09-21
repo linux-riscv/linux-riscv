@@ -2,7 +2,6 @@
 #define _DPA_KFD_H_
 
 #include <linux/kernel.h>
-#include <linux/virtio.h>
 
 #include "dpa_daffy.h"
 
@@ -40,9 +39,6 @@ struct dpa_device {
 	//struct list_head buffers;
 
 	struct dpa_fwq_info qinfo;
-
-	// for virtio demo
-	struct virtio_pci_common_cfg __iomem *common;
 };
 
 struct dpa_kfd_process {
