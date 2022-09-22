@@ -54,6 +54,16 @@
 #define TRANSCTL_PASID_V	BIT(30)
 #define TRANSCTL_PASID		GENMASK(19, 0)
 
+enum {
+	DEST,
+	SRC,
+	SRC2,
+	IV,
+	AAD,
+	COMP,
+	NUM_SG_TBLS
+};
+
 typedef struct AccessInfoRead {
 	uint64_t* value;
 	uint64_t  offset;
@@ -100,10 +110,19 @@ typedef struct __attribute__((packed)) DCEDescriptor {
 } __attribute__((packed)) DCEDescriptor;
 
 typedef struct DescriptorRing {
-	DCEDescriptor* descriptors;
-	dma_addr_t dma;
 	size_t length;
-	int enabled;
+
+	DCEDescriptor* descriptors;
+	HeadTailIndex* hti;
+
+	uint32_t clean_up_index;
+
+	dma_addr_t desc_dma;
+	dma_addr_t hti_dma;
+
+	int * dma_direction[NUM_SG_TBLS];
+	struct sg_table * sg_tables[NUM_SG_TBLS];
+	DataAddrNode ** hw_addr[NUM_SG_TBLS];
 } DescriptorRing;
 
 typedef struct UserArea {
@@ -122,15 +141,6 @@ typedef struct UserArea {
 	   __typeof__ (b) _b = (b); \
 	   _a < _b ? _a : _b; })
 
-enum {
-	DEST,
-	SRC,
-	SRC2,
-	IV,
-	AAD,
-	COMP,
-	NUM_SG_TBLS
-};
 
 static const struct pci_device_id pci_use_msi[] = {
 
@@ -138,6 +148,14 @@ static const struct pci_device_id pci_use_msi[] = {
 			 PCI_ANY_ID, PCI_ANY_ID) },
 	{ }
 };
+
+typedef struct work_queue {
+	bool enable;
+	struct file * owner;
+
+	/* The actual ring */
+	DescriptorRing descriptor_ring;
+} work_queue;
 
 struct dce_driver_priv
 {
@@ -156,18 +174,11 @@ struct dce_driver_priv
 	uint64_t mmio_start;
 	uint64_t mmio_start_phys;
 
-	bool wq_enabled[NUM_WQ];
-	struct file * wq_assignment[NUM_WQ];
 
     WQITE * WQIT;
     dma_addr_t WQIT_dma;
 
-	HeadTailIndex * hti[NUM_WQ];
-	dma_addr_t hti_dma[NUM_WQ];
-	DescriptorRing descriptor_ring[NUM_WQ];
-
-	struct sg_table sg_tables[NUM_WQ][NUM_SG_TBLS];
-	DataAddrNode * hw_addr[NUM_WQ][NUM_SG_TBLS];
+	work_queue wq[NUM_WQ];
 
 	/* VF only */
 	int vf_number;
