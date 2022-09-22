@@ -445,7 +445,7 @@ static int dpa_kfd_ioctl_get_clock_counters(struct file *filep, struct dpa_kfd_p
 	dev_warn(p->dev->dev, "%s: gpu_id %d\n", __func__, ctr_args->gpu_id);
 
 	/* XXX when we have a common clock with DPA use it here */
-	ctr_args->gpu_clock_counter = 0;
+	ctr_args->gpu_clock_counter = ktime_get_raw_ns();
 	ctr_args->cpu_clock_counter = ktime_get_raw_ns();
 
 	/* using ns, so freq is 1Ghz*/
