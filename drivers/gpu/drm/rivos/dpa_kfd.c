@@ -805,6 +805,7 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 
 	// use a macro for this
 	args->handle = (u64)DPA_GPU_ID << 32 | buf->id;
+	dev_warn(p->dev->dev, "%s: handle 0x%llx\n", __func__, args->handle);
 
 	return 0;
 }
@@ -817,12 +818,16 @@ static int dpa_kfd_ioctl_map_memory_to_gpu(struct file *filep,
 	// XXX loop over gpu id verify ID passed in matches
 	// XXX check gpu id
 	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle & 0xFFFFFFFF);
+
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
 		// XXX do mapping here?
 		if (buf->dma_addr)
 			args->n_success = 1;
+	} else {
+		dev_warn(p->dev->dev, "%s: given buffer not found!\n", __func__);
+		return -EINVAL;
 	}
 
 	return 0;
