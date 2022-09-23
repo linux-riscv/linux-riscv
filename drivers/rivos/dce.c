@@ -55,7 +55,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		if (dev->wq[wq_num].owner == 0) {
 			dev->wq[wq_num].owner = file;
-			printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, wq_num);
+			// printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, wq_num);
 			break;
 		}
 	}
@@ -105,8 +105,9 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	mutex_lock(&priv->lock);
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == file) {
-			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
+			// printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
 			priv->wq[wq_num].owner = 0;
+
 			/* Clear the enable bit in dce */
 			uint64_t wq_enable = dce_reg_read(priv, DCE_REG_WQENABLE);
 			wq_enable &= (~BIT(wq_num));
@@ -404,8 +405,8 @@ static void setup_memory_for_wq(struct file * file, int wq_num)
 			&ring->desc_dma, GFP_KERNEL);
 
 	ring->length = length;
-	printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
-		(uint64_t)ring->descriptors);
+	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
+	// 	(uint64_t)ring->descriptors);
 
 	ring->hti = dma_alloc_coherent(drv_priv->pci_dev,
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
@@ -585,7 +586,7 @@ static irqreturn_t handle_dce(int irq, void *dev_id) {
 
 	/* FIXME: multiple thread running this? */
 	/* FIXME: move to a work queue */
-	printk(KERN_INFO "Got interrupt %d, cleaning up!\n", irq);
+	// printk(KERN_INFO "Got interrupt %d, cleaning up!\n", irq);
 	DescriptorRing * ring = get_desc_ring(dce_priv, driver_wq);
 	int head = ring->hti->head;
 	int curr = ring->clean_up_index;
