@@ -22,12 +22,12 @@ static dev_t dev_num;
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
-	printk(KERN_INFO "Read 0x%llx from address 0x%llx\n", result, priv->mmio_start + reg);
+	// printk(KERN_INFO "Read 0x%llx from address 0x%llx\n", result, priv->mmio_start + reg);
 	return result;
 }
 
 void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
-	printk(KERN_INFO "Writing 0x%llx to address 0x%llx\n", value, priv->mmio_start + reg);
+	// printk(KERN_INFO "Writing 0x%llx to address 0x%llx\n", value, priv->mmio_start + reg);
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
 }
 
@@ -50,7 +50,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	for(int slot = 0; slot < NUM_WQ; slot++) {
 		if (dev->wq_assignment[slot] == 0) {
 			dev->wq_assignment[slot] = file;
-			printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, slot);
+			// printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, slot);
 			break;
 		}
 	}
@@ -100,7 +100,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	mutex_lock(&priv->lock);
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq_assignment[wq_num] == file) {
-			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
+			// printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
 			priv->wq_assignment[wq_num] = 0;
 			/* Clear the enable bit in dce */
 			uint64_t wq_enable = dce_reg_read(priv, DCE_REG_WQENABLE);
@@ -117,7 +117,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	}
 	kfree(ctx);
 	mutex_unlock(&priv->lock);
-	printk(KERN_INFO "Closing file 0x%lx\n", file);
+	// printk(KERN_INFO "Closing file 0x%lx\n", file);
 	/* FIXME: Identify and free all allocated memories */
 	return 0;
 }
@@ -163,9 +163,9 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 
 	int flag = (dma_direction == DMA_FROM_DEVICE) ? FOLL_WRITE : 0;
 
-	printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
+	// printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
 	int ret = get_user_pages_fast(user_ptr, nr_pages, flag, pages);
-	printk(KERN_INFO"get_user_pages_fast return value is %d, nrpages is %d\n", ret, nr_pages);
+	// printk(KERN_INFO"get_user_pages_fast return value is %d, nrpages is %d\n", ret, nr_pages);
 
 	/* FIXME needs to be freed */
 	drv_priv->sg_tables[wq_num][index].sgl = kzalloc(nr_pages * sizeof(struct scatterlist), GFP_KERNEL);
@@ -188,12 +188,12 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 			/* middle pages */
 			_size = PAGE_SIZE;
 		}
-		printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], _size, _offset);
+		// printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], _size, _offset);
 		sg_set_page(&sglist[i], pages[i], _size, _offset);
 	}
 	/* FIXME: dma_unmap_sg when appropriate */
 	count = dma_map_sg(drv_priv->pci_dev, sglist, nr_pages, dma_direction);
-	printk(KERN_INFO "Count is %d\n", count);
+	// printk(KERN_INFO "Count is %d\n", count);
 	if (count > 1)
 		*result_is_list = true;
 
@@ -244,7 +244,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 		// Set the pasid and valid bits
 		desc->pasid = ctx->pasid;
 		desc->ctrl |= PASID_VALID;
-		printk(KERN_INFO "Setting PASID fields");
+		// printk(KERN_INFO "Setting PASID fields");
 		return;
 	}
 
@@ -279,7 +279,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 			if ((desc->opcode == DCE_OPCODE_ENCRYPT ||
 				desc->opcode == DCE_OPCODE_DECRYPT) &&
 				(desc->operand0 & 0x10)) { /* check for GCM mode */
-				printk(KERN_INFO "Setting up for GCM mode input, %x", desc->operand0);
+				// printk(KERN_INFO "Setting up for GCM mode input, %x", desc->operand0);
 				iv_size = ((desc->operand3 >> 32) & 0xff);
 				aad_size = ((desc->operand3 >> 48) & 0xff);
 
@@ -345,7 +345,7 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) { /* insert error here */}
 	int DSCSZ = fls(size) - fls(0x1000);
 
-	printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
+	// printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
 	dce_reset_descriptor_ring(drv_priv, wq_num);
 
 	drv_priv->descriptor_ring[wq_num].descriptors = ua->descriptors;
@@ -389,8 +389,8 @@ static void setup_memory_for_wq(struct file * file, int wq_num)
 			&drv_priv->descriptor_ring[wq_num].dma, GFP_KERNEL);
 
 	drv_priv->descriptor_ring[wq_num].length = length;
-	printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
-		(uint64_t)drv_priv->descriptor_ring[wq_num].descriptors);
+	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
+	// 	(uint64_t)drv_priv->descriptor_ring[wq_num].descriptors);
 
 
 	drv_priv->hti[wq_num] = dma_alloc_coherent(drv_priv->pci_dev,
@@ -507,8 +507,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input, wq_num, ctx);
 
-			printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
-			printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
+			// printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
+			// printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			dce_push_descriptor(priv, &descriptor, wq_num);
 
 			// Free up resources when its done
@@ -534,14 +534,14 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	printk(KERN_INFO "Mappping from 0x%lx to 0x%lx\n", vma->vm_start,pfn);
+	// printk(KERN_INFO "Mappping from 0x%lx to 0x%lx\n", vma->vm_start,pfn);
 
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE,
 			vma->vm_page_prot)) {
 		printk(KERN_INFO "Mapping failed!\n");
 		return -EAGAIN;
 	}
-	printk(KERN_INFO "mmap completed\n");
+	// printk(KERN_INFO "mmap completed\n");
 
 	return 0;
 }
@@ -560,7 +560,7 @@ static struct class *dce_char_class;
 
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
-	printk(KERN_INFO "Got interrupt %d!\n", irq);
+	// printk(KERN_INFO "Got interrupt %d!\n", irq);
 	return IRQ_HANDLED;
 }
 
@@ -576,7 +576,7 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 	drv_priv->WQIT = dma_alloc_coherent(dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
-	printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
+	// printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
 	dce_reg_write(drv_priv, DCE_REG_WQITBA,
 				 (uint64_t) drv_priv->WQIT_dma);
 }
@@ -585,9 +585,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int bar, err;
 
-	printk(KERN_INFO " in %s\n", __func__);
+	// printk(KERN_INFO " in %s\n", __func__);
 	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
-	printk(KERN_INFO "return code %d\n", err);
 
 	u16 vendor, device;
 	// unsigned long mmio_start,mmio_len;
@@ -598,13 +597,13 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
+	// printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
 	err = pci_enable_device(pdev);
 	if (err) goto disable_device_and_fail;
 
 	bar = pci_select_bars(pdev, IORESOURCE_MEM);
-	printk(KERN_INFO "io bar: 0x%X\n", bar);
+	// printk(KERN_INFO "io bar: 0x%X\n", bar);
 
 	err = pci_request_selected_regions(pdev, bar, DEVICE_NAME);
 	if (err) goto disable_device_and_fail;
