@@ -15,12 +15,48 @@
 #include <linux/pci_regs.h>
 #include <linux/of_device.h>
 #include <linux/mm.h>
+#include <linux/workqueue.h>
 
 #include "dce.h"
 
 static dev_t dev_num;
 static struct dce_driver_priv *dce_priv;
 static int driver_wq;
+
+DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
+	return &priv->wq[wq_num].descriptor_ring;
+}
+
+void clean_up_work(struct work_struct *work) {
+	printk(KERN_INFO "Doing important cleaning up work!\n");
+	/* FIXME: check which WQ has interrupt pending */
+	DescriptorRing * ring = get_desc_ring(dce_priv, driver_wq);
+	int head = ring->hti->head;
+	int curr = ring->clean_up_index;
+
+	while(curr < head) {
+		int index = (curr % ring->length);
+		for(int i = 0; i < NUM_SG_TBLS; i++){
+			if (!ring->sg_tables[i][curr].sgl) continue;
+			/* unmap the DMA mappings */
+			dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][curr].sgl,
+				ring->sg_tables[i][curr].orig_nents,
+				ring->dma_direction[i][curr]);
+
+			kfree(ring->sg_tables[i][curr].sgl);
+			/* unmap the hw_addr */
+
+			kfree(ring->hw_addr[i][curr]);
+
+			/*zero the thing */
+			ring->sg_tables[i][curr].sgl = 0;
+			ring->sg_tables[i][curr].orig_nents = 0;
+			ring->hw_addr[i][curr] = 0;
+		}
+		curr++;
+	}
+	ring->clean_up_index = curr;
+}
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -38,10 +74,6 @@ struct qemu_dce_ctx {
 	struct iommu_sva *sva;
 	unsigned int pasid;
 };
-
-DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
-	return &priv->wq[wq_num].descriptor_ring;
-}
 
 int dce_ops_open(struct inode *inode, struct file *file)
 {
@@ -216,7 +248,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 	for_each_sg(sglist, sg, count, i) {
 		ring->hw_addr[index][tail_idx][i].ptr = sg_dma_address(sg);
 		ring->hw_addr[index][tail_idx][i].size = sg_dma_len(sg);
-		printk(KERN_INFO "Address 0x%lx, Size 0x%lx\n", sg_dma_address(sg), sg_dma_len(sg));
+		// printk(KERN_INFO "Address 0x%lx, Size 0x%lx\n", sg_dma_address(sg), sg_dma_len(sg));
 	}
 
 	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
@@ -585,34 +617,8 @@ static irqreturn_t handle_dce(int irq, void *dev_id) {
 	if (dce_priv->sva_enabled) return IRQ_HANDLED;
 
 	/* FIXME: multiple thread running this? */
-	/* FIXME: move to a work queue */
-	// printk(KERN_INFO "Got interrupt %d, cleaning up!\n", irq);
-	DescriptorRing * ring = get_desc_ring(dce_priv, driver_wq);
-	int head = ring->hti->head;
-	int curr = ring->clean_up_index;
-
-	while(curr < head) {
-		int index = (curr % ring->length);
-		for(int i = 0; i < NUM_SG_TBLS; i++){
-			if (!ring->sg_tables[i][curr].sgl) continue;
-			/* unmap the DMA mappings */
-			dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][curr].sgl,
-				ring->sg_tables[i][curr].orig_nents,
-				ring->dma_direction[i][curr]);
-
-			kfree(ring->sg_tables[i][curr].sgl);
-			/* unmap the hw_addr */
-
-			kfree(ring->hw_addr[i][curr]);
-
-			/*zero the thing */
-			ring->sg_tables[i][curr].sgl = 0;
-			ring->sg_tables[i][curr].orig_nents = 0;
-			ring->hw_addr[i][curr] = 0;
-		}
-		curr++;
-	}
-	ring->clean_up_index = curr;
+	printk(KERN_INFO "Got interrupt %d, work scheduled!\n", irq);
+	schedule_work(&dce_priv->clean_up_worker);
 
 	return IRQ_HANDLED;
 }
@@ -674,6 +680,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// mmio_len   = pci_resource_len  (pdev, 0);
 
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+	// FIXME: Enable for testing non-SVA
+	// if (1) {
 		dev_warn(dev, "DCE:Unable to turn on user SVA feature.\n");
 		drv_priv->sva_enabled = false;
 	} else {
@@ -706,17 +714,21 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		printk(KERN_INFO "cdev add failed\n");
 	}
 
+
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
-		pci_dbg(pdev, "Using MSI(-X) interrupts\n");
+		dev_info(dev, "Using MSI(-X) interrupts\n");
 		pci_set_master(pdev);
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
 
 		int vec = pci_irq_vector(pdev, 0);
 		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, pdev);
 	} else {
-		printk(KERN_INFO "DCE: MSI enable failed\n");
+		dev_warn(dev, "DCE: MSI enable failed\n");
 	}
+
+	/* work queue setup */
+	INIT_WORK(&drv_priv->clean_up_worker, clean_up_work);
 	return 0;
 
 	disable_device_and_fail:
