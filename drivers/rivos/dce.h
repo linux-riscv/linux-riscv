@@ -159,6 +159,8 @@ typedef struct work_queue {
 
 struct dce_driver_priv
 {
+	struct work_struct clean_up_worker;
+
 	struct pci_dev *pdev;
 	struct device * pci_dev;
 	struct device dev;
