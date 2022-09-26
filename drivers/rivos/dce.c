@@ -21,42 +21,6 @@
 
 static dev_t dev_num;
 static struct dce_driver_priv *dce_priv;
-static int driver_wq;
-
-DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
-	return &priv->wq[wq_num].descriptor_ring;
-}
-
-void clean_up_work(struct work_struct *work) {
-	printk(KERN_INFO "Doing important cleaning up work!\n");
-	/* FIXME: check which WQ has interrupt pending */
-	DescriptorRing * ring = get_desc_ring(dce_priv, driver_wq);
-	int head = ring->hti->head;
-	int curr = ring->clean_up_index;
-
-	while(curr < head) {
-		int index = (curr % ring->length);
-		for(int i = 0; i < NUM_SG_TBLS; i++){
-			if (!ring->sg_tables[i][curr].sgl) continue;
-			/* unmap the DMA mappings */
-			dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][curr].sgl,
-				ring->sg_tables[i][curr].orig_nents,
-				ring->dma_direction[i][curr]);
-
-			kfree(ring->sg_tables[i][curr].sgl);
-			/* unmap the hw_addr */
-
-			kfree(ring->hw_addr[i][curr]);
-
-			/*zero the thing */
-			ring->sg_tables[i][curr].sgl = 0;
-			ring->sg_tables[i][curr].orig_nents = 0;
-			ring->hw_addr[i][curr] = 0;
-		}
-		curr++;
-	}
-	ring->clean_up_index = curr;
-}
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -67,6 +31,53 @@ uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value) {
 	// printk(KERN_INFO "Writing 0x%llx to address 0x%llx\n", value, priv->mmio_start + reg);
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
+}
+
+DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
+	return &priv->wq[wq_num].descriptor_ring;
+}
+
+void clean_up_work(struct work_struct *work) {
+	// printk(KERN_INFO "Doing important cleaning up work!\n");
+	/* FIXME: check which WQ has interrupt pending */
+
+	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
+	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
+		/* break early if we are done */
+		if (!irq_sts) break;
+		if (irq_sts & BIT(wq_num)) {
+			DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
+			int head = ring->hti->head;
+			int curr = ring->clean_up_index;
+
+			while(curr < head) {
+				int index = (curr % ring->length);
+				for(int i = 0; i < NUM_SG_TBLS; i++){
+					if (!ring->sg_tables[i][curr].sgl) continue;
+					// printk(KERN_INFO "Working on wq %d, index %d", wq_num, i);
+					/* unmap the DMA mappings */
+					dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][curr].sgl,
+						ring->sg_tables[i][curr].orig_nents,
+						ring->dma_direction[i][curr]);
+
+					kfree(ring->sg_tables[i][curr].sgl);
+					/* unmap the hw_addr */
+
+					kfree(ring->hw_addr[i][curr]);
+
+					/*zero the thing */
+					ring->sg_tables[i][curr].sgl = 0;
+					ring->sg_tables[i][curr].orig_nents = 0;
+					ring->hw_addr[i][curr] = 0;
+				}
+				curr++;
+			}
+			ring->clean_up_index = curr;
+			irq_sts &= ~BIT(wq_num);
+		}
+	}
+
+	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 }
 
 struct qemu_dce_ctx {
@@ -418,8 +429,6 @@ static void setup_memory_for_wq_from_user(struct file * file,
 
 static void setup_memory_for_wq(struct file * file, int wq_num)
 {
-	/* FIXME: only allow one wq to be owned by driver */
-	driver_wq = wq_num;
 	struct qemu_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv *drv_priv = ctx->dev;
 	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
