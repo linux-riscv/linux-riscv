@@ -482,7 +482,8 @@ static struct dpa_kfd_event *dpa_kfd_alloc_event(struct dpa_kfd_process *p,
 			return NULL;
 		}
 		if (is_signal) {
-			*event_page_offset = KFD_MMAP_TYPE_EVENTS;
+			*event_page_offset = KFD_MMAP_TYPE_EVENTS <<
+				KFD_MMAP_TYPE_SHIFT;
 			*event_slot_index = ev->id;
 		}
 		spin_lock_init(&ev->lock);
@@ -492,6 +493,18 @@ static struct dpa_kfd_event *dpa_kfd_alloc_event(struct dpa_kfd_process *p,
 		list_add(&ev->events, &p->event_list);
 	}
 	return ev;
+}
+
+static int dpa_kfd_process_alloc_event_page(struct dpa_kfd_process *p)
+{
+	if (!p->event_page) {
+		p->event_page = devm_kzalloc(p->dev->dev, PAGE_SIZE,
+					     GFP_KERNEL);
+		memset(p->event_page, -1, PAGE_SIZE);
+		/* XXX need to do daffy register event page or similar */
+
+	}
+	return !!p->event_page;
 }
 
 static int dpa_kfd_ioctl_create_event(struct file *filep,
@@ -512,13 +525,10 @@ static int dpa_kfd_ioctl_create_event(struct file *filep,
 
 	mutex_lock(&p->lock);
 	if (!p->event_page) {
-		p->event_page = devm_kzalloc(p->dev->dev, PAGE_SIZE, GFP_KERNEL);
-		if (!p->event_page) {
+		if (!dpa_kfd_process_alloc_event_page(p)) {
 			mutex_unlock(&p->lock);
 			return -ENOMEM;
 		}
-		memset(p->event_page, -1, PAGE_SIZE);
-		/* XXX need to do daffy register event page or similar */
 	}
 	ev = dpa_kfd_alloc_event(p, args->event_type, &args->event_page_offset,
 		&args->event_slot_index);
@@ -574,26 +584,297 @@ static void dpa_kfd_release_process_events(struct dpa_kfd_process *p)
 	}
 }
 
+static void dpa_set_event(struct dpa_kfd_event *ev)
+{
+	struct dpa_kfd_event_waiter *waiter;
+
+	/* Auto reset if the list is non-empty and we're waking
+	 * someone. waitqueue_active is safe here because we're
+	 * protected by the p->event_mutex, which is also held when
+	 * updating the wait queues in kfd_wait_on_events.
+	 */
+	ev->signaled = !ev->auto_reset || !waitqueue_active(&ev->wq);
+
+	list_for_each_entry(waiter, &ev->wq.head, wait.entry)
+		waiter->activated = true;
+
+	wake_up_all(&ev->wq);
+}
+
 static int dpa_kfd_ioctl_set_event(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
-	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
+	struct kfd_ioctl_set_event_args *args = data;
+	struct dpa_kfd_event *ev;
+	int ret = 0;
 
-	return -ENOSYS;
+	mutex_lock(&p->lock);
+
+	ev = idr_find(&p->event_idr, args->event_id);
+
+	if (ev && (ev->type == KFD_EVENT_TYPE_SIGNAL))
+		dpa_set_event(ev);
+	else
+		ret = -EINVAL;
+
+	mutex_unlock(&p->lock);
+	dev_warn(p->dev->dev, "%s: id %u ret %d\n", __func__, args->event_id,
+		ret);
+
+	return ret;
 }
 
 static int dpa_kfd_ioctl_reset_event(struct file *filep, struct dpa_kfd_process *p,
 				      void *data)
 {
-	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
-	return -ENOSYS;
+	struct kfd_ioctl_reset_event_args *args = data;
+	struct dpa_kfd_event *ev;
+	int ret = 0;
+
+
+	mutex_lock(&p->lock);
+
+	ev = idr_find(&p->event_idr, args->event_id);
+
+	if (ev && (ev->type == KFD_EVENT_TYPE_SIGNAL))
+		ev->signaled = false;
+	else
+		ret = -EINVAL;
+
+	mutex_unlock(&p->lock);
+	dev_warn(p->dev->dev, "%s: id %u ret %d\n", __func__, args->event_id,
+		 ret);
+
+	return ret;
 }
 
-static int dpa_kfd_ioctl_wait_events(struct file *filep, struct dpa_kfd_process *p,
-				      void *data)
+static struct dpa_kfd_event_waiter *alloc_event_waiters(uint32_t num_events)
 {
-	dev_warn(p->dev->dev, "%s: not implemented\n", __func__);
-	return -ENOSYS;
+	struct dpa_kfd_event_waiter *event_waiters;
+	uint32_t i;
+
+	event_waiters = kmalloc_array(num_events,
+					sizeof(struct dpa_kfd_event_waiter),
+					GFP_KERNEL);
+	if (!event_waiters)
+		return NULL;
+
+	for (i = 0; (event_waiters) && (i < num_events) ; i++) {
+		init_wait(&event_waiters[i].wait);
+		event_waiters[i].activated = false;
+	}
+
+	return event_waiters;
+}
+
+static void free_waiters(uint32_t num_events,
+			 struct dpa_kfd_event_waiter *waiters)
+{
+	uint32_t i;
+
+	for (i = 0; i < num_events; i++)
+		if (waiters[i].event)
+			remove_wait_queue(&waiters[i].event->wq,
+					  &waiters[i].wait);
+
+	kfree(waiters);
+}
+
+/* event lock held */
+static int init_event_waiter_get_status(struct dpa_kfd_process *p,
+		struct dpa_kfd_event_waiter *waiter,
+		uint32_t event_id)
+{
+	struct dpa_kfd_event *ev;
+
+	ev = idr_find(&p->event_idr, event_id);
+
+	if (!ev)
+		return -EINVAL;
+
+	waiter->event = ev;
+	waiter->activated = ev->signaled;
+	ev->signaled = ev->signaled && !ev->auto_reset;
+
+	return 0;
+}
+
+static void init_event_waiter_add_to_waitlist(struct dpa_kfd_event_waiter *waiter)
+{
+	struct dpa_kfd_event *ev = waiter->event;
+
+	/* Only add to the wait list if we actually need to
+	 * wait on this event.
+	 */
+	if (!waiter->activated)
+		add_wait_queue(&ev->wq, &waiter->wait);
+}
+
+/* test_event_condition - Test condition of events being waited for
+ * @all:           Return completion only if all events have signaled
+ * @num_events:    Number of events to wait for
+ * @event_waiters: Array of event waiters, one per event
+ *
+ * Returns KFD_IOC_WAIT_RESULT_COMPLETE if all (or one) event(s) have
+ * signaled. Returns KFD_IOC_WAIT_RESULT_TIMEOUT if no (or not all)
+ * events have signaled. Returns KFD_IOC_WAIT_RESULT_FAIL if any of
+ * the events have been destroyed.
+ */
+static uint32_t test_event_condition(bool all, uint32_t num_events,
+				struct dpa_kfd_event_waiter *event_waiters)
+{
+	uint32_t i;
+	uint32_t activated_count = 0;
+
+	for (i = 0; i < num_events; i++) {
+		if (!event_waiters[i].event)
+			return KFD_IOC_WAIT_RESULT_FAIL;
+
+		if (event_waiters[i].activated) {
+			if (!all)
+				return KFD_IOC_WAIT_RESULT_COMPLETE;
+
+			activated_count++;
+		}
+	}
+
+	return activated_count == num_events ?
+		KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT;
+}
+
+static long user_timeout_to_jiffies(uint32_t user_timeout_ms)
+{
+	if (user_timeout_ms == KFD_EVENT_TIMEOUT_IMMEDIATE)
+		return 0;
+
+	if (user_timeout_ms == KFD_EVENT_TIMEOUT_INFINITE)
+		return MAX_SCHEDULE_TIMEOUT;
+
+	/*
+	 * msecs_to_jiffies interprets all values above 2^31-1 as infinite,
+	 * but we consider them finite.
+	 * This hack is wrong, but nobody is likely to notice.
+	 */
+	user_timeout_ms = min_t(uint32_t, user_timeout_ms, 0x7FFFFFFF);
+
+	return msecs_to_jiffies(user_timeout_ms) + 1;
+}
+
+static int dpa_kfd_ioctl_wait_events(struct file *filep,
+				     struct dpa_kfd_process *p, void *data)
+{
+	struct kfd_ioctl_wait_events_args *args = data;
+	struct dpa_kfd_event_waiter *waiters;
+	struct kfd_event_data __user *events =
+			(struct kfd_event_data __user *) args->events_ptr;
+	u32 num_events = args->num_events;
+	uint32_t *wait_result = &args->wait_result;
+	bool wait_all = (args->wait_for_all != 0);
+	long timeout = user_timeout_to_jiffies(args->timeout);
+	int ret = 0;
+	int i;
+
+
+	dev_warn(p->dev->dev, "%s: %u events wait_all %d timeout %lu\n", __func__,
+		 num_events, wait_all, timeout);
+
+	waiters = alloc_event_waiters(num_events);
+	if (!waiters)
+		return -ENOMEM;
+
+	mutex_lock(&p->lock);
+	for (i = 0; i < num_events; i++) {
+		struct kfd_event_data event_data;
+
+		if (copy_from_user(&event_data, &events[i],
+				sizeof(struct kfd_event_data))) {
+			ret = -EFAULT;
+			goto out_unlock;
+		}
+
+		ret = init_event_waiter_get_status(p, &waiters[i],
+				event_data.event_id);
+		if (ret)
+			goto out_unlock;
+	}
+	*wait_result = test_event_condition(wait_all, num_events, waiters);
+	if (*wait_result == KFD_IOC_WAIT_RESULT_COMPLETE) {
+		// no event data yet
+		//ret = copy_signaled_event_data(num_events, waiters,
+		//events);
+		goto out_unlock;
+	} else if (*wait_result == KFD_IOC_WAIT_RESULT_FAIL) {
+		dev_err(p->dev->dev, "%s: failure during test_event\n",
+			__func__);
+		ret = -EIO; /* ??? */
+		goto out_unlock;
+	}
+
+	/* Add to wait lists if we need to wait. */
+	for (i = 0; i < num_events; i++)
+		init_event_waiter_add_to_waitlist(&waiters[i]);
+
+	mutex_unlock(&p->lock);
+	while (true) {
+		if (fatal_signal_pending(current)) {
+			ret = -EINTR;
+			break;
+		}
+
+		if (signal_pending(current)) {
+			/*
+			 * This is wrong when a nonzero, non-infinite timeout
+			 * is specified. We need to use
+			 * ERESTARTSYS_RESTARTBLOCK, but struct restart_block
+			 * contains a union with data for each user and it's
+			 * in generic kernel code that I don't want to
+			 * touch yet.
+			 */
+			ret = -ERESTARTSYS;
+			break;
+		}
+
+		/* Set task state to interruptible sleep before
+		 * checking wake-up conditions. A concurrent wake-up
+		 * will put the task back into runnable state. In that
+		 * case schedule_timeout will not put the task to
+		 * sleep and we'll get a chance to re-check the
+		 * updated conditions almost immediately. Otherwise,
+		 * this race condition would lead to a soft hang or a
+		 * very long sleep.
+		 */
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		*wait_result = test_event_condition(wait_all, num_events,
+						    waiters);
+		if (*wait_result != KFD_IOC_WAIT_RESULT_TIMEOUT)
+			break;
+
+		if (timeout <= 0)
+			break;
+
+		timeout = schedule_timeout(timeout);
+	}
+	__set_current_state(TASK_RUNNING);
+
+	/* copy_signaled_event_data may sleep. So this has to happen
+	 * after the task state is set back to RUNNING.
+	 */
+	//if (!ret && *wait_result == KFD_IOC_WAIT_RESULT_COMPLETE)
+	// no event data yet
+		//ret = copy_signaled_event_data(num_events,
+		//			       waiters, events);
+
+
+
+out_unlock:
+	free_waiters(num_events, waiters);
+	mutex_unlock(&p->lock);
+
+	dev_warn(p->dev->dev, "%s: ret = %d result = %d\n", __func__, ret,
+		*wait_result);
+
+	return ret;
 }
 
 static int dpa_kfd_ioctl_not_implemented(struct file *filep, struct dpa_kfd_process *p,
@@ -1213,11 +1494,45 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 	struct dpa_kfd_process *p = filep->private_data;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
-	unsigned int type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
+	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
+	unsigned long size = vma->vm_end - vma->vm_start;
+	struct page *ev_page;
+	int ret = -EFAULT;
 
-	dev_warn(p->dev->dev, "%s: offset 0x%lx gpu 0x%x type %u\n", __func__,
-		 mmap_offset, gpu_id, type);
-	return 0;
+	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
+		 __func__, mmap_offset, size, gpu_id, type, (u64)vma->vm_start);
+	switch (type) {
+	case KFD_MMAP_TYPE_EVENTS:
+		if (size != DPA_MAX_EVENT_PAGE_SIZE) {
+			dev_warn(p->dev->dev, "%s: invalid size for event \n",
+				 __func__);
+			return -EINVAL;
+		}
+
+		mutex_lock(&p->lock);
+		if (!p->event_page) {
+			if (!dpa_kfd_process_alloc_event_page(p)) {
+				mutex_unlock(&p->lock);
+				return -ENOMEM;
+			}
+		}
+		mutex_unlock(&p->lock);
+		ev_page = virt_to_page(p->event_page);
+		// map_pages checks vm_pgoff vs count, we don't need an offset
+		vma->vm_pgoff = 0;
+		ret = vm_map_pages(vma, &ev_page, 1);
+		if (ret) {
+			dev_warn(p->dev->dev, "%s: failed to map event page 0x%llx"
+				 " count %u %d\n",
+				 __func__, (u64)ev_page, page_count(ev_page),  ret);
+			ret = -EFAULT;
+		}
+		break;
+	default:
+		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
+	}
+
+	return ret;
 }
 
 static int __init dpa_init(void)
