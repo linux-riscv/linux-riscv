@@ -522,7 +522,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			struct AccessInfoWrite __user *__access_info;
 			struct AccessInfoWrite access_info;
 
-			__access_info = (struct AccessInfoWrite __user*) arg;
+			__access_info =	(struct AccessInfoWrite __user*) arg;
 			if (copy_from_user(&access_info, __access_info, sizeof(access_info)))
 				return -EFAULT;
 
@@ -573,9 +573,6 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			// printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
 			// printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			dce_push_descriptor(priv, &descriptor, wq_num);
-
-			// Free up resources when its done
-			free_resources(priv, &descriptor_input);
 		}
 	}
 
