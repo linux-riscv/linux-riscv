@@ -110,8 +110,14 @@ struct kfd_ioctl_desc {
 /* For now let userspace allocate anything within a 48-bit address space */
 #define DPA_GPUVM_ADDR_LIMIT ((1ULL << 48) - 1)
 
+/* just one page max for signals right now */
+#define DPA_MAX_EVENT_PAGE_SIZE (PAGE_SIZE)
+
 /* per process max on signals based on a page */
 #define DPA_MAX_SIGNAL_EVENTS (PAGE_SIZE / sizeof(u64))
+
+#define KFD_EVENT_TIMEOUT_IMMEDIATE 0
+#define KFD_EVENT_TIMEOUT_INFINITE 0xFFFFFFFFu
 
 /* HSA Event types */
 #define KFD_EVENT_TYPE_SIGNAL (0)
@@ -119,6 +125,7 @@ struct kfd_ioctl_desc {
 #define KFD_EVENT_TYPE_DEBUG (5)
 #define KFD_EVENT_TYPE_MEMORY (8)
 
+/* mostly a copy of what's in amdgpu struct kfd_event */
 struct dpa_kfd_event {
 	unsigned id;
 	int type;
@@ -130,9 +137,16 @@ struct dpa_kfd_event {
 	struct list_head events;
 };
 
+/* copy from kfd_event */
+struct dpa_kfd_event_waiter {
+	wait_queue_entry_t wait;
+	struct dpa_kfd_event *event; /* Event to wait for */
+	bool activated;		 /* Becomes true when event is signaled */
+};
+
 /* offsets to MMAP calls for different things */
-#define KFD_MMAP_TYPE_SHIFT (62)
-#define KFD_MMAP_TYPE_EVENTS (0x2ULL << KFD_MMAP_TYPE_SHIFT)
+#define KFD_MMAP_TYPE_SHIFT (60)
+#define KFD_MMAP_TYPE_EVENTS (0x2ULL)
 
 #define KFD_GPU_ID_HASH_WIDTH (4)
 #define KFD_MMAP_GPU_ID_SHIFT (48)
