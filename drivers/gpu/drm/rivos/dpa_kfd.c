@@ -93,10 +93,6 @@ struct dpa_kfd_topology {
 	struct kobject kobj_cpu_node;
 	struct attribute attr_cpu_node_id;
 	struct attribute attr_cpu_properties;
-
-	struct kobject kobj_dpa_node;
-	struct attribute attr_dpa_node_id;
-	struct attribute attr_dpa_properties;
 };
 
 static struct dpa_kfd_topology dkt;
@@ -117,21 +113,17 @@ static ssize_t dpa_kfd_sysfs_show(struct kobject *kobj, struct attribute *attr,
 	} else if (attr == &dkt.attr_cpu_properties) {
 		offs += snprintf(buffer, PAGE_SIZE, "cpu_cores_count %d\n",
 				 num_possible_cpus());
-		offs += snprintf(buffer + offs , PAGE_SIZE - offs, "drm_render_minor 0\n");
-	} else if (attr == &dkt.attr_dpa_properties) {
 		/* this is used to determine if it's a gpu */
-		offs += snprintf(buffer, PAGE_SIZE, "simd_count 1\n");
-		offs += snprintf(buffer + offs , PAGE_SIZE - offs, "mem_banks 1\n");
-		offs += snprintf(buffer + offs , PAGE_SIZE - offs, "wave_front_size 32\n");
+		offs += snprintf(buffer + offs, PAGE_SIZE, "simd_count 1\n");
+		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "mem_banks 1\n");
+		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "wave_front_size 32\n");
 		/* this is used to open a DRM device */
-		offs += snprintf(buffer + offs , PAGE_SIZE - offs, "drm_render_minor %d\n",
+		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "drm_render_minor %d\n",
 			dkt.dpa->drm_minor);
 		/* This tells it which "ISA" to use */
 		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "gfx_target_version %d\n",
 				 DPA_HSA_GFX_VERSION);
 	} else if (attr == &dkt.attr_cpu_node_id) {
-		offs = snprintf(buffer, PAGE_SIZE, "0\n");
-	} else if (attr == &dkt.attr_dpa_node_id) {
 		offs = snprintf(buffer, PAGE_SIZE, "%d\n", DPA_GPU_ID);
 	} else
 		offs = -EINVAL;
@@ -201,19 +193,6 @@ static int dpa_kfd_sysfs_init(void)
 
 	}
 
-	ret = kobject_init_and_add(&dkt.kobj_dpa_node, &dkt_type,
-				   &dkt.kobj_nodes, "1");
-
-	if (ret) {
-		pr_warn("%s: unable to init dpa nodes sysfs %d\n", __func__,
-			ret);
-		kobject_del(&dkt.kobj_cpu_node);
-		kobject_del(&dkt.kobj_nodes);
-		kobject_del(&dkt.kobj_topology);
-		return ret;
-
-	}
-
 	dkt.attr_properties.name = "system_properties";
 	dkt.attr_properties.mode = 0444;
 	sysfs_attr_init(&dkt.attr_properties);
@@ -242,7 +221,7 @@ static int dpa_kfd_sysfs_init(void)
 	sysfs_attr_init(&dkt.attr_cpu_properties);
 	ret = sysfs_create_file(&dkt.kobj_cpu_node,
 				&dkt.attr_cpu_properties);
-
+#if 0
 	dkt.attr_dpa_node_id.name = "gpu_id";
 	dkt.attr_dpa_node_id.mode = 0444;
 	sysfs_attr_init(&dkt.attr_dpa_node_id);
@@ -255,7 +234,7 @@ static int dpa_kfd_sysfs_init(void)
 	ret = sysfs_create_file(&dkt.kobj_dpa_node,
 				&dkt.attr_dpa_properties);
 
-
+#endif
 	return ret;
 }
 
@@ -263,7 +242,6 @@ static void dpa_kfd_sysfs_destroy(void)
 {
 	if (dkt.dpa) {
 		/* XXX sysfs_remove_file a bunch of times */
-		kobject_del(&dkt.kobj_dpa_node);
 		kobject_del(&dkt.kobj_cpu_node);
 		kobject_del(&dkt.kobj_nodes);
 		kobject_del(&dkt.kobj_topology);
