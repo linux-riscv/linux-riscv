@@ -101,10 +101,6 @@ int amdgpu_device_initialize(int fd,
 // necessary for acquire vm
 static void open_render_fd(void)
 {
-	int ret;
-	uint32_t major, minor;
-	char buf[4096];
-
 	drm_fd = open(DRM_DEV, O_RDWR);
 	// non fatal for now
 	// DPA doesn't have DRM yet, so just use DPA KFD
@@ -113,17 +109,6 @@ static void open_render_fd(void)
 		drm_fd = -1;
 		drm_fd = kfd;
 	}
-
-#if 0
-	// maybe we need this?
-	ret = amdgpu_device_initialize(drm_fd, &major, &minor,
-				       (void *)buf);
-	if (ret) {
-		perror("amdgpu_device_initialize");
-	}
-	fprintf(stderr, "amdgpu_device_initialize: major %d minor %d\n",
-		major, minor);
-#endif
 }
 
 // necessary for allocations to work
@@ -228,6 +213,7 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 	*handle = args.handle;
 }
 
+#if 0
 static void mmap_gpu_obj(int fd, void *user_ptr, size_t size, uint64_t mmap_offset)
 {
 	// this set of flags is good for anything the host needs to access
@@ -275,6 +261,7 @@ static void map_memory_to_gpu(uint64_t handle)
 		exit(1);
 
 }
+#endif
 
 static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
 {
@@ -290,8 +277,8 @@ static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
 
     Elf64_Shdr *sh_header = (Elf64_Shdr *) (elf_base + sh_off);
     Elf64_Shdr *sh_end = (Elf64_Shdr *) (elf_base + sh_off + (sh_num * sh_entrysize));
-    Elf64_Off symtab_off, strtab_off;
-    uint64_t sh_size;
+    Elf64_Off symtab_off = 0, strtab_off = 0;
+    uint64_t sh_size = 0;
     if (sh_header == NULL) {
         perror("Missing section header table");
         exit(1);
@@ -330,6 +317,7 @@ static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
     exit(1);
 }
 
+#if 0
 static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 				uint32_t *event_id, uint32_t *event_slot_index)
 {
@@ -358,6 +346,7 @@ static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 		"event_slot_index 0x%x\n", __func__, (uint64_t)args.event_page_offset,
 		args.event_trigger_data, args.event_id, args.event_slot_index);
 }
+#endif
 
 static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 			 uint32_t ctx_scratch_size, uint32_t stack_size,
@@ -419,28 +408,15 @@ void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 
 int main(int argc, char *argv[])
 {
-	void *mmio_ptr, *kern_ptr, *kernarg_ptr, *scratch_ptr, *rw_ptr, *queue_ptr, *doorbell_ptr;
-	size_t mmio_size = getpagesize();
-	size_t doorbell_size = getpagesize() * 2; // this AMD gpu expects 2 pages
-	size_t buf_size = getpagesize();
-	size_t scratch_size = getpagesize();
+	void *kern_ptr = NULL, *rw_ptr, *queue_ptr;
+	//size_t doorbell_size = getpagesize() * 2; // this AMD gpu expects 2 pages
 	size_t queue_size = getpagesize();
 	size_t aql_queue_size = getpagesize();
 	size_t rwptr_size = getpagesize();
-	size_t kernarg_size = getpagesize();
 	size_t kernel_size = 0;
-
-	uint64_t mmio_mmap_offset = 0;
-	uint64_t mmio_handle = 0;
 
 	uint64_t kern_mmap_offset = 0;
 	uint64_t kern_handle = 0;
-
-	uint64_t kernarg_mmap_offset = 0;
-	uint64_t kernarg_handle = 0;
-
-	uint64_t scratch_mmap_offset = 0;
-	uint64_t scratch_handle = 0;
 
 	uint64_t queue_mmap_offset = 0;
 	uint64_t queue_handle = 0;
@@ -450,14 +426,12 @@ int main(int argc, char *argv[])
 	uint64_t *q_read_ptr;
 	uint64_t *q_write_ptr;
 
-	uint64_t doorbell_offset, tmp_doorbell_offset, doorbell_handle;
+	uint64_t doorbell_offset;
 	uint32_t queue_id;
 
 	int kern_fd = -1;
 	struct stat kstat;
-	unsigned int kern_start_offset;
-
-	//uint64_t *queue_head;
+	unsigned int kern_start_offset = 0;
 	hsa_kernel_dispatch_packet_t *aql_packet;
 
 	// if we have arguments expect an ELF file with a RIG binary
@@ -491,29 +465,13 @@ int main(int argc, char *argv[])
 	acquire_vm();
 	set_memory_policy();
 
-	// map the mmio page, allocate address space -- XXX do we really need a MMIO page?
-	// ***   alloc_aligned_host_memory(&mmio_ptr, mmio_size);
-
-	// request the offset
-	// ***    alloc_memory_of_gpu(mmio_ptr, mmio_size, MMIO, &mmio_mmap_offset, &mmio_handle);
-	// map the mmio page
-	// ***   mmap_kfd(mmio_ptr, mmio_size, mmio_mmap_offset);
-
-	// map it to gpu (why?)
-	// ***    map_memory_to_gpu(mmio_handle);
-
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
 	alloc_memory_of_gpu(queue_ptr, queue_size, USER, &queue_mmap_offset, &queue_handle);
 	fprintf(stderr, "queue_ptr: 0x%lx\n", (unsigned long)queue_ptr);
 	fprintf(stderr, "queue_mmap_offset: 0x%lx\n", queue_mmap_offset);
-	//mmap_dev_mem(queue_ptr, queue_size, queue_mmap_offset);
 
-	// alloc_memory_of_gpu(queue_ptr, queue_size, USER, &queue_mmap_offset, &queue_handle);
-	// mmap_kfd(queue_ptr, queue_size, queue_mmap_offset);
-
-	// map_memory_to_gpu(queue_handle);
-
+	
 	alloc_aligned_host_memory(&rw_ptr, rwptr_size);
 	alloc_memory_of_gpu(rw_ptr, rwptr_size, USER, &rwptr_mmap_offset, &rwptr_handle);
 	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
@@ -527,40 +485,12 @@ int main(int argc, char *argv[])
 	// set all packets to invalid -- 1
 	memset(queue_ptr, 1, aql_queue_size);
 
-	// allocate a buffer for kernel args
-	/* alloc_aligned_host_memory(&kernarg_ptr, kernarg_size); */
-	/* alloc_memory_of_gpu(kernargptr, kernargsize, DEVICE, &kernargmmap_offset, &kernarghandle); */
-	/* mmap_dev_mem(kernargptr, kernargsize, kernargmmap_offset); */
-	/* map_memory_to_gpu(kernarghandle); */
-
-	// scratch
-	/* alloc_aligned_host_memory(&scratch_ptr, scratch_size); */
-	/* alloc_memory_of_gpu(scratch_ptr, scratch_size, DEVICE, &scratch_mmap_offset, &scratch_handle); */
-
-	/* map_memory_to_gpu(scratch_handle); */
-
-	// get_clock_counters();
-
-	// need to map a page for this
-	// ***     create_signal_event(NULL, NULL, NULL, NULL);
-	// set_scratch_backing_va();
-	// set_trap_handler();
-	// get_tile_config();
 	*q_read_ptr = *q_write_ptr = 0;
 	create_queue(queue_ptr, aql_queue_size, NULL, 0, 0, q_read_ptr, q_write_ptr,
 			&doorbell_offset, &queue_id);
 
-	// map doorbell page
-	//alloc_aligned_host_memory(&doorbell_ptr, doorbell_size);
-	//alloc_memory_of_gpu(doorbell_ptr, doorbell_size, DOORBELL,
-	//		    &tmp_doorbell_offset, &doorbell_handle);
-	//mmap_kfd(doorbell_ptr, doorbell_size, doorbell_offset);
+	// TODO map doorbell page
 
-	// fprintf(stderr, "q rptr: 0x%lx wptr: 0x%lx\n", *q_read_ptr, *q_write_ptr);
-
-
-	// set_event();
-	//
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
