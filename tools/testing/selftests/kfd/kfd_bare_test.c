@@ -493,6 +493,8 @@ int main(int argc, char *argv[])
 
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
+		int wait_count = 0;
+
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
@@ -524,6 +526,15 @@ int main(int argc, char *argv[])
 			*q_read_ptr, *q_write_ptr);
 		*q_write_ptr += 1;
 		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
+		while ((wait_count < 10) && (*q_read_ptr == 0)) {
+			fprintf(stderr, "Waiting for read index to increment: %lu\n",
+				*q_read_ptr);
+			sleep(1);
+			wait_count++;
+		}
+		if (*q_write_ptr > 0) {
+			fprintf(stderr, "DUC read AQL Packet! read index %lu\n", *q_read_ptr);
+		}
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
