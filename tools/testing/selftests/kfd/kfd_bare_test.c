@@ -455,9 +455,7 @@ int main(int argc, char *argv[])
 
 	int kern_fd = -1;
 	struct stat kstat;
-	// hack, hardcoded entry point offset
-	// unsigned kern_start_offset = 0x1730;
-    unsigned int kern_start_offset;
+	unsigned int kern_start_offset;
 
 	//uint64_t *queue_head;
 	hsa_kernel_dispatch_packet_t *aql_packet;
@@ -482,12 +480,6 @@ int main(int argc, char *argv[])
 			perror("mmap kernel");
 			return 1;
 		}
-
-		// hack -- need to properly read the ELF header and
-		// load sections and find the correct entry point
-		// let user override the hard coded entry point
-		// if (argc > 2)
-		// 	kern_start_offset = strtoul(argv[2], NULL, 16);
 
 		parse_kernels(kern_ptr, &kern_start_offset);
 	}
@@ -569,7 +561,7 @@ int main(int argc, char *argv[])
 
 	// set_event();
 	//
-
+	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%x\n", kern_ptr);
@@ -598,11 +590,13 @@ int main(int argc, char *argv[])
 
 		fprintf(stderr, "AQL packet address: 0x%x\n", aql_packet);
 		fprintf(stderr, "Size of AQL packet: %d\n", sizeof(*aql_packet));
+		fprintf(stderr, "Current read index: %llu write index: %llu\n",
+			*q_read_ptr, *q_write_ptr);
+		*q_write_ptr += 1;
+		fprintf(stderr, "Incremented write index: %llu\n", *q_write_ptr);
+	} else {
+		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
-
-
-	*q_write_ptr += 1;
-	sleep(100);
 
 	return 0;
 }
