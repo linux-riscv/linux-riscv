@@ -411,10 +411,10 @@ void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 	fprintf(stderr, "grid_size_z: 0x%x\n", pkt->grid_size_z);
 	fprintf(stderr, "private_segment_size: 0x%x\n", pkt->private_segment_size);
 	fprintf(stderr, "group_segment_size: 0x%x\n", pkt->group_segment_size);
-	fprintf(stderr, "kernel_object: 0x%x\n", pkt->kernel_object);
-	fprintf(stderr, "kerarg_address: 0x%x\n", pkt->kernarg_address);
-	fprintf(stderr, "reserved2: 0x%x\n", pkt->reserved2);
-	fprintf(stderr, "completion_signal: 0x%x\n\n", pkt->completion_signal.handle);
+	fprintf(stderr, "kernel_object: 0x%lx\n", pkt->kernel_object);
+	fprintf(stderr, "kernarg_address: 0x%lx\n", (unsigned long)pkt->kernarg_address);
+	fprintf(stderr, "reserved2: 0x%lx\n", pkt->reserved2);
+	fprintf(stderr, "completion_signal: 0x%lx\n\n", pkt->completion_signal.handle);
 }
 
 int main(int argc, char *argv[])
@@ -505,8 +505,8 @@ int main(int argc, char *argv[])
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
 	alloc_memory_of_gpu(queue_ptr, queue_size, USER, &queue_mmap_offset, &queue_handle);
-	fprintf(stderr, "queue_ptr: 0x%x\n", queue_ptr);
-	fprintf(stderr, "queue_mmap_offset: 0x%x\n", queue_mmap_offset);
+	fprintf(stderr, "queue_ptr: 0x%lx\n", (unsigned long)queue_ptr);
+	fprintf(stderr, "queue_mmap_offset: 0x%lx\n", queue_mmap_offset);
 	//mmap_dev_mem(queue_ptr, queue_size, queue_mmap_offset);
 
 	// alloc_memory_of_gpu(queue_ptr, queue_size, USER, &queue_mmap_offset, &queue_handle);
@@ -516,8 +516,8 @@ int main(int argc, char *argv[])
 
 	alloc_aligned_host_memory(&rw_ptr, rwptr_size);
 	alloc_memory_of_gpu(rw_ptr, rwptr_size, USER, &rwptr_mmap_offset, &rwptr_handle);
-	fprintf(stderr, "rw_ptr: 0x%x\n", rw_ptr);
-	fprintf(stderr, "rwptr_mmap_offset: 0x%x\n", rwptr_mmap_offset);
+	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
+	fprintf(stderr, "rwptr_mmap_offset: 0x%lx\n", rwptr_mmap_offset);
 
 
 	// set read and write pointers to memory inside the queue space
@@ -564,8 +564,8 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
-		fprintf(stderr, "kern_ptr: 0x%x\n", kern_ptr);
-		fprintf(stderr, "kern_mmap_offset: 0x%x\n", kern_mmap_offset);
+		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
+		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
 
 		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr);
 
@@ -582,18 +582,18 @@ int main(int argc, char *argv[])
 		aql_packet->private_segment_size = 0;
 		aql_packet->group_segment_size = 0;
 		aql_packet->kernel_object = (kern_mmap_offset & 0xFFFFFFFFFFFFULL) + kern_start_offset;
-		aql_packet->kernarg_address = 13;
+		aql_packet->kernarg_address = (void *)13;
 		aql_packet->reserved2 = 0;
 		aql_packet->completion_signal.handle = 0;
 
 		print_aql_packet(aql_packet);
 
-		fprintf(stderr, "AQL packet address: 0x%x\n", aql_packet);
-		fprintf(stderr, "Size of AQL packet: %d\n", sizeof(*aql_packet));
-		fprintf(stderr, "Current read index: %llu write index: %llu\n",
+		fprintf(stderr, "AQL packet address: 0x%lx\n", (unsigned long)aql_packet);
+		fprintf(stderr, "Size of AQL packet: %lu\n", sizeof(*aql_packet));
+		fprintf(stderr, "Current read index: %lu write index: %lu\n",
 			*q_read_ptr, *q_write_ptr);
 		*q_write_ptr += 1;
-		fprintf(stderr, "Incremented write index: %llu\n", *q_write_ptr);
+		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
