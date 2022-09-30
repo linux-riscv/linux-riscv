@@ -35,6 +35,14 @@ struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
 #define SYMTAB 0x2
 #define STRTAB 0x3
 
+// keep read and write indices one CL apart
+#define CACHELINE_SIZE (64)
+
+// hardcoded arguments for axpy kernel
+#define AXPY_X_DIM (4)
+#define AXPY_Y_DIM (1)
+#define AXPY_Z_DIM (1)
+
 static void open_kfd(void)
 {
 	kfd = open(KFD_DEV, O_RDWR);
@@ -156,6 +164,7 @@ static void alloc_aligned_host_memory(void **ptr, size_t size)
 		exit(1);
 	}
 	*ptr = ret;
+	memset(ret, 0xff, size);
 }
 
 typedef enum {
@@ -386,7 +395,7 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 
 }
 
-void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
+static void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 {
 	fprintf(stderr, "\nPrinting AQL packet....\n");
 	fprintf(stderr, "header: 0x%x\n", pkt->header);
@@ -406,6 +415,106 @@ void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 	fprintf(stderr, "completion_signal: 0x%lx\n\n", pkt->completion_signal.handle);
 }
 
+static void dump_buffer_u64(uint64_t *buf, unsigned length)
+{
+	int i;
+	for (i = 0; i < length; i++) {
+		fprintf(stderr, "%08lx\n", buf[i]);
+	}
+}
+
+static void dump_buffer_f32(float *buf, unsigned length)
+{
+	int i;
+	for (i = 0; i < length; i++) {
+		fprintf(stderr, "%f\n", buf[i]);
+	}
+}
+
+#define ARG0_LOC (24)
+#define ARG1_LOC (32)
+#define ARG2_LOC (40)
+const size_t axpy_x_offset = CACHELINE_SIZE;
+const size_t axpy_y_offset = CACHELINE_SIZE * 2;
+
+#define AXPY_XY_BUFSIZE (4)
+
+// set up kernel arguments for a specific instance of axpy
+static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
+{
+	// copied from axpy.cu
+	// 3 arguments a, x, y
+	float a = 2.0f;
+	float host_x[AXPY_XY_BUFSIZE] = {1.0f, 2.0f, 3.0f, 4.0f};
+	float host_y[AXPY_XY_BUFSIZE] = {0.5f, 1.5f, 2.5f, 3.5f};
+
+	// we're not going to bother allocating separate buffers for x and y
+	// arrays, instead just put them somewhere on the kernel arguments page
+	
+
+	// layout is:
+	// 0 -- pointer to arg 0 (literal)
+	// 8 -- pointer to arg 1 (pointer to x array)
+	// 16 -- pointer to arg 2 (pointer to y array)
+
+	// 24 -- arg 0 -- 4 byte float
+	// 32 -- arg 1 -- pointer to x
+	// 40 -- arg 2 -- pointer to y
+	
+	// 64 -- arg 1 array
+	// 128 -- arg 2 array
+
+	void *a_arg_ptr = kern_args_ptr + ARG0_LOC;
+	void *x_arg_ptr = kern_args_ptr + ARG1_LOC;
+	void *y_arg_ptr = kern_args_ptr + ARG2_LOC;
+	void *x_ptr = kern_args_ptr + axpy_x_offset;
+	void *y_ptr = kern_args_ptr + axpy_y_offset;
+
+	fprintf(stderr, "launching axpy with: \na = %f\n", a);
+	fprintf(stderr, "x array: \n");
+	dump_buffer_f32(host_x, AXPY_XY_BUFSIZE);
+	fprintf(stderr, "y array: \n");
+	dump_buffer_f32(host_y, AXPY_XY_BUFSIZE);
+	
+
+	memset(kern_args_ptr, 2, size);
+
+	// pointers to args
+	memcpy(kern_args_ptr + 0 * sizeof(uint64_t), &a_arg_ptr, sizeof(a_arg_ptr));
+	memcpy(kern_args_ptr + 1 * sizeof(uint64_t), &x_arg_ptr, sizeof(x_arg_ptr));
+	memcpy(kern_args_ptr + 2 * sizeof(uint64_t), &y_arg_ptr, sizeof(y_arg_ptr));
+	
+       	// copy literal first arg is at 24 bytes in
+	memcpy(kern_args_ptr + ARG0_LOC, &a, sizeof(a));
+	
+	// pointers to x and y arrays
+	memcpy(kern_args_ptr + ARG1_LOC, &x_ptr, sizeof(x_ptr));
+	memcpy(kern_args_ptr + ARG2_LOC, &y_ptr, sizeof(y_ptr));
+	
+	// copy arrays to their locations
+	memcpy(x_ptr, host_x, sizeof(host_x));
+	memcpy(y_ptr, host_y, sizeof(host_y));
+
+	fprintf(stderr, "kernargs buffer:\n");
+	//dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
+}
+
+
+// now convert pointers..
+static void axpy_kern_args_convert_nopasid(uint8_t *kern_args_ptr, uint64_t device_args_ptr, size_t size)
+{
+	uint64_t *kaptr = (uint64_t*)kern_args_ptr;
+	kaptr[0] = device_args_ptr + ARG0_LOC;
+	kaptr[1] = device_args_ptr + ARG1_LOC;
+	kaptr[2] = device_args_ptr + ARG2_LOC;
+	kaptr[4] = device_args_ptr + CACHELINE_SIZE;
+	kaptr[5] = device_args_ptr + 2 * CACHELINE_SIZE;
+
+	fprintf(stderr, "converted kernargs buffer:\n");
+	dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
+}
+
+
 int main(int argc, char *argv[])
 {
 	void *kern_ptr = NULL, *rw_ptr, *queue_ptr;
@@ -414,9 +523,6 @@ int main(int argc, char *argv[])
 	size_t aql_queue_size = getpagesize();
 	size_t rwptr_size = getpagesize();
 	size_t kernel_size = 0;
-
-	uint64_t kern_mmap_offset = 0;
-	uint64_t kern_handle = 0;
 
 	uint64_t queue_mmap_offset = 0;
 	uint64_t queue_handle = 0;
@@ -435,6 +541,7 @@ int main(int argc, char *argv[])
 	hsa_kernel_dispatch_packet_t *aql_packet;
 
 	// if we have arguments expect an ELF file with a RIG binary
+	// we are only expecting a very specific axpy kernel binary
 	if (argc > 1) {
 		if (lstat(argv[1], &kstat)) {
 			perror("lstat");
@@ -480,7 +587,7 @@ int main(int argc, char *argv[])
 
 	// set read and write pointers to memory inside the queue space
 	q_read_ptr = rw_ptr;
-	q_write_ptr = q_read_ptr + 1;
+	q_write_ptr = q_read_ptr + (CACHELINE_SIZE/sizeof(uint64_t));
 
 	// set all packets to invalid -- 1
 	memset(queue_ptr, 1, aql_queue_size);
@@ -494,27 +601,48 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
 		int wait_count = 0;
+		uint64_t kern_mmap_offset = 0;
+		uint64_t kern_handle = 0;
+		
+		uint64_t kern_args_mmap_offset = 0;
+		uint64_t kern_args_handle = 0;
+		void *kern_args_ptr;
 
+		uint64_t kern_args_size = getpagesize();
+		
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
+
+		alloc_aligned_host_memory(&kern_args_ptr, kern_args_size);
+		alloc_memory_of_gpu(kern_args_ptr, kern_args_size, USER, &kern_args_mmap_offset,
+				    &kern_args_handle);
+		fprintf(stderr, "kern_args_ptr: 0x%lx\n", (unsigned long)kern_args_ptr);
+		fprintf(stderr, "kern_args_mmap_offset: 0x%lx\n", (unsigned long)kern_args_mmap_offset);
+
+		// only designed to support axpy kernel
+		init_axpy_kern_args(kern_args_ptr, kern_args_size);
+		// hack to deal with no pasid
+		axpy_kern_args_convert_nopasid(kern_args_ptr, kern_args_mmap_offset & 0xFFFFFFFFFFFFULL,
+					       kern_args_size);
+
 
 		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr);
 
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-		aql_packet->setup = 2;
-		aql_packet->workgroup_size_x = 3;
-		aql_packet->workgroup_size_y = 4;
-		aql_packet->workgroup_size_z = 5;
+		aql_packet->setup = 0;
+		aql_packet->workgroup_size_x = AXPY_X_DIM;
+		aql_packet->workgroup_size_y = AXPY_Y_DIM;
+		aql_packet->workgroup_size_z = AXPY_Z_DIM;
 		aql_packet->reserved0 = 0;
-		aql_packet->grid_size_x = 7;
-		aql_packet->grid_size_y = 8;
-		aql_packet->grid_size_z = 9;
+		aql_packet->grid_size_x = AXPY_X_DIM;;
+		aql_packet->grid_size_y = AXPY_Y_DIM;;
+		aql_packet->grid_size_z = AXPY_Z_DIM;;
 		aql_packet->private_segment_size = 0;
 		aql_packet->group_segment_size = 0;
 		aql_packet->kernel_object = (kern_mmap_offset & 0xFFFFFFFFFFFFULL) + kern_start_offset;
-		aql_packet->kernarg_address = (void *)13;
+		aql_packet->kernarg_address = (void *)(kern_args_mmap_offset & 0xFFFFFFFFFFFFULL);
 		aql_packet->reserved2 = 0;
 		aql_packet->completion_signal.handle = 0;
 
@@ -535,6 +663,8 @@ int main(int argc, char *argv[])
 		if (*q_write_ptr > 0) {
 			fprintf(stderr, "DUC read AQL Packet! read index %lu\n", *q_read_ptr);
 		}
+		fprintf(stderr, "axpy y buffer after execution: \n");
+		dump_buffer_f32((float *)(kern_args_ptr + axpy_y_offset), AXPY_XY_BUFSIZE);
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
