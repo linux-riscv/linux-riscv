@@ -108,7 +108,8 @@ int daffy_get_version_cmd(struct dpa_device *dev, u32 *version);
 int daffy_create_queue_cmd(struct dpa_device *dev,
 			   struct dpa_kfd_process *p,
 			   struct kfd_ioctl_create_queue_args *args);
-
+int daffy_destroy_queue_cmd(struct dpa_device *dev,
+			    struct dpa_kfd_process *p, u32 queue_id);
 
 
 
