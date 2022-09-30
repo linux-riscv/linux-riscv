@@ -357,6 +357,20 @@ static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 }
 #endif
 
+static void destroy_queue(uint32_t q_id)
+{
+	struct kfd_ioctl_destroy_queue_args args;
+	int ret;
+
+	fprintf(stderr, "%s: id %u\n", __func__, q_id);
+	args.queue_id = q_id;
+	ret = ioctl(kfd, AMDKFD_IOC_DESTROY_QUEUE, &args);
+	if (ret) {
+		perror("ioctl destroy queue");
+		exit(1);
+	}
+}
+
 static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 			 uint32_t ctx_scratch_size, uint32_t stack_size,
 			 uint64_t *read_ptr, uint64_t *write_ptr,
@@ -668,6 +682,7 @@ int main(int argc, char *argv[])
 		}
 		fprintf(stderr, "axpy y buffer after execution: \n");
 		dump_buffer_f32((float *)(kern_args_ptr + axpy_y_offset), AXPY_XY_BUFSIZE);
+		destroy_queue(queue_id);
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
