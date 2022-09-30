@@ -404,7 +404,8 @@ static int dpa_kfd_ioctl_create_queue(struct file *filep, struct dpa_kfd_process
 
 static int dpa_kfd_ioctl_destroy_queue(struct file *filep, struct dpa_kfd_process *p, void *data)
 {
-	return -ENOSYS;
+	struct kfd_ioctl_destroy_queue_args *args = data;
+	return daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
 }
 
 static int dpa_kfd_ioctl_set_memory_policy(struct file *filep, struct dpa_kfd_process *p, void *data)

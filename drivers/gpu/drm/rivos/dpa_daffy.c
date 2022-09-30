@@ -137,6 +137,39 @@ int daffy_get_version_cmd(struct dpa_device *dev, u32 *version)
 	return 0;
 }
 
+int daffy_destroy_queue_cmd(struct dpa_device *dev,
+			    struct dpa_kfd_process *p, u32 queue_id)
+{
+	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct daffy_destroy_queue_cmd *cmd;
+	unsigned index;
+	int ret = 0;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DESTROY_QUEUE;
+	cmd = &pkt.u.ddqc;
+
+	cmd->queue_id = queue_id;
+
+	index = add_to_queue(dev, &pkt);
+	dev_warn(dev->dev, "%s: added to queue index %u cmd = %u qid = %u\n",
+		 __func__, index, pkt.hdr.command, queue_id);
+	if (index == -1) {
+		dev_warn(dev->dev, "%s: got invalid queue index -1\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	}
+	qpkt = dev->qinfo.h_ring + index;
+	// XXX wait for response
+	usleep_range(100000, 200000);
+	dev_warn(dev->dev, "%s: after sleep: rsp = %u ridx = %llu\n",
+		 __func__, qpkt->hdr.response, dev->qinfo.fw_queue->h_read_index);
+
+out:
+	return ret;
+}
+
+
 int daffy_create_queue_cmd(struct dpa_device *dev,
 			   struct dpa_kfd_process *p,
 			   struct kfd_ioctl_create_queue_args *args)
