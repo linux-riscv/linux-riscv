@@ -92,16 +92,6 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	struct dce_driver_priv *dev = file->private_data;
 	struct qemu_dce_ctx * ctx;
 	int ret;
-	/* Assign a WQ to the file descriptor */
-	/* FIXME: lock , better assignemnt algo, error if full */
-	mutex_lock(&dev->lock);
-	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
-		if (dev->wq[wq_num].owner == 0) {
-			dev->wq[wq_num].owner = file;
-			// printk(KERN_INFO "Assigning file handle 0x%lx to slot %u\n", file, wq_num);
-			break;
-		}
-	}
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -123,6 +113,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			printk(KERN_INFO "SVA allocation success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
+		// printk(KERN_INFO "PASID assigned is %d\n", ctx->pasid);
 		if (ctx->pasid == IOMMU_PASID_INVALID) {
 			dev_err(dev->pci_dev, "PASID allocation failed.\n");
 			iommu_sva_unbind_device(ctx->sva);
@@ -136,7 +127,6 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	/* keep sva context linked to the file */
 	file->private_data = ctx;
 
-	mutex_unlock(&dev->lock);
 	return 0;
 }
 
@@ -146,7 +136,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	struct dce_driver_priv *priv = ctx->dev;
 	/* FIXME: do we need lock here? */
 	mutex_lock(&priv->lock);
-	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
+	for(int wq_num = 1; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == file) {
 			// printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
 			priv->wq[wq_num].owner = 0;
@@ -186,7 +176,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	DescriptorRing * ring = get_desc_ring(priv, wq_num);
 	uint64_t tail_idx = ring->hti->tail;
 	uint64_t base = ring->descriptors;
-	uint64_t tail_ptr = base + ((tail_idx % NUM_DSC_PER_WQ) * sizeof(DCEDescriptor));
+	uint8_t * tail_ptr = base + ((tail_idx % NUM_DSC_PER_WQ) * sizeof(DCEDescriptor));
 
 	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
@@ -393,63 +383,62 @@ static void setup_memory_for_wq_from_user(struct file * file,
 					  int wq_num, UserArea * ua)
 {
 	struct qemu_dce_ctx *ctx = file->private_data;
-	struct dce_driver_priv *drv_priv = ctx->dev;
 	size_t length = ua->numDescs;
 
-	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
+	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 	int size = length * sizeof(DCEDescriptor);
 	/* make sure size is multiple of 4K */
 	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) { /* insert error here */}
 	int DSCSZ = fls(size) - fls(0x1000);
 
 	// printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
-	dce_reset_descriptor_ring(drv_priv, wq_num);
+	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	ring->length = length;
 	ring->descriptors = ua->descriptors;
 	ring->hti = ua->hti;
 
 	/* populate WQITE TODO: only first one for now*/
-	drv_priv->WQIT[wq_num].DSCBA = ring->descriptors;
-	drv_priv->WQIT[wq_num].DSCSZ = DSCSZ;
-	drv_priv->WQIT[wq_num].DSCPTA =	ring->hti;
+	dce_priv->WQIT[wq_num].DSCBA = ring->descriptors;
+	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
+	dce_priv->WQIT[wq_num].DSCPTA =	ring->hti;
 	/* set the PASID fields in TRANSCTL */
-	drv_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 0) |
+	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 0) |
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
 
+
 	/* set the enable bit in dce*/
-	uint64_t wq_enable = dce_reg_read(drv_priv, DCE_REG_WQENABLE);
+	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
 	wq_enable |= BIT(wq_num);
-	dce_reg_write(drv_priv, DCE_REG_WQENABLE, wq_enable);
+	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
 
 	/* mark the WQ as enabled in driver */
-	drv_priv->wq[wq_num].enable = true;
+	dce_priv->wq[wq_num].enable = true;
+	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
-static void setup_memory_for_wq(struct file * file, int wq_num)
+static void setup_memory_for_wq(int wq_num)
 {
-	struct qemu_dce_ctx *ctx = file->private_data;
-	struct dce_driver_priv *drv_priv = ctx->dev;
-	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
+	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 
 	int DSCSZ = 0;
 
 	/* Supervisor memory setup */
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
 	size_t length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
-	dce_reset_descriptor_ring(drv_priv, wq_num);
+	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	// Allcate the descriptors as coherent DMA memory
 	ring->descriptors =
-		dma_alloc_coherent(drv_priv->pci_dev, length * sizeof(DCEDescriptor),
+		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
 
 	ring->length = length;
 	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
 	// 	(uint64_t)ring->descriptors);
 
-	ring->hti = dma_alloc_coherent(drv_priv->pci_dev,
+	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	ring->hti->head = 0;
 	ring->hti->tail = 0;
@@ -462,17 +451,18 @@ static void setup_memory_for_wq(struct file * file, int wq_num)
 	}
 
 	/* populate WQITE TODO: only first one for now*/
-	drv_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
-	drv_priv->WQIT[wq_num].DSCSZ = DSCSZ;
-	drv_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
-	drv_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
+	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
+	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
+	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
+	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
 	/* set the enable bit in dce*/
-	uint64_t wq_enable = dce_reg_read(drv_priv, DCE_REG_WQENABLE);
+	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
 	wq_enable |= BIT(wq_num);
-	dce_reg_write(drv_priv, DCE_REG_WQENABLE, wq_enable);
+	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
 
 	/* mark the WQ as enabled in driver */
-	drv_priv->wq[wq_num].enable = true;
+	dce_priv->wq[wq_num].enable = true;
+	dce_priv->wq[wq_num].type = KERNEL_WQ;
 }
 
 static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
@@ -492,6 +482,26 @@ static int find_wq_number(struct file * file, struct dce_driver_priv * priv) {
 	/* error out if no WQ found */
 	if (!wq_found) return -1;
 	return wq_num;
+}
+
+static int assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
+	/* start from wq num 1 as 0 is reserved for KERNEL_SHARED */
+	bool found = false;
+	int wq_num;
+	mutex_lock(&priv->lock);
+	for(wq_num = 1; wq_num < NUM_WQ; wq_num++) {
+		if (priv->wq[wq_num].owner == 0) {
+			priv->wq[wq_num].owner = file;
+			found = true;
+			break;
+		}
+	}
+	mutex_unlock(&priv->lock);
+	/* FIXME: should not reach here, return 0 if not able to assign */
+	if (found)
+		return wq_num;
+	else
+		return 0;
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -531,7 +541,22 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		case INITIALIZE_USER_MEM: {
+		case REQUEST_KERNEL_WQ: {
+			/* WQ shouldn't havve been assigned at this point */
+			int wq_num = find_wq_number(file, priv);
+			if (wq_num != -1) return -EFAULT;
+
+			/* assign WQ to file descriptor */
+			wq_num = assign_wq_to_fd(file, priv);
+			printk(KERN_INFO "Requested kernel managed WQ %d\n", wq_num);
+			/* wq_num meaning falling back to shared kernel WQ */
+			if (wq_num > 0)
+				setup_memory_for_wq(wq_num);
+
+			break;
+		}
+
+		case SETUP_USER_WQ: {
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
@@ -541,14 +566,17 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (copy_from_user(&ua, __UserArea_input, sizeof(UserArea)))
 				return -EFAULT;
 
-			/* find WQ num */
+			/* WQ shouldn't havve been assigned at this point */
 			int wq_num = find_wq_number(file, priv);
-			if (wq_num == -1) return -EFAULT;
+			if (wq_num != -1) return -EFAULT;
+
+			/* assign WQ to file descriptor */
+			wq_num = assign_wq_to_fd(file, priv);
+			if (wq_num == 0) return -EFAULT;
+
 			/* The WQ is not enabled to be setuped already */
-			if (priv->wq[wq_num].enable == false)
-				setup_memory_for_wq_from_user(file, wq_num, &ua);
-			else
-				return -EFAULT;
+			setup_memory_for_wq_from_user(file, wq_num, &ua);
+
 			break;
 		}
 
@@ -560,17 +588,23 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
 				return -EFAULT;
 
-			/* figure out WQ number, should have been assigned in open() */
+			/* Default to WQ 0 (Shared kernel) if not assigned */
 			int wq_num = find_wq_number(file, priv);
-			if (wq_num == -1) return -EFAULT;
+			if (wq_num == -1)
+				wq_num = 0;
 
-			/* setup the memory for the WQ and enable it if not already */
+			/* Make sure selected WQ is owned by Kernel */
+			if (priv->wq[wq_num].type == USER_OWNED_WQ)
+				return -EFAULT;
+
+			/* WQ should be enabled at this point */
 			if (priv->wq[wq_num].enable == false)
-				setup_memory_for_wq(file, wq_num);
+				return -EFAULT;
 
 			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input, wq_num, ctx);
 
-			// printk(KERN_INFO "pushing descriptor thru ioctl with opcode %d!\n", descriptor.opcode);
+			// printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
+			// 	wq_num, descriptor.opcode);
 			// printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			dce_push_descriptor(priv, &descriptor, wq_num);
 		}
@@ -584,7 +618,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	struct dce_driver_priv *priv = ctx->dev;
 
 	int wq_num = find_wq_number(file, priv);
-		if (wq_num == -1) return -EFAULT;
+	if (wq_num == -1) return -EFAULT;
 
 	unsigned long pfn = phys_to_pfn(priv->mmio_start_phys);
 	/* coompute the door bell page with wq num */
@@ -594,7 +628,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	// printk(KERN_INFO "Mappping from 0x%lx to 0x%lx\n", vma->vm_start,pfn);
+	// printk(KERN_INFO "Mappping wq %d from 0x%lx to 0x%lx\n", wq_num, vma->vm_start,pfn);
 
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE,
 			vma->vm_page_prot)) {
@@ -720,7 +754,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		printk(KERN_INFO "cdev add failed\n");
 	}
 
-
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		dev_info(dev, "Using MSI(-X) interrupts\n");
@@ -735,6 +768,14 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* work queue setup */
 	INIT_WORK(&drv_priv->clean_up_worker, clean_up_work);
+
+	/* init mutex */
+	mutex_init(&drv_priv->lock);
+
+	/* setup WQ 0 for SHARED_KERNEL usage */
+	setup_memory_for_wq(0);
+	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
+
 	return 0;
 
 	disable_device_and_fail:

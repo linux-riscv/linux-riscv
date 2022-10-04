@@ -64,6 +64,13 @@ enum {
 	NUM_SG_TBLS
 };
 
+/* WQ type based on ownership */
+typedef enum {
+	KERNEL_WQ,
+	USER_OWNED_WQ,
+	SHARED_KERNEL_WQ,
+} wq_type;
+
 typedef struct AccessInfoRead {
 	uint64_t* value;
 	uint64_t  offset;
@@ -134,7 +141,8 @@ typedef struct UserArea {
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-#define INITIALIZE_USER_MEM _IOW(0xAA, 3, struct UserArea*)
+#define SETUP_USER_WQ 	  _IOW(0xAA, 3, struct UserArea*)
+#define REQUEST_KERNEL_WQ _IOW(0xAA, 4, int)
 
 #define MIN(a, b) \
 	({ __typeof__ (a) _a = (a); \
@@ -151,6 +159,7 @@ static const struct pci_device_id pci_use_msi[] = {
 
 typedef struct work_queue {
 	bool enable;
+	wq_type type;
 	struct file * owner;
 
 	/* The actual ring */
