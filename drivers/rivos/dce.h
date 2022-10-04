@@ -43,8 +43,8 @@
 #define DEVICE_NAME "dce"
 #define DEVICE_VF_NAME "dcevf"
 #define VENDOR_ID 0x1EFD
-#define DEVICE_ID 0x0001
-#define DEVICE_VF_ID 0x0002
+#define DEVICE_ID 0x0010
+#define DEVICE_VF_ID 0x0011
 #define DCE_MINOR 0x0
 #define DCE_NR_DEVS  2
 #define DCE_NR_VIRTFN 7
