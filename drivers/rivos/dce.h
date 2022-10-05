@@ -87,7 +87,7 @@ typedef struct DataAddrNode {
 } DataAddrNode;
 
 #define NUM_WQ      64
-#define NUM_DSC_PER_WQ 64
+#define DEFAULT_NUM_DSC_PER_WQ 64
 typedef struct __attribute__((packed)) WQITE {
     uint64_t DSCBA;
     uint8_t  DSCSZ;
