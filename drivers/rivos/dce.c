@@ -171,12 +171,21 @@ ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *pp
 	return 0;
 }
 
+/* compute number of descriptors in a WQ using DSCSZ */
+static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
+	int DSCSZ = priv->WQIT[wq_num].DSCSZ;
+	int num_desc = DEFAULT_NUM_DSC_PER_WQ;
+	while (DSCSZ--) num_desc *= 2;
+	return num_desc;
+}
+
 static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor, int wq_num)
 {
 	DescriptorRing * ring = get_desc_ring(priv, wq_num);
 	uint64_t tail_idx = ring->hti->tail;
 	uint64_t base = ring->descriptors;
-	uint8_t * tail_ptr = base + ((tail_idx % NUM_DSC_PER_WQ) * sizeof(DCEDescriptor));
+	int num_desc_in_wq = get_num_desc_for_wq(priv, wq_num);
+	uint8_t * tail_ptr = base + ((tail_idx % num_desc_in_wq) * sizeof(DCEDescriptor));
 
 	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
@@ -398,7 +407,6 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	ring->descriptors = ua->descriptors;
 	ring->hti = ua->hti;
 
-	/* populate WQITE TODO: only first one for now*/
 	dce_priv->WQIT[wq_num].DSCBA = ring->descriptors;
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA =	ring->hti;
