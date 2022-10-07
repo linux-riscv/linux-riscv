@@ -205,8 +205,10 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
 	memcpy(tail_ptr, descriptor, sizeof(DCEDescriptor));
+	wmb();
 	/* increment tail index */
 	ring->hti->tail++;
+	wmb();
 	/* notify DCE */
 	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
 	dce_reg_write(priv, WQCR_REG, 1);
