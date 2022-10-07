@@ -100,7 +100,9 @@ typedef struct __attribute__((packed)) WQITE {
 
 typedef struct HeadTailIndex {
 	uint64_t head;
-	uint64_t tail;
+	uint64_t padding1[7];
+	_Atomic uint64_t tail;
+	uint64_t padding2[7];
 } HeadTailIndex;
 
 typedef struct __attribute__((packed)) DCEDescriptor {
