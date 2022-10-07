@@ -2,6 +2,7 @@
 #define DCE_H
 
 #include "linux/mutex.h"
+#include "linux/eventfd.h"
 
 #define DCE_CTRL 0
 
@@ -136,13 +137,20 @@ typedef struct UserArea {
 	HeadTailIndex * hti;
 	DCEDescriptor * descriptors;
 	int numDescs;
+	int efd;
 } UserArea;
+
+typedef struct KernelQueueReq {
+    int DSCSZ;
+    bool eventfd_vld;
+    int eventfd;
+} KernelQueueReq;
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-#define SETUP_USER_WQ 	  _IOW(0xAA, 3, struct UserArea*)
-#define REQUEST_KERNEL_WQ _IOW(0xAA, 4, int)
+#define SETUP_USER_WQ 	  _IOW(0xAA, 3, UserArea *)
+#define REQUEST_KERNEL_WQ _IOW(0xAA, 4, KernelQueueReq *)
 
 #define MIN(a, b) \
 	({ __typeof__ (a) _a = (a); \
@@ -161,6 +169,10 @@ typedef struct work_queue {
 	bool enable;
 	wq_type type;
 	struct file * owner;
+
+	// eventfd structure
+	bool efd_ctx_valid;
+	struct eventfd_ctx * efd_ctx;
 
 	/* The actual ring */
 	DescriptorRing descriptor_ring;

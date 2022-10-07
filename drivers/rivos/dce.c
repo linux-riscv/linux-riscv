@@ -38,10 +38,11 @@ DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
 }
 
 void clean_up_work(struct work_struct *work) {
-	// printk(KERN_INFO "Doing important cleaning up work!\n");
 	/* FIXME: check which WQ has interrupt pending */
 
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
+	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
+
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		/* break early if we are done */
 		if (!irq_sts) break;
@@ -51,6 +52,13 @@ void clean_up_work(struct work_struct *work) {
 			int curr = ring->clean_up_index;
 
 			while(curr < head) {
+				// printk(KERN_INFO "curr :%d, head: %d\n", curr, head);
+				/* for every clean up, notify user via eventfd when applicable */
+				if (dce_priv->wq[wq_num].efd_ctx_valid) {
+					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
+					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
+				}
+
 				int index = (curr % ring->length);
 				for(int i = 0; i < NUM_SG_TBLS; i++){
 					if (!ring->sg_tables[i][curr].sgl) continue;
@@ -148,6 +156,13 @@ int dce_ops_release(struct inode *inode, struct file *file)
 
 			/* mark the WQ as disabled in driver */
 			priv->wq[wq_num].enable = false;
+
+			/* Clean up the eventfd ctx */
+			if (priv->wq[wq_num].efd_ctx_valid)
+				eventfd_ctx_put(priv->wq[wq_num].efd_ctx);
+
+			priv->wq[wq_num].efd_ctx_valid = false;
+			priv->wq[wq_num].efd_ctx = 0;
 			break;
 		}
 	}
@@ -426,11 +441,19 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
-static void setup_memory_for_wq(int wq_num)
+static void setup_memory_for_wq(int wq_num, KernelQueueReq * kqr)
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 
 	int DSCSZ = 0;
+
+	// Parse KernelQueueReq if provided
+	if (kqr) {
+		DSCSZ = kqr->DSCSZ;
+		dce_priv->wq[wq_num].efd_ctx_valid = kqr->eventfd_vld;
+		if (kqr->eventfd_vld)
+			dce_priv->wq[wq_num].efd_ctx = eventfd_ctx_fdget(kqr->eventfd);
+	}
 
 	/* Supervisor memory setup */
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
@@ -500,6 +523,7 @@ static int assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
 	for(wq_num = 1; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == 0) {
 			priv->wq[wq_num].owner = file;
+			printk(KERN_INFO "Assigning file 0x%lx to wq[%d]\n", file, wq_num);
 			found = true;
 			break;
 		}
@@ -550,16 +574,29 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 
 		case REQUEST_KERNEL_WQ: {
+			/* FIXME:
+			 *	1. put inside some function
+			 *	2. check a efd_valid
+			 *	3. also add a numDesc for kernel WQ
+			 */
+			KernelQueueReq __user * __kqr_input;
+			KernelQueueReq kqr = {.DSCSZ = 0, .eventfd_vld = true, .eventfd = 0};
+			__kqr_input = (KernelQueueReq __user *) arg;
+			if (__kqr_input)
+				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
+					return -EFAULT;
+
 			/* WQ shouldn't havve been assigned at this point */
 			int wq_num = find_wq_number(file, priv);
 			if (wq_num != -1) return -EFAULT;
 
 			/* assign WQ to file descriptor */
 			wq_num = assign_wq_to_fd(file, priv);
-			printk(KERN_INFO "Requested kernel managed WQ %d\n", wq_num);
+			// printk(KERN_INFO "Requested kernel managed WQ %d\n", wq_num);
+
 			/* wq_num meaning falling back to shared kernel WQ */
 			if (wq_num > 0)
-				setup_memory_for_wq(wq_num);
+				setup_memory_for_wq(wq_num, &kqr);
 
 			break;
 		}
@@ -662,7 +699,7 @@ static struct class *dce_char_class;
 
 static irqreturn_t handle_dce(int irq, void *dev_id) {
 	/* with SVA there is no per-job clean up needed */
-	if (dce_priv->sva_enabled) return IRQ_HANDLED;
+	// if (dce_priv->sva_enabled) return IRQ_HANDLED;
 
 	/* FIXME: multiple thread running this? */
 	printk(KERN_INFO "Got interrupt %d, work scheduled!\n", irq);
@@ -781,7 +818,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_init(&drv_priv->lock);
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
-	setup_memory_for_wq(0);
+	setup_memory_for_wq(0, NULL);
 	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
 
 	return 0;
