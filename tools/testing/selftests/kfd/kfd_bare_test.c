@@ -660,8 +660,11 @@ int main(int argc, char *argv[])
 			sleep(1);
 			wait_count++;
 		}
-		if (*q_write_ptr > 0) {
+		if (*q_read_ptr > 0) {
 			fprintf(stderr, "DUC read AQL Packet! read index %lu\n", *q_read_ptr);
+		} else {
+			fprintf(stderr, "Read index failed to increment, DUC is likely stuck parsing AQL packet\n");
+			exit(1);
 		}
 		fprintf(stderr, "axpy y buffer after execution: \n");
 		dump_buffer_f32((float *)(kern_args_ptr + axpy_y_offset), AXPY_XY_BUFSIZE);
@@ -669,5 +672,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
 
+	close(kfd);
 	return 0;
 }
