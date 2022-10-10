@@ -3,6 +3,7 @@
 #include <linux/bitfield.h>
 #include <linux/bitops.h>
 #include <linux/cdev.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/iommu.h>
 #include <linux/irq.h>
