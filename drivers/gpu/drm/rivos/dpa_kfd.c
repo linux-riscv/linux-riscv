@@ -10,20 +10,11 @@
 #include <linux/device/class.h>
 #include <linux/dev_printk.h>
 #include <linux/fs.h>
+#include <linux/iommu.h>
 #include <linux/pci.h>
 #include <linux/sched/mm.h>
 #include <uapi/linux/kfd_ioctl.h>
 #include "dpa_kfd.h"
-
-
-
-
-#define DPA_REGS_MIN_SIZE 0x1000
-
-#define DUC_PCI_STATUS_REG 0x0000
-#define DUC_PCI_QUEUE_INFO_ADDRESS 0x0001
-#define DUC_PCI_QUEUE_INFO_SIZE 0x0009
-
 
 static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 static int dpa_kfd_open(struct inode *inode, struct file *filep);
@@ -271,6 +262,7 @@ void setup_queue(struct dpa_device *dpa) {
 	writeq(dpa->qinfo.fw_queue_dma_addr, dpa->regs + DUC_PCI_QUEUE_INFO_ADDRESS);
 	writeq(0x1000, dpa->regs + DUC_PCI_QUEUE_INFO_SIZE);
 }
+
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int ret = 0;
@@ -300,7 +292,13 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if ((ret = pci_request_mem_regions(pdev, kfd_dev_name)))
 		goto disable_device;
 
-
+	// Enable PASID support
+	if (iommu_dev_enable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA)) {
+		dev_warn(dpa->dev, "%s: Unable to turn on SVA feature\n", __func__);
+		goto disable_device;
+	} else {
+		dev_warn(dpa->dev, "%s: SVA feature enabled successfully\n", __func__);
+	}
 
 	dpa->regs = ioremap(pci_resource_start(pdev, 0), DPA_MMIO_SIZE);
 	if (!dpa->regs) {
@@ -345,9 +343,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 free_queue:
 	daffy_free_fw_queue(dpa);
 
-#ifndef VIRTIO_DEMO
 unmap:
-#endif
 	iounmap(dpa->regs);
 
 disable_device:
@@ -362,6 +358,8 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 	if (dpa) {
 		// XXX other stuff
 		daffy_free_fw_queue(dpa);
+		// Disable PASID support
+		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 		// unmap regs
 		iounmap(dpa->regs);
 		pci_disable_device(pdev);
@@ -979,81 +977,91 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		// XXX HACK if we don't have iommu wtih svm pass the address back via
 		// mmap
 		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
 		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
+		
+		// TODO: Setup of dma_addr not explicitly needed once PASID supported tested and working
 		buf->type = args->flags;
 		buf->size = args->size;
 		buf->page_count = buf->size >> PAGE_SHIFT;
-		buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
-		if (!buf->pages) {
-			dev_warn(dev, "%s: cannot alloc pages\n", __func__);
-			devm_kfree(dev, buf);
-		}
-
-
-		buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
-		if (!buf->sgt) {
-			dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
-			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf);
-			return -ENOMEM;
-		}
-
-		mmap_read_lock(current->mm);
-		if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
-			mmap_read_unlock(current->mm);
-			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
-			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf->sgt);
-			devm_kfree(dev, buf);
-			return -ENOMEM;
-		}
-		mmap_read_unlock(current->mm);
-
-		if ((ret = sg_alloc_table_from_pages(buf->sgt, buf->pages, buf->page_count, 0,
-						     buf->size, GFP_KERNEL))) {
-			dev_warn(dev, "%s: sg_alloc_table_from_pages ret %d\n", __func__, ret);
-			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf->sgt);
-			devm_kfree(dev, buf);
-			return -ENOMEM;
-		}
-
-		if ((ret = dma_map_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0))) {
-			dev_warn(dev, "%s: dma_map_sgtable() failed %d\n", __func__, ret);
-			sg_free_table(buf->sgt);
-			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf->sgt);
-			devm_kfree(dev, buf);
-		}
-		if (buf->sgt->nents > 1) {
-			int d;
-			int contig = 1;
-			dma_addr_t next_addr = sg_dma_address(&buf->sgt->sgl[0]);
-			for (d = 0; d < buf->sgt->nents; d++) {
-				if (sg_dma_address(&buf->sgt->sgl[d]) != next_addr)
-					contig = 0;
-				next_addr = sg_dma_address(&buf->sgt->sgl[d]) +
-					sg_dma_len(&buf->sgt->sgl[d]);
-				dev_warn(dev, "%s: sgl[%d] = 0x%llx len %x contig %d\n", __func__, d,
-					 sg_dma_address(&buf->sgt->sgl[d]), sg_dma_len(&buf->sgt->sgl[d]),
-					 contig);
-			}
-			if (!contig)
-				dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
-					 __func__, buf->sgt->nents);
-
-
-		}
-		buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
-		// XXX HACK if we don't have iommu wtih svm pass the address back via
-		// mmap
-		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
-
-
+		buf->dma_addr = args->va_addr;
 	}
+
+	// 	buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
+	// 	if (!buf)
+	// 		return -ENOMEM;
+	// 	buf->type = args->flags;
+	// 	buf->size = args->size;
+	// 	buf->page_count = buf->size >> PAGE_SHIFT;
+	// 	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+	// 	if (!buf->pages) {
+	// 		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
+	// 		devm_kfree(dev, buf);
+	// 	}
+
+
+	// 	buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
+	// 	if (!buf->sgt) {
+	// 		dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
+	// 		devm_kfree(dev, buf->pages);
+	// 		devm_kfree(dev, buf);
+	// 		return -ENOMEM;
+	// 	}
+
+	// 	mmap_read_lock(current->mm);
+	// 	if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
+	// 		mmap_read_unlock(current->mm);
+	// 		dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
+	// 		devm_kfree(dev, buf->pages);
+	// 		devm_kfree(dev, buf->sgt);
+	// 		devm_kfree(dev, buf);
+	// 		return -ENOMEM;
+	// 	}
+	// 	mmap_read_unlock(current->mm);
+
+	// 	if ((ret = sg_alloc_table_from_pages(buf->sgt, buf->pages, buf->page_count, 0,
+	// 					     buf->size, GFP_KERNEL))) {
+	// 		dev_warn(dev, "%s: sg_alloc_table_from_pages ret %d\n", __func__, ret);
+	// 		devm_kfree(dev, buf->pages);
+	// 		devm_kfree(dev, buf->sgt);
+	// 		devm_kfree(dev, buf);
+	// 		return -ENOMEM;
+	// 	}
+
+	// 	if ((ret = dma_map_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0))) {
+	// 		dev_warn(dev, "%s: dma_map_sgtable() failed %d\n", __func__, ret);
+	// 		sg_free_table(buf->sgt);
+	// 		devm_kfree(dev, buf->pages);
+	// 		devm_kfree(dev, buf->sgt);
+	// 		devm_kfree(dev, buf);
+	// 	}
+	// 	if (buf->sgt->nents > 1) {
+	// 		int d;
+	// 		int contig = 1;
+	// 		dma_addr_t next_addr = sg_dma_address(&buf->sgt->sgl[0]);
+	// 		for (d = 0; d < buf->sgt->nents; d++) {
+	// 			if (sg_dma_address(&buf->sgt->sgl[d]) != next_addr)
+	// 				contig = 0;
+	// 			next_addr = sg_dma_address(&buf->sgt->sgl[d]) +
+	// 				sg_dma_len(&buf->sgt->sgl[d]);
+	// 			dev_warn(dev, "%s: sgl[%d] = 0x%llx len %x contig %d\n", __func__, d,
+	// 				 sg_dma_address(&buf->sgt->sgl[d]), sg_dma_len(&buf->sgt->sgl[d]),
+	// 				 contig);
+	// 		}
+	// 		if (!contig)
+	// 			dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
+	// 				 __func__, buf->sgt->nents);
+
+
+	// 	}
+	// 	buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
+	// 	// XXX HACK if we don't have iommu wtih svm pass the address back via
+	// 	// mmap
+	// 	args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+	// }
 
 	mutex_lock(&p->dev->lock);
 	// XXX use an IDR/IDA for this
@@ -1445,7 +1453,23 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	// only one DPA for now
 	dpa_app->dev = dpa;
 
-	// XXX alloc pasid
+	// Bind device and allocate PASID
+	struct device *dpa_dev = dpa_app->dev->dev;
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm, NULL);
+	if (IS_ERR(dpa_app->sva)) {
+		int ret = PTR_ERR(dpa_app->sva);
+		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
+		kfree(dpa_app);
+		return -ENODEV;
+	}
+	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
+	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
+		dev_err(dpa_dev, "PASID allocation failed\n");
+		iommu_sva_unbind_device(dpa_app->sva);
+		kfree(dpa_app);
+		return -ENODEV;
+	}
+	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
 
 	filep->private_data = dpa_app;
 

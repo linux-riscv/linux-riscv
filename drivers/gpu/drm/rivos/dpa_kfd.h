@@ -2,8 +2,18 @@
 #define _DPA_KFD_H_
 
 #include <linux/kernel.h>
+#include <linux/iommu.h>
 
 #include "dpa_daffy.h"
+
+#define DPA_REGS_MIN_SIZE 0x1000
+
+#define DUC_PCI_STATUS_REG 0x0000
+#define DUC_PCI_QUEUE_INFO_ADDRESS 0x0001
+#define DUC_PCI_QUEUE_INFO_SIZE 0x0009
+#define DUC_PCI_DMA_STATE_BUF 0x0011
+#define DUC_PCI_DMA_STATE_SIZE 0x0019
+#define DUC_PCI_DMA_STATE_PASID 0x0021
 
 // contains info about the queue to fw
 struct dpa_fwq_info {
@@ -54,10 +64,14 @@ struct dpa_kfd_process {
 
 	// struct mmu_notifier *mmu_notifier;
 
+	/* IOMMU Shared Virtual Address unit */
+	struct iommu_sva *sva;
+
 	/* pasid allocated to this process */
 	u32 pasid;
 
 	unsigned alloc_count;
+
 	// hack for now -- just maintain a list of allocations in vram
 	struct list_head buffers;
 
