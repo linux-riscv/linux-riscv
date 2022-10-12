@@ -169,7 +169,7 @@ typedef struct {
 
 #define ATOMIC_INIT(i) { (i) }
 
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) && !defined(CONFIG_GENERIC_ATOMIC64)
 typedef struct {
 	s64 counter;
 } atomic64_t;
