@@ -251,7 +251,9 @@ pmp_done:
 	/* Pick one hart to run the main boot sequence */
 	la a3, hart_lottery
 	li a2, 1
-	amoadd.w a3, a2, (a3)
+	//	amoadd.w a3, a2, (a3)
+	sw a2, (a3)
+	li a2, 0
 	bnez a3, .Lsecondary_start
 
 #else
