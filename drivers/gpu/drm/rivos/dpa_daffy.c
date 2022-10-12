@@ -177,8 +177,8 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	cmd->pasid = p->pasid;
 
 	// mmap_read_lock(current->mm);
-	// no PASID support -- need to map to dma space
-	// XXX one page for now
+	// // no PASID support -- need to map to dma space
+	// // XXX one page for now
 	// if (get_user_pages(ring_ptr, 1, 0, &ring_page, NULL) < 1) {
 	// 	mmap_read_unlock(current->mm);
 	// 	dev_warn(dev->dev, "unable to get ring_page");
@@ -238,18 +238,18 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	return 0;
 
 // out_unmap_rwptr:
-	// dma_unmap_page(dev->dev, rwptr_dma_addr, PAGE_SIZE,
-		    //    DMA_BIDIRECTIONAL);
-// 
+// 	dma_unmap_page(dev->dev, rwptr_dma_addr, PAGE_SIZE,
+// 		       DMA_BIDIRECTIONAL);
+
 // out_unmap_ring:
-	// dma_unmap_page(dev->dev, ring_dma_addr, args->ring_size,
-		    //    DMA_BIDIRECTIONAL);
-// 
+// 	dma_unmap_page(dev->dev, ring_dma_addr, args->ring_size,
+// 		       DMA_BIDIRECTIONAL);
+
 // out_put_rwptr:
-	// put_page(rwptr_page);
-// 
+// 	put_page(rwptr_page);
+
 // out_put_ring:
-	// put_page(ring_page);
+// 	put_page(ring_page);
 
 	return ret;
 }

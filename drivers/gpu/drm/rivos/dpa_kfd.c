@@ -990,6 +990,13 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		buf->dma_addr = args->va_addr;
 	}
 
+	// if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+	// 	buf = dpa_alloc_vram(p, args->size, args->flags);
+	// 	// XXX HACK if we don't have iommu wtih svm pass the address back via
+	// 	// mmap
+	// 	args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+
+	// } else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
 	// 	buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 	// 	if (!buf)
 	// 		return -ENOMEM;
