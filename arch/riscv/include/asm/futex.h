@@ -7,6 +7,9 @@
 #ifndef _ASM_RISCV_FUTEX_H
 #define _ASM_RISCV_FUTEX_H
 
+#ifndef CONFIG_SMP
+#include <asm-generic/futex.h>
+#else
 #include <linux/futex.h>
 #include <linux/uaccess.h>
 #include <linux/errno.h>
@@ -100,5 +103,7 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	*uval = val;
 	return ret;
 }
+
+#endif
 
 #endif /* _ASM_RISCV_FUTEX_H */

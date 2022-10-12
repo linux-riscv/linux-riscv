@@ -25,6 +25,13 @@
 
 #include <asm-generic/bitops/hweight.h>
 
+#ifndef CONFIG_SMP
+
+#include <asm-generic/bitops/atomic.h>
+#include <asm-generic/bitops/lock.h>
+
+#else
+
 #if (BITS_PER_LONG == 64)
 #define __AMO(op)	"amo" #op ".d"
 #elif (BITS_PER_LONG == 32)
@@ -196,6 +203,8 @@ static inline void __clear_bit_unlock(
 #undef __NOP
 #undef __NOT
 #undef __AMO
+
+#endif
 
 #include <asm-generic/bitops/non-atomic.h>
 #include <asm-generic/bitops/le.h>

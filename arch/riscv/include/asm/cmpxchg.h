@@ -6,6 +6,12 @@
 #ifndef _ASM_RISCV_CMPXCHG_H
 #define _ASM_RISCV_CMPXCHG_H
 
+#ifndef CONFIG_SMP
+
+#include <asm-generic/cmpxchg.h>
+
+#else
+
 #include <linux/bug.h>
 
 #include <asm/barrier.h>
@@ -359,5 +365,7 @@
 	BUILD_BUG_ON(sizeof(*(ptr)) != 8);				\
 	arch_cmpxchg_relaxed((ptr), (o), (n));				\
 })
+
+#endif
 
 #endif /* _ASM_RISCV_CMPXCHG_H */
