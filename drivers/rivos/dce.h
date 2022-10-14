@@ -26,14 +26,16 @@
 #define DCE_OPCODE_MEMCPY             1
 #define DCE_OPCODE_MEMSET             2
 #define DCE_OPCODE_MEMCMP             3
-#define DCE_OPCODE_COMPRESS           4
-#define DCE_OPCODE_DECOMPRESS         5
+// #define DCE_OPCODE_COMPRESS           4
+// #define DCE_OPCODE_DECOMPRESS         5
 #define DCE_OPCODE_LOAD_KEY           6
 #define DCE_OPCODE_CLEAR_KEY          7
 #define DCE_OPCODE_ENCRYPT            8
 #define DCE_OPCODE_DECRYPT            9
-#define DCE_OPCODE_DECRYPT_DECOMPRESS 10
-#define DCE_OPCODE_COMPRESS_ENCRYPT   11
+// #define DCE_OPCODE_DECRYPT_DECOMPRESS 10
+// #define DCE_OPCODE_COMPRESS_ENCRYPT   11
+#define DCE_OPCODE_CRC_GEN            12
+#define DCE_OPCODE_MEMCPY_CRC_GEN     13
 
 #define SRC_IS_LIST                 (1 << 1)
 #define SRC2_IS_LIST                (1 << 2)

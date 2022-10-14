@@ -372,22 +372,26 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 				&dest_is_list, (uint8_t __user *)input->destination,
 				size, DMA_FROM_DEVICE, wq_num);
 			break;
-		case DCE_OPCODE_COMPRESS:
-		case DCE_OPCODE_DECOMPRESS:
-		case DCE_OPCODE_COMPRESS_ENCRYPT:
-		case DCE_OPCODE_DECRYPT_DECOMPRESS:
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-				&dest_is_list, (uint8_t __user *)input->destination,
-				desc->operand2, DMA_FROM_DEVICE, wq_num);
-			break;
+		// case DCE_OPCODE_COMPRESS:
+		// case DCE_OPCODE_DECOMPRESS:
+		// case DCE_OPCODE_COMPRESS_ENCRYPT:
+		// case DCE_OPCODE_DECRYPT_DECOMPRESS:
+		// 	desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
+		// 		&src_is_list, (uint8_t __user *)input->source,
+		// 		size, DMA_TO_DEVICE, wq_num);
+		// 	desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
+		// 		&dest_is_list, (uint8_t __user *)input->destination,
+		// 		desc->operand2, DMA_FROM_DEVICE, wq_num);
+		// 	break;
 		case DCE_OPCODE_LOAD_KEY:
 			/* Keys are 32B */
 			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
 				&src_is_list, (uint8_t __user *)input->source,
 				32, DMA_TO_DEVICE, wq_num);
+			break;
+		case DCE_OPCODE_MEMCPY_CRC_GEN:
+		case DCE_OPCODE_CRC_GEN:
+			/* TODO need to parse width here to setup DMA buffer*/
 			break;
 		default:
 			break;
