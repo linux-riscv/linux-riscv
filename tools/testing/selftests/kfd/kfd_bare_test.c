@@ -623,8 +623,8 @@ int main(int argc, char *argv[])
 		// only designed to support axpy kernel
 		init_axpy_kern_args(kern_args_ptr, kern_args_size);
 		// hack to deal with no pasid
-		axpy_kern_args_convert_nopasid(kern_args_ptr, kern_args_mmap_offset & 0xFFFFFFFFFFFFULL,
-					       kern_args_size);
+		// axpy_kern_args_convert_nopasid(kern_args_ptr, kern_args_mmap_offset & 0xFFFFFFFFFFFFULL,
+		// 			       kern_args_size);
 
 
 		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr);
@@ -641,8 +641,8 @@ int main(int argc, char *argv[])
 		aql_packet->grid_size_z = AXPY_Z_DIM;;
 		aql_packet->private_segment_size = 0;
 		aql_packet->group_segment_size = 0;
-		aql_packet->kernel_object = (kern_mmap_offset & 0xFFFFFFFFFFFFULL) + kern_start_offset;
-		aql_packet->kernarg_address = (void *)(kern_args_mmap_offset & 0xFFFFFFFFFFFFULL);
+		aql_packet->kernel_object = (uint64_t) ((uint8_t*) kern_ptr + kern_start_offset);
+		aql_packet->kernarg_address = kern_args_ptr;
 		aql_packet->reserved2 = 0;
 		aql_packet->completion_signal.handle = 0;
 
