@@ -347,6 +347,7 @@ unmap:
 	iounmap(dpa->regs);
 
 disable_device:
+	dev_warn(dpa->dev, "%s: Disabling device\n", __func__);
 	pci_disable_device(pdev);
 	devm_kfree(dev, dpa);
 
@@ -986,7 +987,7 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		// TODO: Setup of dma_addr not explicitly needed once PASID supported tested and working
 		buf->type = args->flags;
 		buf->size = args->size;
-		buf->page_count = buf->size >> PAGE_SHIFT;
+		// buf->page_count = buf->size >> PAGE_SHIFT;
 		buf->dma_addr = args->va_addr;
 	}
 
@@ -1138,21 +1139,21 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 		}
 	}
 
-	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-		if (buf->sgt) {
-			dma_unmap_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0);
-			sg_free_table(buf->sgt);
-			devm_kfree(dev, buf->sgt);
-		}
-		if (buf->page_count) {
-			int i;
-			for (i = 0; i < buf->page_count; i++) {
-				put_page(buf->pages[i]);
-			}
-			devm_kfree(dev, buf->pages);
-		}
+	// if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+	// 	if (buf->sgt) {
+	// 		dma_unmap_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0);
+	// 		sg_free_table(buf->sgt);
+	// 		devm_kfree(dev, buf->sgt);
+	// 	}
+	// 	if (buf->page_count) {
+	// 		int i;
+	// 		for (i = 0; i < buf->page_count; i++) {
+	// 			put_page(buf->pages[i]);
+	// 		}
+	// 		devm_kfree(dev, buf->pages);
+	// 	}
 
-	}
+	// }
 	devm_kfree(dev, buf);
 
 }

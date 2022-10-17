@@ -214,8 +214,8 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	// }
 
 	cmd->ring_base_address = ring_ptr;
-	cmd->write_pointer_address = ring_ptr + wr_ptr;
-	cmd->read_pointer_address = ring_ptr + rd_ptr;
+	cmd->write_pointer_address = wr_ptr;
+	cmd->read_pointer_address = rd_ptr;
 	cmd->ring_size = args->ring_size;
 
 	index = add_to_queue(dev, &pkt);
