@@ -21,7 +21,6 @@
 #include "dce.h"
 
 static dev_t dev_num;
-static struct dce_driver_priv *dce_priv;
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -40,6 +39,9 @@ DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
 
 void clean_up_work(struct work_struct *work) {
 	/* FIXME: check which WQ has interrupt pending */
+
+	struct dce_driver_priv* dce_priv =
+		container_of(work, struct dce_driver_priv, clean_up_worker);
 
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
@@ -410,6 +412,7 @@ static void setup_memory_for_wq_from_user(struct file * file,
 					  int wq_num, UserArea * ua)
 {
 	struct qemu_dce_ctx *ctx = file->private_data;
+	struct dce_driver_priv * dce_priv = ctx->dev;
 	size_t length = ua->numDescs;
 
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
@@ -444,7 +447,8 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
-static void setup_memory_for_wq(int wq_num, KernelQueueReq * kqr)
+static void setup_memory_for_wq(
+		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr)
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 
@@ -526,7 +530,8 @@ static int assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
 	for(wq_num = 1; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == 0) {
 			priv->wq[wq_num].owner = file;
-			printk(KERN_INFO "Assigning file 0x%lx to wq[%d]\n", file, wq_num);
+			printk(KERN_INFO "Assigning file 0x%p to wq[%d]\n",
+						file, wq_num);
 			found = true;
 			break;
 		}
@@ -599,7 +604,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			/* wq_num meaning falling back to shared kernel WQ */
 			if (wq_num > 0)
-				setup_memory_for_wq(wq_num, &kqr);
+				setup_memory_for_wq(priv, wq_num, &kqr);
 
 			break;
 		}
@@ -700,9 +705,10 @@ static const struct file_operations dce_ops = {
 
 static struct class *dce_char_class;
 
-static irqreturn_t handle_dce(int irq, void *dev_id) {
+static irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 	/* with SVA there is no per-job clean up needed */
 	// if (dce_priv->sva_enabled) return IRQ_HANDLED;
+	struct dce_driver_priv *dce_priv=dce_priv_p;
 
 	/* FIXME: multiple thread running this? */
 	printk(KERN_INFO "Got interrupt %d, work scheduled!\n", irq);
@@ -744,7 +750,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	// printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
+	//printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
 	err = pci_enable_device(pdev);
 	if (err) goto disable_device_and_fail;
@@ -759,7 +765,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	drv_priv = kzalloc_node(sizeof(struct dce_driver_priv), GFP_KERNEL,
 			     dev_to_node(dev));
 	if (!drv_priv) goto disable_device_and_fail;
-	dce_priv = drv_priv;
 
 	drv_priv->pdev = pdev;
 	drv_priv->pci_dev = dev;
@@ -809,7 +814,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
 
 		int vec = pci_irq_vector(pdev, 0);
-		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, pdev);
+		/* auto frees on device detach, nice */
+		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
 	} else {
 		dev_warn(dev, "DCE: MSI enable failed\n");
 	}
@@ -821,7 +827,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_init(&drv_priv->lock);
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
-	setup_memory_for_wq(0, NULL);
+	setup_memory_for_wq(drv_priv, 0, NULL);
 	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
 
 	return 0;
