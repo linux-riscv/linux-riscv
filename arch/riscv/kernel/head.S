@@ -286,6 +286,8 @@ pmp_done:
 	mv a0, s0
 #endif
 
+#ifndef CONFIG_RISCV_SKIP_BSSZ
+	/* Zeroing BSS is unnecessary in sim, and wastes a ton of time. */
 #ifndef CONFIG_XIP_KERNEL
 	/* Clear BSS for flat non-ELF images */
 	la a3, __bss_start
@@ -296,6 +298,7 @@ clear_bss:
 	add a3, a3, RISCV_SZPTR
 	blt a3, a4, clear_bss
 clear_bss_done:
+#endif
 #endif
 	/* Save hart ID and DTB physical address */
 	mv s0, a0

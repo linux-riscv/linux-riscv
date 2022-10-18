@@ -93,4 +93,8 @@ config RISCV_HAVE_PMP
         bool
 	default y if !SOC_RIVOS_SIM_TINY
 
+config RISCV_SKIP_BSSZ
+	bool "Skip zero of BSS on startup"
+	default y if SOC_RIVOS_SIM_TINY
+
 endmenu # "SoC selection"
