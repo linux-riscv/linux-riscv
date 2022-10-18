@@ -393,6 +393,14 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 		case DCE_OPCODE_CRC_GEN:
 			/* TODO need to parse width here to setup DMA buffer*/
 			break;
+		case DCE_OPCODE_DIF_CHK:
+		case DCE_OPCODE_DIF_GEN:
+		case DCE_OPCODE_DIF_UPD:
+		case DCE_OPCODE_DIF_STRP:
+		case DCE_OPCODE_DIX_CHK:
+		case DCE_OPCODE_DIX_GEN:
+			/* TODO need to parse width here to setup DMA buffer*/
+			break;
 		default:
 			break;
 	}
