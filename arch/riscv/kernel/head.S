@@ -271,6 +271,8 @@ SYM_CODE_START(_start_kernel)
 	mv a0, s0
 #endif
 
+#ifndef CONFIG_RISCV_SKIP_BSSZ
+	/* Zeroing BSS is unnecessary in sim, and wastes a ton of time. */
 #ifndef CONFIG_XIP_KERNEL
 	/* Clear BSS for flat non-ELF images */
 	la a3, __bss_start
@@ -282,6 +284,8 @@ SYM_CODE_START(_start_kernel)
 	blt a3, a4, .Lclear_bss
 .Lclear_bss_done:
 #endif
+#endif
+
 	la a2, boot_cpu_hartid
 	XIP_FIXUP_OFFSET a2
 	REG_S a0, (a2)
