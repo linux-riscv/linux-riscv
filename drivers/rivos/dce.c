@@ -888,7 +888,7 @@ static int __init dce_driver_init(void)
 {
 	int err;
 	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
-	if (err) return -err;
+	if (err) return err;
 
 	dce_char_class = class_create(THIS_MODULE, DEVICE_NAME);
 	if (IS_ERR(dce_char_class)) {
