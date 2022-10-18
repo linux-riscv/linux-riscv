@@ -55,31 +55,32 @@ void clean_up_work(struct work_struct *work) {
 			int curr = ring->clean_up_index;
 
 			while(curr < head) {
+				// Position in queue
+				int qi = (curr % ring->length);
 				// printk(KERN_INFO "curr :%d, head: %d\n", curr, head);
-				/* for every clean up, notify user via eventfd when applicable */
+				/* for every clean up, notify user via eventfd when applicable
+				 * TODO: Find out an optimal policy for eventfd */
 				if (dce_priv->wq[wq_num].efd_ctx_valid) {
 					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
 					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
 				}
 
-				int index = (curr % ring->length);
 				for(int i = 0; i < NUM_SG_TBLS; i++){
-					if (!ring->sg_tables[i][curr].sgl) continue;
+					if (!ring->sg_tables[i][qi].sgl) continue;
 					// printk(KERN_INFO "Working on wq %d, index %d", wq_num, i);
 					/* unmap the DMA mappings */
-					dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][curr].sgl,
-						ring->sg_tables[i][curr].orig_nents,
-						ring->dma_direction[i][curr]);
+					dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][qi].sgl,
+						ring->sg_tables[i][qi].orig_nents,
+						ring->dma_direction[i][qi]);
 
-					kfree(ring->sg_tables[i][curr].sgl);
+					kfree(ring->sg_tables[i][qi].sgl);
 					/* unmap the hw_addr */
-
-					kfree(ring->hw_addr[i][curr]);
+					kfree(ring->hw_addr[i][qi]);
 
 					/*zero the thing */
-					ring->sg_tables[i][curr].sgl = 0;
-					ring->sg_tables[i][curr].orig_nents = 0;
-					ring->hw_addr[i][curr] = 0;
+					ring->sg_tables[i][qi].sgl = 0;
+					ring->sg_tables[i][qi].orig_nents = 0;
+					ring->hw_addr[i][qi] = 0;
 				}
 				curr++;
 			}
