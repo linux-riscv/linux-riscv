@@ -62,7 +62,7 @@ enum {
 	IV,
 	AAD,
 	COMP,
-	NUM_SG_TBLS
+	NUM_SG_TBLS /*each of the above kind needs a SG list, potentially */
 };
 
 /* WQ type based on ownership */
@@ -120,16 +120,23 @@ typedef struct __attribute__((packed)) DCEDescriptor {
 } __attribute__((packed)) DCEDescriptor;
 
 typedef struct DescriptorRing {
-	size_t length;
-
+	/* Data structures shared with HW*/
 	DCEDescriptor* descriptors;
 	HeadTailIndex* hti;
 
+	/* Local cached copy of WQITE.DSCSZ TODO: Change to mask? */
+	size_t length;
+
+	/* Sequence num of the last job where clean up was performed */
 	uint32_t clean_up_index;
 
+	/* IOVA for configuration of the data strucs shared with HW
+	 * TODO: Do we need to keep them? We never use them */
 	dma_addr_t desc_dma;
 	dma_addr_t hti_dma;
 
+	/* Scatter/Gather list information
+	 * dynamically allocated table of queue size elms for each */
 	int * dma_direction[NUM_SG_TBLS];
 	struct sg_table * sg_tables[NUM_SG_TBLS];
 	DataAddrNode ** hw_addr[NUM_SG_TBLS];
