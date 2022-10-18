@@ -34,8 +34,16 @@
 #define DCE_OPCODE_DECRYPT            9
 // #define DCE_OPCODE_DECRYPT_DECOMPRESS 10
 // #define DCE_OPCODE_COMPRESS_ENCRYPT   11
+/* CRC Opcodes */
 #define DCE_OPCODE_CRC_GEN            12
 #define DCE_OPCODE_MEMCPY_CRC_GEN     13
+/* PI Opcodes */
+#define DCE_OPCODE_DIF_CHK            14
+#define DCE_OPCODE_DIF_GEN            15
+#define DCE_OPCODE_DIF_UPD            16
+#define DCE_OPCODE_DIF_STRP           17
+#define DCE_OPCODE_DIX_CHK            18
+#define DCE_OPCODE_DIX_GEN            19
 
 #define SRC_IS_LIST                 (1 << 1)
 #define SRC2_IS_LIST                (1 << 2)
