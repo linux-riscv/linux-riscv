@@ -267,6 +267,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 		sg_set_page(&sglist[i], pages[i], _size, _offset);
 	}
 	/* FIXME: dma_unmap_sg when appropriate */
+	// TODO: count of 0 means error? Are we dealing with it?
 	count = dma_map_sg(drv_priv->pci_dev, sglist, nr_pages, dma_direction);
 	// printk(KERN_INFO "Count is %d\n", count);
 	if (count > 1)
@@ -399,6 +400,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	if (dest_is_list)
 		desc->ctrl |= DEST_IS_LIST;
 
+	//TODO: Check, are we sure about the src_is_list here ?
 	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP,
 		&src_is_list, (uint8_t __user *)input->completion,
 		8, DMA_FROM_DEVICE, wq_num);
@@ -469,6 +471,7 @@ static void setup_memory_for_wq(
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	// Allcate the descriptors as coherent DMA memory
+	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
 		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
@@ -477,6 +480,7 @@ static void setup_memory_for_wq(
 	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
 	// 	(uint64_t)ring->descriptors);
 
+	// TODO: Error handling, alloc DMA can fail
 	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	ring->hti->head = 0;
@@ -727,6 +731,7 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 
 	// printk(KERN_INFO"dma_mask: 0x%lx\n",dev->dma_mask);
 	/* WQIT is 4KiB */
+	// TODO: Error handling, alloc DMA can fail
 	drv_priv->WQIT = dma_alloc_coherent(dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
