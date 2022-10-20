@@ -23,11 +23,12 @@
 #include <linux/uaccess.h>
 #include <linux/iommu.h>
 #include <linux/platform_device.h>
-#include <linux/dma-iommu.h>
 #include <linux/riscv-iommu.h>
 #include <linux/dma-map-ops.h>
 #include <asm/page.h>
 
+
+#include "dma-iommu.h"
 #include "iommu-sva-lib.h"
 
 #include <asm/csr.h>
@@ -778,7 +779,7 @@ riscv_iommu_of_xlate(struct device *dev, struct of_phandle_args *args)
 	return iommu_fwspec_add_ids(dev, args->args, 1);
 }
 
-static bool riscv_iommu_capable(enum iommu_cap cap)
+static bool riscv_iommu_capable(struct device *dev, enum iommu_cap cap)
 {
 	switch (cap) {
 	case IOMMU_CAP_CACHE_COHERENCY:
@@ -1433,20 +1434,6 @@ static int riscv_iommu_probe(struct device *dev,
 
 	dev_set_drvdata(dev, iommu);
 
-	if (!iommu_present(&platform_bus_type)) {
-		if (bus_set_iommu(&platform_bus_type, &riscv_iommu_ops))
-			dev_warn(dev, "cannot enable IOMMU for platform bus\n");
-	} else if (platform_bus_type.iommu_ops != &riscv_iommu_ops) {
-		dev_warn(dev, "incompatible IOMMU set for platform bus\n");
-	}
-
-	if (!iommu_present(&pci_bus_type)) {
-		if (bus_set_iommu(&pci_bus_type, &riscv_iommu_ops))
-			dev_warn(dev, "cannot enable IOMMU for PCI bus\n");
-	} else if (pci_bus_type.iommu_ops != &riscv_iommu_ops) {
-		dev_warn(dev, "incompatible IOMMU set for PCI bus\n");
-	}
-
 	return 0;
 
  err_ops:
@@ -1577,10 +1564,6 @@ static int __init riscv_iommu_init_module(void)
 
 static void __exit riscv_iommu_cleanup_module(void)
 {
-	if (platform_bus_type.iommu_ops == &riscv_iommu_ops)
-		bus_set_iommu(&platform_bus_type, NULL);
-	if (pci_bus_type.iommu_ops == &riscv_iommu_ops)
-		bus_set_iommu(&pci_bus_type, NULL);
 	pci_unregister_driver(&riscv_iommu_pci_driver);
 }
 
