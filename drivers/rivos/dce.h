@@ -3,6 +3,7 @@
 
 #include "linux/mutex.h"
 #include "linux/eventfd.h"
+#include <linux/workqueue.h>
 
 #define DCE_CTRL 0
 
@@ -191,6 +192,8 @@ static const struct pci_device_id pci_use_msi[] = {
 
 	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_ID,
 			 PCI_ANY_ID, PCI_ANY_ID) },
+	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_VF_ID,
+			 PCI_ANY_ID, PCI_ANY_ID) },
 	{ }
 };
 
@@ -239,6 +242,7 @@ struct dce_driver_priv
 	bool sva_enabled;
 };
 
+void clean_up_work(struct work_struct *work);
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg);
 void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value);
@@ -248,7 +252,11 @@ ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, lof
 ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos);
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int dce_mmap(struct file *file, struct vm_area_struct *vma);
+irqreturn_t handle_dce(int irq, void *dce_priv_p);
 
 void setup_memory_regions(struct dce_driver_priv * drv_priv);
+
+void setup_memory_for_wq(
+		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr);
 
 #endif

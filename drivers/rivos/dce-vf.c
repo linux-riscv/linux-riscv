@@ -108,7 +108,29 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		printk(KERN_INFO "cdev add failed\n");
 	}
 
-	printk(KERN_INFO "VF MMIO: 0x%x\n", drv_priv->mmio_start);
+	/* MSI setup */
+	if (pci_match_id(pci_use_msi, pdev)) {
+		dev_info(dev, "Using MSI(-X) interrupts\n");
+		pci_set_master(pdev);
+		printk(KERN_INFO"dev->msi_enabled: %d\n", pdev->msix_enabled);
+		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+		int vec = pci_irq_vector(pdev, 0);
+		printk(KERN_INFO"err: %d, IRQ vector is %d\n",err, vec);
+		/* auto frees on device detach, nice */
+		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
+	} else {
+		dev_warn(dev, "DCE: MSI enable failed\n");
+	}
+
+	/* work queue setup */
+	INIT_WORK(&drv_priv->clean_up_worker, clean_up_work);
+
+	/* init mutex */
+	mutex_init(&drv_priv->lock);
+
+	/* setup WQ 0 for SHARED_KERNEL usage */
+	setup_memory_for_wq(drv_priv, 0, NULL);
+	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
 
 	return 0;
 disable_device_and_fail:
