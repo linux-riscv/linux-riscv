@@ -297,6 +297,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	struct qemu_dce_ctx *ctx)
 {
 	size_t size, dest_size, iv_size, aad_size;
+	uint32_t num_lbas;
 	bool src_is_list = false;
 	bool src2_is_list = false;
 	bool dest_is_list = false;
@@ -390,8 +391,20 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 				32, DMA_TO_DEVICE, wq_num);
 			break;
 		case DCE_OPCODE_MEMCPY_CRC_GEN:
+			size = FIELD_GET(JOB_CTRL_SIZE, desc->operand4);
+			dest_size = size;
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
+				&src_is_list, (uint8_t __user *)input->source,
+				size, DMA_TO_DEVICE, wq_num);
+			desc->source = setup_dma_for_user_buffer(drv_priv, DEST,
+				&src_is_list, (uint8_t __user *)input->destination,
+				dest_size, DMA_FROM_DEVICE, wq_num);
+			break;
 		case DCE_OPCODE_CRC_GEN:
-			/* TODO need to parse width here to setup DMA buffer*/
+			size = FIELD_GET(JOB_CTRL_SIZE, desc->operand4);
+			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
+				&src_is_list, (uint8_t __user *)input->source,
+				size, DMA_TO_DEVICE, wq_num);
 			break;
 		case DCE_OPCODE_DIF_CHK:
 		case DCE_OPCODE_DIF_GEN:
@@ -399,7 +412,12 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 		case DCE_OPCODE_DIF_STRP:
 		case DCE_OPCODE_DIX_CHK:
 		case DCE_OPCODE_DIX_GEN:
-			/* TODO need to parse width here to setup DMA buffer*/
+			/* Compute the total size using num_lbas and LBA size */
+			num_lbas = FIELD_GET(PI_CTL_NUM_LBA_8_0, desc->operand2);
+			num_lbas += ((FIELD_GET(PI_CTL_NUM_LBA_15_9, desc->operand4)) << 9);
+			size = FIELD_GET(FMT_INFO_LBAS, desc->operand0) ? 0x1000 : 0x200;
+			size *= num_lbas;
+			/* TODO need to consider PI size and how dest differs from src*/
 			break;
 		default:
 			break;

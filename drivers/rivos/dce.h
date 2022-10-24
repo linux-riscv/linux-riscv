@@ -65,6 +65,16 @@
 #define TRANSCTL_PASID_V	BIT(30)
 #define TRANSCTL_PASID		GENMASK(19, 0)
 
+/* JOB_CONTROL fields */
+#define JOB_CTRL_SIZE		GENMASK(47, 0)
+
+/* PI_CTL fields */
+#define PI_CTL_NUM_LBA_8_0	GENMASK(45, 37)
+#define PI_CTL_NUM_LBA_15_9	GENMASK(47, 41)
+
+/* FMT_INFO fields */
+#define FMT_INFO_LBAS		GENMASK(15, 14)
+
 enum {
 	DEST,
 	SRC,
