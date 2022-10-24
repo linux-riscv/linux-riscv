@@ -1529,7 +1529,7 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
 	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
-	struct page *ev_page;
+	unsigned long pfn;
 	int ret = -EFAULT;
 
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
@@ -1550,15 +1550,28 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 			}
 		}
 		mutex_unlock(&p->lock);
-		ev_page = virt_to_page(p->event_page);
-		// map_pages checks vm_pgoff vs count, we don't need an offset
-		vma->vm_pgoff = 0;
-		ret = vm_map_pages(vma, &ev_page, 1);
+
+		pfn = __pa(p->event_page);
+		pfn >>= PAGE_SHIFT;
+
+		pr_debug("Mapping signal page\n");
+		pr_debug("     start user address  == 0x%08lx\n", vma->vm_start);
+		pr_debug("     end user address    == 0x%08lx\n", vma->vm_end);
+		pr_debug("     pfn                 == 0x%016lX\n", pfn);
+		pr_debug("     vm_flags            == 0x%08lX\n", vma->vm_flags);
+		pr_debug("     size                == 0x%08lX\n",
+			vma->vm_end - vma->vm_start);
+
+		/* XXX why does amd keep the user address? */
+//		page->user_address = (uint64_t __user *)vma->vm_start;
+
+		/* mapping the page to user process */
+		ret = remap_pfn_range(vma, vma->vm_start, pfn,
+				      vma->vm_end - vma->vm_start, vma->vm_page_prot);
 		if (ret) {
 			dev_warn(p->dev->dev, "%s: failed to map event page 0x%llx"
-				 " count %u %d\n",
-				 __func__, (u64)ev_page, page_count(ev_page),  ret);
-			ret = -EFAULT;
+				 " ret %d\n",
+				 __func__, (u64)p->event_page, ret);
 		}
 		break;
 	default:
