@@ -247,6 +247,7 @@ int dce_ops_release(struct inode *inode, struct file *file);
 ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos);
 ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *ppos);
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+int dce_mmap(struct file *file, struct vm_area_struct *vma);
 
 void setup_memory_regions(struct dce_driver_priv * drv_priv);
 
