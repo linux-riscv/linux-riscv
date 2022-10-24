@@ -1,6 +1,11 @@
+
 #include <asm-generic/int-ll64.h>
+#include <linux/bitfield.h>
+#include <linux/bitops.h>
 #include <linux/cdev.h>
+#include <linux/delay.h>
 #include <linux/init.h>
+#include <linux/iommu.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -10,6 +15,8 @@
 #include <linux/types.h>
 #include <linux/pci_regs.h>
 #include <linux/of_device.h>
+#include <linux/mm.h>
+#include <linux/workqueue.h>
 
 #include "dce.h"
 
@@ -22,6 +29,7 @@ static const struct file_operations dcevf_ops = {
 	.release	= dce_ops_release,
 	.read		= dce_ops_read,
 	.write		= dce_ops_write,
+	.mmap 		= dce_mmap,
 	.unlocked_ioctl = dce_ioctl,
 };
 // FIXME: clean up ida
@@ -56,7 +64,22 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	if (!drv_priv) goto disable_device_and_fail;
 
 	drv_priv->pdev = pdev;
-	drv_priv->pci_dev = &pdev->dev;
+	drv_priv->pci_dev = dev;
+
+	drv_priv->mmio_start_phys = pci_resource_start(pdev, 0);
+	// mmio_len   = pci_resource_len  (pdev, 0);
+
+	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+	// FIXME: Enable for testing non-SVA
+	// if (1) {
+		dev_warn(dev, "DCE:Unable to turn on user SVA feature.\n");
+		drv_priv->sva_enabled = false;
+	} else {
+		dev_info(dev, "DCE:SVA feature enabled.\n");
+		drv_priv->sva_enabled = true;
+	}
+
+	// initialize the child device
 	dev = &drv_priv->dev;
 
 	device_initialize(dev);
