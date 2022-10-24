@@ -16,7 +16,6 @@
 #include <linux/pci_regs.h>
 #include <linux/of_device.h>
 #include <linux/mm.h>
-#include <linux/workqueue.h>
 
 #include "dce.h"
 
@@ -480,7 +479,7 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
-static void setup_memory_for_wq(
+void setup_memory_for_wq(
 		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr)
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
@@ -738,9 +737,7 @@ static const struct file_operations dce_ops = {
 	.unlocked_ioctl	= dce_ioctl
 };
 
-static struct class *dce_char_class;
-
-static irqreturn_t handle_dce(int irq, void *dce_priv_p) {
+irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 	/* with SVA there is no per-job clean up needed */
 	// if (dce_priv->sva_enabled) return IRQ_HANDLED;
 	struct dce_driver_priv *dce_priv=dce_priv_p;
@@ -769,6 +766,7 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 	dce_reg_write(drv_priv, DCE_REG_WQITBA,
 				 (uint64_t) drv_priv->WQIT_dma);
 }
+static struct class *dce_char_class;
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
@@ -846,10 +844,12 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		dev_info(dev, "Using MSI(-X) interrupts\n");
+		printk(KERN_INFO"dev->msix_enabled: %d\n", pdev->msi_enabled);
 		pci_set_master(pdev);
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
-
 		int vec = pci_irq_vector(pdev, 0);
+		printk(KERN_INFO"err: %d, IRQ vector is %d\n",err, vec);
+
 		/* auto frees on device detach, nice */
 		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
 	} else {
