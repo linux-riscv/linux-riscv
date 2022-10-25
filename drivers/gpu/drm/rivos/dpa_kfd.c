@@ -992,85 +992,45 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		buf->dma_addr = args->va_addr;
 	}
 
-	// if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
-	// 	buf = dpa_alloc_vram(p, args->size, args->flags);
-	// 	// XXX HACK if we don't have iommu wtih svm pass the address back via
-	// 	// mmap
-	// 	args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
+	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+		buf = dpa_alloc_vram(p, args->size, args->flags);
+		// XXX HACK if we don't have iommu wtih svm pass the address back via
+		// mmap
+		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
 
-	// } else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-	// 	buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
-	// 	if (!buf)
-	// 		return -ENOMEM;
-	// 	buf->type = args->flags;
-	// 	buf->size = args->size;
-	// 	buf->page_count = buf->size >> PAGE_SHIFT;
-	// 	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
-	// 	if (!buf->pages) {
-	// 		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
-	// 		devm_kfree(dev, buf);
-	// 	}
-
-
-	// 	buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
-	// 	if (!buf->sgt) {
-	// 		dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
-	// 		devm_kfree(dev, buf->pages);
-	// 		devm_kfree(dev, buf);
-	// 		return -ENOMEM;
-	// 	}
-
-	// 	mmap_read_lock(current->mm);
-	// 	if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
-	// 		mmap_read_unlock(current->mm);
-	// 		dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
-	// 		devm_kfree(dev, buf->pages);
-	// 		devm_kfree(dev, buf->sgt);
-	// 		devm_kfree(dev, buf);
-	// 		return -ENOMEM;
-	// 	}
-	// 	mmap_read_unlock(current->mm);
-
-	// 	if ((ret = sg_alloc_table_from_pages(buf->sgt, buf->pages, buf->page_count, 0,
-	// 					     buf->size, GFP_KERNEL))) {
-	// 		dev_warn(dev, "%s: sg_alloc_table_from_pages ret %d\n", __func__, ret);
-	// 		devm_kfree(dev, buf->pages);
-	// 		devm_kfree(dev, buf->sgt);
-	// 		devm_kfree(dev, buf);
-	// 		return -ENOMEM;
-	// 	}
-
-	// 	if ((ret = dma_map_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0))) {
-	// 		dev_warn(dev, "%s: dma_map_sgtable() failed %d\n", __func__, ret);
-	// 		sg_free_table(buf->sgt);
-	// 		devm_kfree(dev, buf->pages);
-	// 		devm_kfree(dev, buf->sgt);
-	// 		devm_kfree(dev, buf);
-	// 	}
-	// 	if (buf->sgt->nents > 1) {
-	// 		int d;
-	// 		int contig = 1;
-	// 		dma_addr_t next_addr = sg_dma_address(&buf->sgt->sgl[0]);
-	// 		for (d = 0; d < buf->sgt->nents; d++) {
-	// 			if (sg_dma_address(&buf->sgt->sgl[d]) != next_addr)
-	// 				contig = 0;
-	// 			next_addr = sg_dma_address(&buf->sgt->sgl[d]) +
-	// 				sg_dma_len(&buf->sgt->sgl[d]);
-	// 			dev_warn(dev, "%s: sgl[%d] = 0x%llx len %x contig %d\n", __func__, d,
-	// 				 sg_dma_address(&buf->sgt->sgl[d]), sg_dma_len(&buf->sgt->sgl[d]),
-	// 				 contig);
-	// 		}
-	// 		if (!contig)
-	// 			dev_warn(dev, "%s: unable to map buffer into contig space: %u nents\n",
-	// 				 __func__, buf->sgt->nents);
+	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
+		if (!buf)
+			return -ENOMEM;
+		buf->type = args->flags;
+		buf->size = args->size;
+		buf->page_count = buf->size >> PAGE_SHIFT;
+		buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+		if (!buf->pages) {
+			dev_warn(dev, "%s: cannot alloc pages\n", __func__);
+			devm_kfree(dev, buf);
+		}
 
 
-	// 	}
-	// 	buf->dma_addr = sg_dma_address(&buf->sgt->sgl[0]);
-	// 	// XXX HACK if we don't have iommu wtih svm pass the address back via
-	// 	// mmap
-	// 	args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
-	// }
+		buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
+		if (!buf->sgt) {
+			dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf);
+			return -ENOMEM;
+		}
+
+		mmap_read_lock(current->mm);
+		if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
+			mmap_read_unlock(current->mm);
+			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf->sgt);
+			devm_kfree(dev, buf);
+			return -ENOMEM;
+		}
+		mmap_read_unlock(current->mm);
+	}
 
 	mutex_lock(&p->dev->lock);
 	// XXX use an IDR/IDA for this
