@@ -391,7 +391,7 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
 	}
 
 	entry = iommu_alloc_resv_region(RISCV_IMSIC_BASE, PAGE_SIZE * 256, 0,
-					IOMMU_RESV_SW_MSI);
+					IOMMU_RESV_SW_MSI, GFP_KERNEL);
 	if (entry) {
 		list_add_tail(&entry->list, &ep->regions);
 	}
