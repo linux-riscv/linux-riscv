@@ -1,0 +1,86 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	compatible = "riscv-rivos-sim-tiny";
+	model = "rivos,sim-tiny";
+
+	chosen {
+		rng-seed = <0xe3845ee4 0xcf65761d 0x69df6405 0xec014342 0x3e5e2a59 0x81a65560 0x18d9e980 0x70f9ad1f>;
+		stdout-path = "/soc/serial@10000000";
+		bootargs = "console=hvc0 earlycon=ot,mmio32,0x10000000 init=/bin/sh";
+	};
+
+	platform-bus@4000000 {
+		interrupt-parent = <0x03>;
+		ranges = <0x00 0x00 0x4000000 0x2000000>;
+		#address-cells = <0x01>;
+		#size-cells = <0x01>;
+		compatible = "simple-bus";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x8000000>;
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		timebase-frequency = <0x989680>;
+
+		cpu: cpu@0 {
+			device_type = "cpu";
+			reg = <0x00>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv64imafdch_zicsr_zifencei_zihintpause_zba_zbb_zbc_zbs_sstc";
+			mmu-type = "riscv,sv39";
+
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <&cpu>;
+				};
+			};
+		};
+	};
+
+	soc {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		compatible = "simple-bus";
+		ranges;
+
+		serial@10000000 {
+			reg = <0x00 0x10000000 0x00 0x100>;
+			compatible = "opentitan,uart";
+		};
+
+/*		plic@c000000 {
+			riscv,ndev = <0x60>;
+			reg = <0x00 0xc000000 0x00 0x600000>;
+			interrupts-extended = <&cpu0_intc 0x0b &cpu0_intc 0x09>;
+			interrupt-controller;
+			compatible = "sifive,plic-1.0.0\0riscv,plic0";
+			#address-cells = <0x00>;
+			#interrupt-cells = <0x01>;
+		};
+*/
+/*		clint@2000000 {
+			interrupts-extended = <&cpu0_intc 0x03 &cpu0_intc 0x07>;
+			reg = <0x00 0x2000000 0x00 0x10000>;
+			compatible = "sifive,clint0\0riscv,clint0";
+		};
+*/
+
+	};
+};

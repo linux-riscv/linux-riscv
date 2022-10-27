@@ -41,6 +41,15 @@ config SOC_VIRT
 	help
 	  This enables support for QEMU Virt Machine.
 
+config SOC_RIVOS_SIM_TINY
+	bool "Rivos tiny sim machine"
+	select PM_GENERIC_DOMAINS if PM
+	select PM_GENERIC_DOMAINS_OF if PM && OF
+	select RISCV_SBI_CPUIDLE if CPU_IDLE && RISCV_SBI
+	select RISCV_TIMER
+	help
+	  This enables support for the Rivos Tiny Sim machine
+
 config SOC_CANAAN
 	bool "Canaan Kendryte K210 SoC"
 	depends on !MMU
