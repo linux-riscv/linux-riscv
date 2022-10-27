@@ -17,9 +17,10 @@
 #define DUC_PCI_DMA_PASIDS 0x0081
 #define DUC_PCI_DMA_GO 0x00A1
 #define DUC_PCI_DMA_OP_DONE 0x00A9
+#define DUC_PCI_DMA_INTERRUPT_ENABLE 0x00B1
 
-#define DUC_PCI_QUEUE_INFO_ADDRESS 0x00B1
-#define DUC_PCI_QUEUE_INFO_SIZE 0x00B9
+#define DUC_PCI_QUEUE_INFO_ADDRESS 0x00B9
+#define DUC_PCI_QUEUE_INFO_SIZE 0x00C1
 
 // contains info about the queue to fw
 struct dpa_fwq_info {
