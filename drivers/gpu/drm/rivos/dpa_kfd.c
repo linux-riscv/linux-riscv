@@ -775,8 +775,8 @@ static int dpa_kfd_ioctl_wait_events(struct file *filep,
 	int i;
 
 
-	dev_warn(p->dev->dev, "%s: %u events wait_all %d timeout %lu\n", __func__,
-		 num_events, wait_all, timeout);
+	/* dev_warn(p->dev->dev, "%s: %u events wait_all %d timeout %lu\n", __func__, */
+	/* 	 num_events, wait_all, timeout); */
 
 	waiters = alloc_event_waiters(num_events);
 	if (!waiters)
@@ -871,8 +871,8 @@ out_unlock:
 	free_waiters(num_events, waiters);
 	mutex_unlock(&p->lock);
 
-	dev_warn(p->dev->dev, "%s: ret = %d result = %d\n", __func__, ret,
-		*wait_result);
+	/* dev_warn(p->dev->dev, "%s: ret = %d result = %d\n", __func__, ret, */
+	/* 	*wait_result); */
 
 	return ret;
 }
@@ -1310,7 +1310,8 @@ static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long ar
 //	if (nr >= AMDKFD_CORE_IOCTL_COUNT)
 //		return ret;
 
-	dev_warn(dpa_device, "ioctl cmd 0x%x (#0x%x), arg 0x%lx\n", cmd, nr, arg);
+	if (nr != 0xc) // wait event is too noisy
+		dev_warn(dpa_device, "ioctl cmd 0x%x (#0x%x), arg 0x%lx\n", cmd, nr, arg);
 
 	if ((nr >= AMDKFD_COMMAND_START) && (nr < AMDKFD_COMMAND_END)) {
 		u32 amdkfd_size;
