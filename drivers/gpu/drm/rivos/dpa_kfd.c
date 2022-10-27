@@ -112,7 +112,7 @@ static ssize_t dpa_kfd_sysfs_show(struct kobject *kobj, struct attribute *attr,
 		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "drm_render_minor %d\n",
 			dkt.dpa->drm_minor);
 		/* This tells it which "ISA" to use */
-		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "gfx_target_version %d\n",
+		offs += snprintf(buffer + offs, PAGE_SIZE - offs, "gfx_target_version %x\n",
 				 DPA_HSA_GFX_VERSION);
 	} else if (attr == &dkt.attr_cpu_node_id) {
 		offs = snprintf(buffer, PAGE_SIZE, "%d\n", DPA_GPU_ID);

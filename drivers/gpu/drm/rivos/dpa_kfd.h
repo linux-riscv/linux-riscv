@@ -125,7 +125,7 @@ struct kfd_ioctl_desc {
 #define DPA_GPU_ID (1234)
 
 /* userspace is expecting version (10, 9, 9) for RIG64 ISA */
-#define DPA_HSA_GFX_VERSION (10909)
+#define DPA_HSA_GFX_VERSION (0x10909)
 
 /* For now let userspace allocate anything within a 48-bit address space */
 #define DPA_GPUVM_ADDR_LIMIT ((1ULL << 48) - 1)
