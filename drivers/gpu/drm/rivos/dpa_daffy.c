@@ -185,18 +185,7 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	// dma_addr_t ring_dma_addr = 0;
 	// dma_addr_t rwptr_dma_addr = 0;
 	unsigned index;
-	int ret;
-
-	// XXX assume read and write pointers are in the same page
-	if ((wr_ptr & ~(PAGE_SIZE - 1ULL)) != (rd_ptr & ~(PAGE_SIZE - 1ULL))) {
-		dev_warn(dev->dev, "rwptrs not on same page");
-		return -EINVAL;
-	}
-
-	if (args->ring_size != PAGE_SIZE) {
-		dev_warn(dev->dev, "ring_size != PAGE_SIZE");
-		return -EINVAL;
-	}
+	int ret = 0;
 
 	if (!queue_has_space(&dev->qinfo)) {
 		// XXX wait on wait queue
@@ -207,45 +196,8 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = CREATE_QUEUE;
 	cmd = &pkt.u.dcqc;
+
 	cmd->pasid = p->pasid;
-
-	// mmap_read_lock(current->mm);
-	// // no PASID support -- need to map to dma space
-	// // XXX one page for now
-	// if (get_user_pages(ring_ptr, 1, 0, &ring_page, NULL) < 1) {
-	// 	mmap_read_unlock(current->mm);
-	// 	dev_warn(dev->dev, "unable to get ring_page");
-	// 	return -EFAULT;
-	// }
-
-	// if (get_user_pages(wr_ptr, 1, 0, &rwptr_page, NULL) < 1) {
-	// 	mmap_read_unlock(current->mm);
-	// 	dev_warn(dev->dev, "unable to get rwptr_page");
-	// 	ret = -EFAULT;
-	// 	goto out_put_ring;
-	// }
-	// mmap_read_unlock(current->mm);
-
-	// ring_offset = ring_ptr & (PAGE_SIZE - 1ULL);
-	// wr_offset = wr_ptr & (PAGE_SIZE - 1ULL);
-	// rd_offset = rd_ptr & (PAGE_SIZE - 1ULL);
-
-	// ring_dma_addr = dma_map_page(dev->dev, ring_page, ring_offset,
-	// 			     args->ring_size, DMA_BIDIRECTIONAL);
-	// if (ring_dma_addr == DMA_MAPPING_ERROR) {
-	// 	dev_warn(dev->dev, "error mapping ring page");
-	// 	ret = -EIO;
-	// 	goto out_put_rwptr;
-	// }
-
-	// rwptr_dma_addr = dma_map_page(dev->dev, rwptr_page, 0,
-	// 			      PAGE_SIZE, DMA_BIDIRECTIONAL);
-	// if (rwptr_dma_addr == DMA_MAPPING_ERROR) {
-	// 	dev_warn(dev->dev, "error mapping ring page");
-	// 	ret = -EIO;
-	// 	goto out_unmap_ring;
-	// }
-
 	cmd->ring_base_address = ring_ptr;
 	cmd->write_pointer_address = wr_ptr;
 	cmd->read_pointer_address = rd_ptr;
@@ -268,21 +220,6 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 		dev->qinfo.fw_queue->h_read_index);
 	args->queue_id = qpkt->u.dcqc.queue_id;
 	// XXX save queue somewhere to device/process
-	return 0;
-
-// out_unmap_rwptr:
-// 	dma_unmap_page(dev->dev, rwptr_dma_addr, PAGE_SIZE,
-// 		       DMA_BIDIRECTIONAL);
-
-// out_unmap_ring:
-// 	dma_unmap_page(dev->dev, ring_dma_addr, args->ring_size,
-// 		       DMA_BIDIRECTIONAL);
-
-// out_put_rwptr:
-// 	put_page(rwptr_page);
-
-// out_put_ring:
-// 	put_page(ring_page);
 
 	return ret;
 }
