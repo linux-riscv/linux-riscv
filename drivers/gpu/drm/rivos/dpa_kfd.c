@@ -946,14 +946,15 @@ static int dpa_kfd_ioctl_wait_events(struct file *filep,
 	 */
 	//if (!ret && *wait_result == KFD_IOC_WAIT_RESULT_COMPLETE)
 	// no event data yet
-		//ret = copy_signaled_event_data(num_events,
-		//			       waiters, events);
-
-
+	//ret = copy_signaled_event_data(num_events,
+	//			       waiters, events);
+	goto out;
 
 out_unlock:
-	free_waiters(num_events, waiters);
 	mutex_unlock(&p->lock);
+
+out:
+	free_waiters(num_events, waiters);
 
 	/* dev_warn(p->dev->dev, "%s: ret = %d result = %d\n", __func__, ret, */
 	/* 	*wait_result); */
