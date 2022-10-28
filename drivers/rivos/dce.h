@@ -75,6 +75,7 @@
 
 /* FMT_INFO fields */
 #define FMT_INFO_LBAS		GENMASK(15, 14)
+#define FMT_INFO_PIF		GENMASK(13, 12)
 
 enum {
 	DEST,
@@ -85,6 +86,13 @@ enum {
 	COMP,
 	NUM_SG_TBLS /*each of the above kind needs a SG list, potentially */
 };
+
+typedef enum {
+    _16GB = 0,
+    _32GB = 1,
+    _64GB = 2,
+    PIF_RESERVED = 3,
+} PIF_encoding;
 
 /* WQ type based on ownership */
 typedef enum {
