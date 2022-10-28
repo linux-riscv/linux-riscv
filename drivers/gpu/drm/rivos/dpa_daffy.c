@@ -219,7 +219,8 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 		 __func__, qpkt->hdr.response, qpkt->u.dcqc.queue_id,
 		dev->qinfo.fw_queue->h_read_index);
 	args->queue_id = qpkt->u.dcqc.queue_id;
-	// XXX save queue somewhere to device/process
+	// doorbell_offset will get converted from page offset to something else by caller
+	args->doorbell_offset = qpkt->u.dcqc.doorbell_offset;
 
 	return ret;
 }
