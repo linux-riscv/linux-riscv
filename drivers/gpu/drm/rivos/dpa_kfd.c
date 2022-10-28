@@ -396,16 +396,100 @@ static int dpa_kfd_ioctl_get_version(struct file *filep,
 	return 0;
 }
 
+static int dpa_add_aql_queue(struct dpa_kfd_process *p, u32 queue_id,
+			     u32 doorbell_offset)
+{
+	struct dpa_aql_queue *q = devm_kzalloc(p->dev->dev, sizeof(*q),
+					       GFP_KERNEL);
+	if (!q)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&q->list);
+	q->id = queue_id;
+	q->mmap_offset = doorbell_offset;
+
+	mutex_lock(&p->lock);
+	list_add_tail(&q->list, &p->queue_list);
+	mutex_unlock(&p->lock);
+
+	return 0;
+}
+
+static int dpa_del_aql_queue(struct dpa_kfd_process *p, u32 queue_id)
+{
+	struct dpa_aql_queue *q, *tmp;
+	bool found = false;
+
+	mutex_lock(&p->lock);
+	list_for_each_entry_safe(q, tmp, &p->queue_list, list) {
+		if (q->id == queue_id) {
+			dev_warn(p->dev->dev, "%s: deleteing aql queue %u\n",
+				 __func__, queue_id);
+			list_del(&q->list);
+			devm_kfree(p->dev->dev, q);
+			found = true;
+		}
+	}
+	mutex_unlock(&p->lock);
+
+	return !found;
+}
+
+static void dpa_del_all_queues(struct dpa_kfd_process *p)
+{
+	struct dpa_aql_queue *q;
+	int ret;
+
+	mutex_lock(&p->lock);
+	while (!list_empty(&p->queue_list)) {
+		q = container_of(p->queue_list.next, struct dpa_aql_queue,
+				 list);
+		list_del(&q->list);
+		ret = daffy_destroy_queue_cmd(p->dev, p, q->id);
+		if (ret)
+			dev_warn(p->dev->dev, "%s: failed to destroy q %u\n",
+				 __func__, q->id);
+		devm_kfree(p->dev->dev, q);
+	}
+	mutex_unlock(&p->lock);
+}
+
 static int dpa_kfd_ioctl_create_queue(struct file *filep, struct dpa_kfd_process *p, void *data)
 {
 	struct kfd_ioctl_create_queue_args *args = data;
-	return daffy_create_queue_cmd(p->dev, p, args);
+	u64 doorbell_mmap_offset;
+	int ret = daffy_create_queue_cmd(p->dev, p, args);
+
+	if (ret)
+		return ret;
+
+	// we need to convert the page offset from daffy to an offset mmap can recognize
+	doorbell_mmap_offset = KFD_MMAP_TYPE_DOORBELL << KFD_MMAP_TYPE_SHIFT;
+	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
+	if (ret) {
+		dev_warn(p->dev->dev, "%s: unable to add aql queue to process,"
+			 " destroying id %u\n", __func__, args->queue_id);
+		daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
+	}
+	args->doorbell_offset = doorbell_mmap_offset;
+	return ret;
 }
 
 static int dpa_kfd_ioctl_destroy_queue(struct file *filep, struct dpa_kfd_process *p, void *data)
 {
 	struct kfd_ioctl_destroy_queue_args *args = data;
-	return daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
+	int ret;
+
+	ret = dpa_del_aql_queue(p, args->queue_id);
+
+	if (ret) {
+		dev_warn(p->dev->dev, "%s: queue id %u not found\n", __func__,
+			 args->queue_id);
+		return -EINVAL;
+	}
+	ret = daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
+
+	return ret;
 }
 
 static int dpa_kfd_ioctl_set_memory_policy(struct file *filep, struct dpa_kfd_process *p, void *data)
@@ -1419,6 +1503,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	INIT_LIST_HEAD(&dpa_app->buffers);
 	idr_init(&dpa_app->event_idr);
 	INIT_LIST_HEAD(&dpa_app->event_list);
+	INIT_LIST_HEAD(&dpa_app->queue_list);
 
 	// only one DPA for now
 	dpa_app->dev = dpa;
@@ -1474,6 +1559,9 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 		idr_destroy(&p->event_idr);
 		if (p->event_page)
 			devm_kfree(p->dev->dev, p->event_page);
+		if (p->fake_doorbell_page)
+			devm_kfree(p->dev->dev, p->fake_doorbell_page);
+		dpa_del_all_queues(p);
 		// XXX single process hack, clear the singleton
 		if (p == dpa_app)
 			dpa_app = NULL;
@@ -1535,10 +1623,39 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 				 __func__, (u64)p->event_page, ret);
 		}
 		break;
+	case KFD_MMAP_TYPE_DOORBELL:
+		// XXX hack for now until real doorbell mmio is implemented
+		// allocate a regular page and put it there, device will be
+		// polling on the queues until real doorbells are implemented
+		mutex_lock(&p->lock);
+		if (!p->fake_doorbell_page) {
+			p->fake_doorbell_page = devm_kzalloc(p->dev->dev, size,
+							     GFP_KERNEL);
+			if (!p->fake_doorbell_page) {
+				dev_warn(p->dev->dev, "%s: failed to alloc fake"
+					 " db page\n", __func__);
+				ret = -ENOMEM;
+				mutex_unlock(&p->lock);
+				goto out;
+			}
+		}
+		mutex_unlock(&p->lock);
+
+		pfn = __pa(p->fake_doorbell_page);
+		pfn >>= PAGE_SHIFT;
+
+		ret = remap_pfn_range(vma, vma->vm_start, pfn,
+				      vma->vm_end - vma->vm_start, vma->vm_page_prot);
+		if (ret) {
+			dev_warn(p->dev->dev, "%s: failed to map doorbell page"
+				 "ret %d\n",
+				 __func__, ret);
+		}
+		break;
 	default:
 		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
 	}
-
+out:
 	return ret;
 }
 

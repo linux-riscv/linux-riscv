@@ -57,6 +57,13 @@ struct dpa_device {
 	struct dpa_fwq_info qinfo;
 };
 
+// keep track of all allocated aql queues
+struct dpa_aql_queue {
+	struct list_head list;
+	u32 id;
+	u32 mmap_offset;
+};
+
 struct dpa_kfd_process {
 	// list_head for list of processes using device
 
@@ -67,8 +74,6 @@ struct dpa_kfd_process {
 
 	/* mm struct of the process */
 	void *mm;
-
-	// struct mmu_notifier *mmu_notifier;
 
 	/* IOMMU Shared Virtual Address unit */
 	struct iommu_sva *sva;
@@ -85,6 +90,10 @@ struct dpa_kfd_process {
 	u64 *event_page;
 	struct idr event_idr;
 	struct list_head event_list;
+
+	// aql queues
+	struct list_head queue_list;
+	void *fake_doorbell_page;
 };
 
 // tracks buffers -- especially vram allocations
@@ -167,6 +176,7 @@ struct dpa_kfd_event_waiter {
 /* offsets to MMAP calls for different things */
 #define KFD_MMAP_TYPE_SHIFT (60)
 #define KFD_MMAP_TYPE_EVENTS (0x2ULL)
+#define KFD_MMAP_TYPE_DOORBELL (0x1ULL)
 
 #define KFD_GPU_ID_HASH_WIDTH (4)
 #define KFD_MMAP_GPU_ID_SHIFT (48)
