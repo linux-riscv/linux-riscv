@@ -117,16 +117,16 @@ typedef struct __attribute__((packed)) WQITE {
     uint32_t TRANSCTL;
     uint64_t WQ_CTX_SAVE_BA;
     // TBA: key slot management
-} __attribute__((packed)) WQITE;
+} WQITE;
 
-typedef struct HeadTailIndex {
+typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
 	uint64_t head;
 	uint64_t padding1[7];
 	_Atomic uint64_t tail;
 	uint64_t padding2[7];
-} HeadTailIndex __attribute__((aligned(64)));
+} HeadTailIndex;
 
-typedef struct __attribute__((packed)) DCEDescriptor {
+typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
 	uint16_t operand0;
@@ -138,7 +138,7 @@ typedef struct __attribute__((packed)) DCEDescriptor {
 	uint64_t operand2;
 	uint64_t operand3;
 	uint64_t operand4;
-} __attribute__((packed)) DCEDescriptor;
+} DCEDescriptor;
 
 typedef struct DescriptorRing {
 	/* Data structures shared with HW*/
@@ -230,8 +230,8 @@ struct dce_driver_priv
 	uint64_t mmio_start_phys;
 
 
-    WQITE * WQIT;
-    dma_addr_t WQIT_dma;
+	WQITE * WQIT;
+	dma_addr_t WQIT_dma;
 
 	work_queue wq[NUM_WQ];
 
