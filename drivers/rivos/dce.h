@@ -228,10 +228,6 @@ struct dce_driver_priv
 	dev_t dev_num;
 	struct cdev cdev;
 
-	u32* in;
-	u32* out;
-	u32* temp;
-
 	struct mutex lock;
 
 	uint64_t mmio_start;
