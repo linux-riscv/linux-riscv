@@ -91,7 +91,7 @@ void clean_up_work(struct work_struct *work) {
 	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 }
 
-struct qemu_dce_ctx {
+struct submitter_dce_ctx {
 	struct dce_driver_priv *dev;
 	struct iommu_sva *sva;
 	unsigned int pasid;
@@ -101,7 +101,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 {
 	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
 	struct dce_driver_priv *dev = file->private_data;
-	struct qemu_dce_ctx * ctx;
+	struct submitter_dce_ctx * ctx;
 	int ret;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -143,7 +143,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 
 int dce_ops_release(struct inode *inode, struct file *file)
 {
-	struct qemu_dce_ctx *ctx = file->private_data;
+	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 	/* FIXME: do we need lock here? */
 	mutex_lock(&priv->lock);
@@ -293,7 +293,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	struct DCEDescriptor * desc, struct DCEDescriptor * input, int wq_num,
-	struct qemu_dce_ctx *ctx)
+	struct submitter_dce_ctx *ctx)
 {
 	size_t size = 0, dest_size = 0, iv_size, aad_size, block_size, PI_size;
 	uint32_t num_lbas, PIF;
@@ -468,7 +468,7 @@ void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
 static void setup_memory_for_wq_from_user(struct file * file,
 					  int wq_num, UserArea * ua)
 {
-	struct qemu_dce_ctx *ctx = file->private_data;
+	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv * dce_priv = ctx->dev;
 	size_t length = ua->numDescs;
 
@@ -607,7 +607,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	uint64_t val;
 	struct DCEDescriptor descriptor;
-	struct qemu_dce_ctx * ctx = file->private_data;
+	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 
 	switch (cmd) {
@@ -726,7 +726,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 int dce_mmap(struct file *file, struct vm_area_struct *vma) {
-	struct qemu_dce_ctx * ctx = file->private_data;
+	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 
 	int wq_num = find_wq_number(file, priv);
