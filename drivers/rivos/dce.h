@@ -128,10 +128,10 @@ typedef struct __attribute__((packed)) WQITE {
 } WQITE;
 
 typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
-	uint64_t head;
-	uint64_t padding1[7];
-	_Atomic uint64_t tail;
-	uint64_t padding2[7];
+	u64 head;
+	u64 padding1[7];
+	_Atomic u64 tail;
+	u64 padding2[7];
 } HeadTailIndex;
 
 typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
@@ -172,16 +172,15 @@ typedef struct DescriptorRing {
 } DescriptorRing;
 
 typedef struct UserArea {
-	HeadTailIndex * hti;
-	DCEDescriptor * descriptors;
-	int numDescs;
-	int efd;
+	u64 hti;
+	u64 descriptors;
+	u64 numDescs;
 } UserArea;
 
 typedef struct KernelQueueReq {
-    int DSCSZ;
-    bool eventfd_vld;
-    int eventfd;
+    u32 DSCSZ;
+    u32 eventfd_vld;
+    u32 eventfd;
 } KernelQueueReq;
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
