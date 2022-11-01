@@ -63,7 +63,7 @@ void clean_up_work(struct work_struct *work) {
 					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
 					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
 				}
-
+#if NOPASID
 				for(int i = 0; i < NUM_SG_TBLS; i++){
 					if (!ring->sg_tables[i][qi].sgl) continue;
 					// printk(KERN_INFO "Working on wq %d, index %d", wq_num, i);
@@ -81,6 +81,7 @@ void clean_up_work(struct work_struct *work) {
 					ring->sg_tables[i][qi].orig_nents = 0;
 					ring->hw_addr[i][qi] = 0;
 				}
+#endif
 				curr++;
 			}
 			ring->clean_up_index = curr;
@@ -135,6 +136,11 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			printk(KERN_INFO "PASID allocation success!\n");
 		}
 	}
+#if NOPASID
+	else {
+		/* TODO: error */
+	}
+#endif
 	/* keep sva context linked to the file */
 	file->private_data = ctx;
 
@@ -229,6 +235,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	// TODO: release semantics here
 }
 
+#if NOPASID
 static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index, bool * result_is_list,
                                           uint8_t __user * user_ptr, size_t size, uint8_t dma_direction, int wq_num) {
 	int i, count;
@@ -301,6 +308,7 @@ static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int 
 	}
 	else return (uint64_t)(ring->hw_addr[index][tail_idx][0].ptr);
 }
+#endif
 
 void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	struct DCEDescriptor * desc, struct DCEDescriptor * input, int wq_num,
@@ -335,7 +343,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 		return;
 	}
 
-
+#if NOPASID
 	size = desc->operand1;
 	dest_size = (desc->opcode == DCE_OPCODE_MEMCMP && !(desc->operand0 & 1)) ?
 				8 : size;
@@ -469,6 +477,7 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP,
 		&src_is_list, (uint8_t __user *)input->completion,
 		8, DMA_FROM_DEVICE, wq_num);
+#endif
 }
 
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
@@ -551,12 +560,14 @@ void setup_memory_for_wq(
 	ring->hti->head = 0;
 	ring->hti->tail = 0;
 
+#if NOPASID
 	/* allocate the sg_table and hw_addr */
 	for(int i = 0; i < NUM_SG_TBLS; i++) {
 		ring->dma_direction[i] = kzalloc(length * sizeof(int), GFP_KERNEL);
 		ring->sg_tables[i] = kzalloc(length * sizeof(struct sg_table), GFP_KERNEL);
 		ring->hw_addr[i] = kzalloc(length * sizeof(DataAddrNode *), GFP_KERNEL);
 	}
+#endif
 
 	/* populate WQITE */
 	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
@@ -652,13 +663,12 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 
 		case REQUEST_KERNEL_WQ: {
-			/* FIXME:
-			 *	1. put inside some function
-			 *	2. check a efd_valid
-			 *	3. also add a numDesc for kernel WQ
-			 */
+			/* Check if PASID is enabled */
+			if (!priv->sva_enabled)
+				return -EFAULT;
+
 			KernelQueueReq __user * __kqr_input;
-			KernelQueueReq kqr = {.DSCSZ = 0, .eventfd_vld = true, .eventfd = 0};
+			KernelQueueReq kqr = {.DSCSZ = 0, .eventfd_vld = false, .eventfd = 0};
 			__kqr_input = (KernelQueueReq __user *) arg;
 			if (__kqr_input)
 				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
@@ -683,6 +693,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
+
 			UserArea __user * __UserArea_input;
 			UserArea ua;
 			__UserArea_input = (struct UserArea __user *) arg;
@@ -774,11 +785,10 @@ static const struct file_operations dce_ops = {
 };
 
 irqreturn_t handle_dce(int irq, void *dce_priv_p) {
-	/* with SVA there is no per-job clean up needed */
-	// if (dce_priv->sva_enabled) return IRQ_HANDLED;
+
 	struct dce_driver_priv *dce_priv=dce_priv_p;
 
-	/* FIXME: multiple thread running this? */
+	/* FIXME: multiple thread running this? schedule_work reentrant safe?*/
 	printk(KERN_INFO "Got interrupt %d, work scheduled!\n", irq);
 	schedule_work(&dce_priv->clean_up_worker);
 
@@ -843,10 +853,13 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// mmio_len   = pci_resource_len  (pdev, 0);
 
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
-	// FIXME: Enable for testing non-SVA
-	// if (1) {
-		dev_warn(dev, "DCE:Unable to turn on user SVA feature.\n");
 		drv_priv->sva_enabled = false;
+#if NOPASID
+		dev_err(dev, "DCE:Unable to turn on user SVA feature. Device disabled\n");
+		goto free_resources_and_fail;
+#else
+		dev_warn(dev, "DCE:Unable to turn on user SVA feature.\n");
+#endif
 	} else {
 		dev_info(dev, "DCE:SVA feature enabled.\n");
 		drv_priv->sva_enabled = true;
