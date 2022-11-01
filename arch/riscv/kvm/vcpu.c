@@ -986,6 +986,8 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 		ret = xfer_to_guest_mode_handle_work(vcpu);
 		if (!ret)
 			ret = 1;
+		else
+			continue;
 
 		kvm_riscv_gstage_vmid_update(vcpu);
 
