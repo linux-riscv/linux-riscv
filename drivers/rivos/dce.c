@@ -482,8 +482,8 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	ring->length = length;
-	ring->descriptors = ua->descriptors;
-	ring->hti = ua->hti;
+	ring->descriptors = (DCEDescriptor *)ua->descriptors;
+	ring->hti = (HeadTailIndex *)ua->hti;
 
 	dce_priv->WQIT[wq_num].DSCBA = ring->descriptors;
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
