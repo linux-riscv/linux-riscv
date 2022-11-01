@@ -149,7 +149,18 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	mutex_lock(&priv->lock);
 	for(int wq_num = 1; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == file) {
-			// printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
+			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
+			/* clean up the descriptor ring */
+			DescriptorRing * ring = get_desc_ring(priv, wq_num);
+			if (ring->desc_dma) {
+				dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
+					ring->descriptors, ring->desc_dma);
+				dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
+					ring->hti, ring->hti_dma);
+			}
+			/* clean up the WQITE*/
+			memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
+
 			priv->wq[wq_num].owner = 0;
 
 			/* Clear the enable bit in dce */
@@ -547,7 +558,7 @@ void setup_memory_for_wq(
 		ring->hw_addr[i] = kzalloc(length * sizeof(DataAddrNode *), GFP_KERNEL);
 	}
 
-	/* populate WQITE TODO: only first one for now*/
+	/* populate WQITE */
 	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
@@ -859,6 +870,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_drvdata(pdev, drv_priv);
 
 	/* priv mem regions setup */
+	/* TODO: need to be freed when device is released */
 	setup_memory_regions(drv_priv);
 
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
