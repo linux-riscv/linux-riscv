@@ -25,6 +25,12 @@ struct cpu_manufacturer_info_t {
 				  unsigned int stage);
 };
 
+struct __packed {
+    u32 vendor_id;
+    u32 arch_id;
+    u32 imp_id;
+} m_cpu_info;
+
 static void __init_or_module riscv_fill_cpu_mfr_info(struct cpu_manufacturer_info_t *cpu_mfr_info)
 {
 #ifdef CONFIG_RISCV_M_MODE
@@ -32,10 +38,16 @@ static void __init_or_module riscv_fill_cpu_mfr_info(struct cpu_manufacturer_inf
 	cpu_mfr_info->arch_id = csr_read(CSR_MARCHID);
 	cpu_mfr_info->imp_id = csr_read(CSR_MIMPID);
 #else
+#ifdef CONFIG_RISCV_SBI
 	cpu_mfr_info->vendor_id = sbi_get_mvendorid();
 	cpu_mfr_info->arch_id = sbi_get_marchid();
 	cpu_mfr_info->imp_id = sbi_get_mimpid();
-#endif
+#else
+	cpu_mfr_info->vendor_id = m_cpu_info.vendor_id;
+	cpu_mfr_info->arch_id = m_cpu_info.arch_id;
+	cpu_mfr_info->imp_id = m_cpu_info.imp_id;
+#endif /* !CONFIG_RISCV_SBI */
+#endif /* !CONFIG_RISCV_M_MODE */
 
 	switch (cpu_mfr_info->vendor_id) {
 #ifdef CONFIG_ERRATA_SIFIVE
