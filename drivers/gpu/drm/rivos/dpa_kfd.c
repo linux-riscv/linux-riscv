@@ -246,16 +246,6 @@ static void dpa_kfd_sysfs_destroy(void)
 	}
 }
 
-/* PCI Stuff */
-
-#ifndef PCI_VENDOR_ID_RIVOS
-#define PCI_VENDOR_ID_RIVOS             0x1efd
-#endif
-
-#ifndef PCI_DEVICE_ID_TDC
-#define PCI_DEVICE_ID_RIVOS_DPA       0x8003
-#endif
-
 static const struct pci_device_id dpa_pci_table[] = {
 	{ PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_DPA,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
@@ -515,7 +505,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dpa->dev, "%s: SVA feature enabled successfully\n", __func__);
 	}
 
-	dpa->regs = ioremap(pci_resource_start(pdev, 0), DPA_MMIO_SIZE);
+	dpa->regs = ioremap(pci_resource_start(pdev, 0), DUC_MMIO_SIZE);
 	if (!dpa->regs) {
 		dev_warn(dpa_device, "%s: unable to remap registers\n", __func__);
 		ret = -EIO;
@@ -541,7 +531,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			__func__, ret);
 	}
 
-	writeq(0x4, dpa->regs);
 	if ((ret = daffy_get_version_cmd(dpa, &version))) {
 		dev_err(dpa_device, "%s: get version failed %d\n",
 			__func__, ret);
