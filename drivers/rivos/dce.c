@@ -63,25 +63,6 @@ void clean_up_work(struct work_struct *work) {
 					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
 					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
 				}
-#if NOPASID
-				for(int i = 0; i < NUM_SG_TBLS; i++){
-					if (!ring->sg_tables[i][qi].sgl) continue;
-					// printk(KERN_INFO "Working on wq %d, index %d", wq_num, i);
-					/* unmap the DMA mappings */
-					dma_unmap_sg(dce_priv->pci_dev, ring->sg_tables[i][qi].sgl,
-						ring->sg_tables[i][qi].orig_nents,
-						ring->dma_direction[i][qi]);
-
-					kfree(ring->sg_tables[i][qi].sgl);
-					/* unmap the hw_addr */
-					kfree(ring->hw_addr[i][qi]);
-
-					/*zero the thing */
-					ring->sg_tables[i][qi].sgl = 0;
-					ring->sg_tables[i][qi].orig_nents = 0;
-					ring->hw_addr[i][qi] = 0;
-				}
-#endif
 				curr++;
 			}
 			ring->clean_up_index = curr;
@@ -136,11 +117,10 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			printk(KERN_INFO "PASID allocation success!\n");
 		}
 	}
-#if NOPASID
 	else {
-		/* TODO: error */
+		return -EFAULT;
 	}
-#endif
+
 	/* keep sva context linked to the file */
 	file->private_data = ctx;
 
@@ -235,82 +215,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	// TODO: release semantics here
 }
 
-#if NOPASID
-static uint64_t setup_dma_for_user_buffer(struct dce_driver_priv *drv_priv, int index, bool * result_is_list,
-                                          uint8_t __user * user_ptr, size_t size, uint8_t dma_direction, int wq_num) {
-	int i, count;
-	int first, last, nr_pages;
-	struct scatterlist * sg;
-	struct scatterlist * sglist;
-
-	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
-
-	uint64_t tail_idx = ring->hti->tail;
-	first = ((uint64_t)user_ptr & PAGE_MASK) >> PAGE_SHIFT;
-	last  = (((uint64_t)user_ptr + size - 1) & PAGE_MASK) >> PAGE_SHIFT;
-	nr_pages = last - first + 1;
-	struct page * pages[nr_pages];
-
-	int flag = (dma_direction == DMA_FROM_DEVICE) ? FOLL_WRITE : 0;
-
-	// printk(KERN_INFO"User address is 0x%lx\n", user_ptr);
-	int ret = get_user_pages_fast(user_ptr, nr_pages, flag, pages);
-	// printk(KERN_INFO"get_user_pages_fast return value is %d, nrpages is %d\n", ret, nr_pages);
-
-	/* FIXME needs to be freed */
-	ring->dma_direction[index][tail_idx] = dma_direction;
-	ring->sg_tables[index][tail_idx].sgl =
-		kzalloc(nr_pages * sizeof(struct scatterlist), GFP_KERNEL);
-	ring->sg_tables[index][tail_idx].orig_nents = nr_pages;
-
-	sglist = ring->sg_tables[index][tail_idx].sgl;
-	for (int i = 0; i < nr_pages; i++) {
-		uint64_t _size, _offset = 0;
-		if (i == 0) {
-			/* first page */
-			_size = offset_in_page(user_ptr) + size > PAGE_SIZE ?
-								 (PAGE_SIZE - offset_in_page(user_ptr)) :
-								 size;
-			_offset = offset_in_page(user_ptr);
-		} else if (i == nr_pages - 1) {
-			/* last page */
-			_size = offset_in_page(user_ptr + size);
-			if (_size == 0) _size = PAGE_SIZE;
-		} else {
-			/* middle pages */
-			_size = PAGE_SIZE;
-		}
-		// printk(KERN_INFO"parameters passed to sg_set_page: 0x%lx, 0x%lx, 0x%lx", pages[i], _size, _offset);
-		sg_set_page(&sglist[i], pages[i], _size, _offset);
-	}
-	/* FIXME: dma_unmap_sg when appropriate */
-	// TODO: count of 0 means error? Are we dealing with it?
-	count = dma_map_sg(drv_priv->pci_dev, sglist, nr_pages, dma_direction);
-	// printk(KERN_INFO "Count is %d\n", count);
-	if (count > 1)
-		*result_is_list = true;
-
-	/* FIXME needs to be freed */
-	ring->sg_tables[index][tail_idx].nents = count;
-	ring->hw_addr[index][tail_idx] = kzalloc(count * sizeof(DataAddrNode), GFP_KERNEL);
-
-	for_each_sg(sglist, sg, count, i) {
-		ring->hw_addr[index][tail_idx][i].ptr = sg_dma_address(sg);
-		ring->hw_addr[index][tail_idx][i].size = sg_dma_len(sg);
-		// printk(KERN_INFO "Address 0x%lx, Size 0x%lx\n", sg_dma_address(sg), sg_dma_len(sg));
-	}
-
-	// printk(KERN_INFO "num_dma_entries: %d, Address is 0x%lx\n", num_dma_entries, sg_dma_address(&sg[0]));
-	if (count > 1) {
-		return dma_map_single(drv_priv->pci_dev,
-					ring->hw_addr[index][tail_idx],
-					count, dma_direction);
-	}
-	else return (uint64_t)(ring->hw_addr[index][tail_idx][0].ptr);
-}
-#endif
-
-void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
+static int parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	struct DCEDescriptor * desc, struct DCEDescriptor * input, int wq_num,
 	struct submitter_dce_ctx *ctx)
 {
@@ -334,150 +239,17 @@ void parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	desc->operand3 = input->operand3;
 	desc->operand4 = input->operand4;
 
-	/* no need for DMA setup */
 	if (ctx->sva) {
 		// Set the pasid and valid bits
 		desc->pasid = ctx->pasid;
 		desc->ctrl |= PASID_VALID;
 		// printk(KERN_INFO "Setting PASID fields");
-		return;
+	}
+	else {
+		return -EFAULT;
 	}
 
-#if NOPASID
-	size = desc->operand1;
-	dest_size = (desc->opcode == DCE_OPCODE_MEMCMP && !(desc->operand0 & 1)) ?
-				8 : size;
-	/* Override based on opcode */
-	switch (desc->opcode)
-	{
-		case DCE_OPCODE_MEMCMP:
-			/* src2 */
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-			desc->operand2 = setup_dma_for_user_buffer(drv_priv, SRC2,
-				&src2_is_list, (uint8_t __user *)input->operand2,
-				size, DMA_TO_DEVICE, wq_num);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-				&dest_is_list, (uint8_t __user *)input->destination,
-				dest_size, DMA_FROM_DEVICE, wq_num);
-			break;
-		case DCE_OPCODE_ENCRYPT:
-		case DCE_OPCODE_DECRYPT:
-		case DCE_OPCODE_MEMCPY:
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-				&dest_is_list, (uint8_t __user *)input->destination,
-				size, DMA_FROM_DEVICE, wq_num);
-			if ((desc->opcode == DCE_OPCODE_ENCRYPT ||
-				desc->opcode == DCE_OPCODE_DECRYPT) &&
-				(desc->operand0 & 0x10)) { /* check for GCM mode */
-				// printk(KERN_INFO "Setting up for GCM mode input, %x", desc->operand0);
-				iv_size = ((desc->operand3 >> 32) & 0xff);
-				aad_size = ((desc->operand3 >> 48) & 0xff);
-
-				desc->operand2 = setup_dma_for_user_buffer(drv_priv, IV,
-						NULL, (uint8_t __user *)input->operand2,
-						iv_size, DMA_TO_DEVICE, wq_num);
-				desc->operand4 = setup_dma_for_user_buffer(drv_priv, AAD,
-						NULL, (uint8_t __user *)input->operand4,
-						aad_size, DMA_TO_DEVICE, wq_num);
-			}
-			break;
-		case DCE_OPCODE_MEMSET:
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-				&dest_is_list, (uint8_t __user *)input->destination,
-				size, DMA_FROM_DEVICE, wq_num);
-			break;
-		// case DCE_OPCODE_COMPRESS:
-		// case DCE_OPCODE_DECOMPRESS:
-		// case DCE_OPCODE_COMPRESS_ENCRYPT:
-		// case DCE_OPCODE_DECRYPT_DECOMPRESS:
-		// 	desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-		// 		&src_is_list, (uint8_t __user *)input->source,
-		// 		size, DMA_TO_DEVICE, wq_num);
-		// 	desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-		// 		&dest_is_list, (uint8_t __user *)input->destination,
-		// 		desc->operand2, DMA_FROM_DEVICE, wq_num);
-		// 	break;
-		case DCE_OPCODE_LOAD_KEY:
-			/* Keys are 32B */
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				32, DMA_TO_DEVICE, wq_num);
-			break;
-		case DCE_OPCODE_MEMCPY_CRC_GEN:
-			size = FIELD_GET(JOB_CTRL_SIZE, desc->operand4);
-			dest_size = size;
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-			desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-				&dest_is_list, (uint8_t __user *)input->destination,
-				dest_size, DMA_FROM_DEVICE, wq_num);
-			break;
-		case DCE_OPCODE_CRC_GEN:
-			size = FIELD_GET(JOB_CTRL_SIZE, desc->operand4);
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-			break;
-		case DCE_OPCODE_DIF_CHK:
-		case DCE_OPCODE_DIF_GEN:
-		case DCE_OPCODE_DIF_UPD:
-		case DCE_OPCODE_DIF_STRP:
-		case DCE_OPCODE_DIX_CHK:
-		case DCE_OPCODE_DIX_GEN:
-			/* Compute the total size using num_lbas and LBA size */
-			num_lbas = FIELD_GET(PI_CTL_NUM_LBA_8_0, desc->operand2);
-			num_lbas += ((FIELD_GET(PI_CTL_NUM_LBA_15_9, desc->operand4)) << 9);
-			PIF = FIELD_GET(FMT_INFO_PIF,  desc->operand0);
-			block_size = FIELD_GET(FMT_INFO_LBAS, desc->operand0) ? 0x1000 : 0x200;
-			PI_size = (PIF == _16GB) ? 8 : 16;
-			/* src size */
-			if (desc->opcode == DCE_OPCODE_DIF_GEN ||
-			    desc->opcode == DCE_OPCODE_DIX_GEN) {
-				size = block_size * num_lbas;
-			}
-			else {
-				size = (block_size + PI_size) * num_lbas;
-			}
-			desc->source = setup_dma_for_user_buffer(drv_priv, SRC,
-				&src_is_list, (uint8_t __user *)input->source,
-				size, DMA_TO_DEVICE, wq_num);
-
-			/* dst size */
-			if (desc->opcode == DCE_OPCODE_DIF_GEN ||
-			    desc->opcode == DCE_OPCODE_DIF_UPD) {
-				dest_size = (block_size + PI_size) * num_lbas;
-			}
-			else if (desc->opcode == DCE_OPCODE_DIF_STRP)
-				dest_size = block_size * num_lbas;
-			else if (desc->opcode == DCE_OPCODE_DIX_GEN)
-				dest_size = PI_size * num_lbas;
-			if (dest_size)
-				desc->destination = setup_dma_for_user_buffer(drv_priv, DEST,
-					&dest_is_list, (uint8_t __user *)input->destination,
-					dest_size, DMA_FROM_DEVICE, wq_num);
-			break;
-		default:
-			break;
-	}
-
-	if (src_is_list)
-		desc->ctrl |= SRC_IS_LIST;
-	if (src2_is_list)
-		desc->ctrl |= SRC2_IS_LIST;
-	if (dest_is_list)
-		desc->ctrl |= DEST_IS_LIST;
-
-	//TODO: Check, are we sure about the src_is_list here ?
-	desc->completion = setup_dma_for_user_buffer(drv_priv, COMP,
-		&src_is_list, (uint8_t __user *)input->completion,
-		8, DMA_FROM_DEVICE, wq_num);
-#endif
+	return 0;
 }
 
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
@@ -559,15 +331,6 @@ void setup_memory_for_wq(
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	ring->hti->head = 0;
 	ring->hti->tail = 0;
-
-#if NOPASID
-	/* allocate the sg_table and hw_addr */
-	for(int i = 0; i < NUM_SG_TBLS; i++) {
-		ring->dma_direction[i] = kzalloc(length * sizeof(int), GFP_KERNEL);
-		ring->sg_tables[i] = kzalloc(length * sizeof(struct sg_table), GFP_KERNEL);
-		ring->hw_addr[i] = kzalloc(length * sizeof(DataAddrNode *), GFP_KERNEL);
-	}
-#endif
 
 	/* populate WQITE */
 	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
@@ -735,7 +498,10 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (priv->wq[wq_num].enable == false)
 				return -EFAULT;
 
-			parse_descriptor_based_on_opcode(priv, &descriptor, &descriptor_input, wq_num, ctx);
+			if (parse_descriptor_based_on_opcode(priv, &descriptor,
+				&descriptor_input, wq_num, ctx) < 0) {
+				return -EFAULT;
+			}
 
 			// printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
 			// 	wq_num, descriptor.opcode);
@@ -854,12 +620,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		drv_priv->sva_enabled = false;
-#if NOPASID
 		dev_err(dev, "DCE:Unable to turn on user SVA feature. Device disabled\n");
 		goto free_resources_and_fail;
-#else
-		dev_warn(dev, "DCE:Unable to turn on user SVA feature.\n");
-#endif
 	} else {
 		dev_info(dev, "DCE:SVA feature enabled.\n");
 		drv_priv->sva_enabled = true;
