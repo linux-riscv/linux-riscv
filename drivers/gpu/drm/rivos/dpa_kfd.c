@@ -527,7 +527,7 @@ static int dpa_kfd_ioctl_get_process_apertures(struct file *filep, struct dpa_kf
 	aperture->lds_base = 0;
 	aperture->lds_limit = 0;
 	// gpuvm is the main one
-	aperture->gpuvm_base = 0;
+	aperture->gpuvm_base = PAGE_SIZE;  // don't allow NULL ptrs
 	aperture->gpuvm_limit = DPA_GPUVM_ADDR_LIMIT; // allow everything up to 48 bits
 	aperture->scratch_base = 0;
 	aperture->scratch_limit = 0;
@@ -988,6 +988,7 @@ static int dpa_kfd_ioctl_get_process_apertures_new(struct file *filep,
 	memset(&ap, 0, sizeof(ap));
 	args->num_of_nodes = 1;
 	ap.gpu_id = DPA_GPU_ID;
+	ap.gpuvm_base = PAGE_SIZE;
 	ap.gpuvm_limit = DPA_GPUVM_ADDR_LIMIT;
 	ret = copy_to_user((void __user*)args->kfd_process_device_apertures_ptr,
 			   &ap, sizeof(ap));
