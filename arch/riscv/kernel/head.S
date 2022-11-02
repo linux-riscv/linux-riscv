@@ -205,6 +205,7 @@ ENTRY(_start_kernel)
 	/* Reset all registers except ra, a0, a1 */
 	call reset_regs
 
+#ifdef CONFIG_RISCV_HAVE_PMP
 	/*
 	 * Setup a PMP to permit access to all of memory.  Some machines may
 	 * not implement PMPs, so we set up a quick trap handler to just skip
@@ -219,13 +220,20 @@ ENTRY(_start_kernel)
 	csrw CSR_PMPCFG0, a0
 .align 2
 pmp_done:
+#endif
+#endif /* CONFIG_RISCV_M_MODE */
 
+#if !defined(CONFIG_RISCV_SBI) || defined(CONFIG_RISCV_M_MODE)
 	/*
 	 * The hartid in a0 is expected later on, and we have no firmware
 	 * to hand it to us.
 	 */
+#if defined(CONFIG_SOC_RIVOS_SIM_TINY)
+	li	a0, 0
+#else
 	csrr a0, CSR_MHARTID
-#endif /* CONFIG_RISCV_M_MODE */
+#endif
+#endif /* !CONFIG_RISCV_SBI || CONFIG_RISCV_M_MODE */
 
 	/* Load the global pointer */
 .option push
