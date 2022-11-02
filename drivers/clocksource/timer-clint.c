@@ -36,7 +36,7 @@ static u64 __iomem *clint_timer_val;
 static unsigned long clint_timer_freq;
 static unsigned int clint_timer_irq;
 
-#ifdef CONFIG_RISCV_M_MODE
+#ifdef CONFIG_CLINT_TIMER_MMIO
 u64 __iomem *clint_time_val;
 EXPORT_SYMBOL(clint_time_val);
 #endif
@@ -194,7 +194,7 @@ static int __init clint_timer_init_dt(struct device_node *np)
 	clint_timer_val = base + CLINT_TIMER_VAL_OFF;
 	clint_timer_freq = riscv_timebase;
 
-#ifdef CONFIG_RISCV_M_MODE
+#ifdef CONFIG_CLINT_TIMER_MMIO
 	/*
 	 * Yes, that's an odd naming scheme.  time_val is public, but hopefully
 	 * will die in favor of something cleaner.

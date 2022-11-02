@@ -10,7 +10,8 @@
 
 typedef unsigned long cycles_t;
 
-#ifdef CONFIG_RISCV_M_MODE
+
+#ifdef CONFIG_CLINT_TIMER_MMIO
 
 #include <asm/clint.h>
 
@@ -46,7 +47,7 @@ static inline unsigned long random_get_entropy(void)
 }
 #define random_get_entropy()	random_get_entropy()
 
-#else /* CONFIG_RISCV_M_MODE */
+#else /* CONFIG_CLINT_TIMER_MMIO */
 
 static inline cycles_t get_cycles(void)
 {
@@ -60,7 +61,7 @@ static inline u32 get_cycles_hi(void)
 }
 #define get_cycles_hi get_cycles_hi
 
-#endif /* !CONFIG_RISCV_M_MODE */
+#endif /* !CONFIG_CLINT_TIMER_MMIO */
 
 #ifdef CONFIG_64BIT
 static inline u64 get_cycles64(void)

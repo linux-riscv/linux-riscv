@@ -9,7 +9,7 @@
 #include <linux/types.h>
 #include <asm/mmio.h>
 
-#ifdef CONFIG_RISCV_M_MODE
+#ifdef CONFIG_CLINT_TIMER_MMIO
 /*
  * This lives in the CLINT driver, but is accessed directly by timex.h to avoid
  * any overhead when accessing the MMIO timer.
