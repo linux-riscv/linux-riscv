@@ -5,8 +5,6 @@
 #include "linux/eventfd.h"
 #include <linux/workqueue.h>
 
-#define NOPASID 0
-
 #define DCE_CTRL 0
 
 #define DCE_STATUS 8
@@ -166,13 +164,6 @@ typedef struct DescriptorRing {
 	dma_addr_t desc_dma;
 	dma_addr_t hti_dma;
 
-#if NOPASID
-	/* Scatter/Gather list information
-	 * dynamically allocated table of queue size elms for each */
-	int * dma_direction[NUM_SG_TBLS];
-	struct sg_table * sg_tables[NUM_SG_TBLS];
-	DataAddrNode ** hw_addr[NUM_SG_TBLS];
-#endif
 } DescriptorRing;
 
 typedef struct UserArea {
