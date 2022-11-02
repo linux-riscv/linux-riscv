@@ -50,12 +50,10 @@ static int riscv_clock_next_event(unsigned long delta,
 #ifdef CONFIG_RISCV_HAVE_MTIMECMP
 		csr_write(CSR_MTIMECMP, next_tval);
 #else
-#error "timer-riscv: No SBI or MTIMECMP"
-#endif
-#else
-		/* S-mode */
-#error "timer-riscv: FIXME: Add support for stimecmp"
-#endif /* !CONFIG_RISCV_M_MODE */
+		/* Config should prevent this combination from occurring. */
+#error "timer-riscv: M-mode but no MTIMECMP"
+#endif /* !CONFIG_RISCV_HAVE_MTIMECMP */
+#endif /* CONFIG_RISCV_M_MODE */
 #endif /* !CONFIG_RISCV_SBI */
 	}
 
@@ -202,6 +200,11 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 	if (riscv_isa_extension_available(NULL, SSTC)) {
 		pr_info("Timer interrupt in S-mode is available via sstc extension\n");
 		static_branch_enable(&riscv_sstc_available);
+	} else {
+#ifndef CONFIG_RISCV_SBI
+	    pr_warn("No SBI support and no sstc extension\n");
+	    return -ENODEV;
+#endif
 	}
 #endif
 
