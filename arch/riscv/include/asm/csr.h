@@ -281,6 +281,8 @@
 
 #define CSR_MSTATUS		0x300
 #define CSR_MISA		0x301
+#define CSR_MEDELEG             0x302
+#define CSR_MIDELEG             0x303
 #define CSR_MIE			0x304
 #define CSR_MTVEC		0x305
 #define CSR_MCOUNTEREN		0x306

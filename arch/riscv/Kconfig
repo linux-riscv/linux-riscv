@@ -152,7 +152,7 @@ config RISCV_M_MODE
 
 # set if we are running in S-mode and can use SBI calls
 config RISCV_SBI
-	bool
+	bool "RISC-V SBI call support"
 	depends on !RISCV_M_MODE
 	default y
 

@@ -198,14 +198,15 @@ ENTRY(_start_kernel)
 	csrw CSR_IE, zero
 	csrw CSR_IP, zero
 
-#ifdef CONFIG_RISCV_M_MODE
+#if defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)
 	/* flush the instruction cache */
 	fence.i
 
 	/* Reset all registers except ra, a0, a1 */
 	call reset_regs
+#endif /* CONFIG_RISCV_M_MODE || !CONFIG_RISCV_SBI */
 
-#ifdef CONFIG_RISCV_HAVE_PMP
+#if defined(CONFIG_RISCV_M_MODE) && defined(CONFIG_RISCV_HAVE_PMP)
 	/*
 	 * Setup a PMP to permit access to all of memory.  Some machines may
 	 * not implement PMPs, so we set up a quick trap handler to just skip
@@ -220,14 +221,18 @@ ENTRY(_start_kernel)
 	csrw CSR_PMPCFG0, a0
 .align 2
 pmp_done:
-#endif
-#endif /* CONFIG_RISCV_M_MODE */
+#endif /* CONFIG_RISCV_M_MODE && CONFIG_RISCV_HAVE_PMP */
 
 #if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
 	/*
 	 * Enable access to the 'time' CSR (and Sstc's stimecmp)
 	 */
 	call m_enable_timers
+#endif
+
+#if !defined(CONFIG_RISCV_SBI) && !defined(CONFIG_RISCV_M_MODE)
+	/* FIXME: This is currently dependent on starting in M! */
+	call	m_to_s
 #endif
 
 #if !defined(CONFIG_RISCV_SBI) || defined(CONFIG_RISCV_M_MODE)
@@ -376,7 +381,7 @@ clear_bss_done:
 
 END(_start_kernel)
 
-#ifdef CONFIG_RISCV_M_MODE
+#if defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)
 ENTRY(reset_regs)
 	li	sp, 0
 	li	gp, 0
@@ -453,7 +458,7 @@ ENTRY(reset_regs)
 .Lreset_regs_done:
 	ret
 END(reset_regs)
-#endif /* CONFIG_RISCV_M_MODE */
+#endif /* CONFIG_RISCV_M_MODE || !CONFIG_RISCV_SBI */
 
 #if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
 m_enable_timers:
@@ -464,4 +469,54 @@ m_enable_timers:
 	li	a0, 2
 	csrw	CSR_MCOUNTEREN, a0	/* time/rdtime now accessible! */
 	ret
+#endif
+
+#if !defined(CONFIG_RISCV_SBI) && !defined(CONFIG_RISCV_M_MODE)
+m_to_s:
+	/* Assumes M mode!  FIXME, bail if S mode. */
+	csrw 	CSR_MIE, zero
+	csrw 	CSR_MIP, zero
+	csrw 	CSR_SIE, zero
+	csrw 	CSR_SIP, zero
+
+	la	a0, m_vectors
+	csrw 	CSR_MTVEC, a0
+	/* Read M-mode ID regs */
+	/* Load the global pointer */
+.option push
+.option norelax
+	la gp, __global_pointer$
+.option pop
+
+	la 	a1, m_cpu_info
+	csrr	a0, CSR_MVENDORID
+	sw	a0, 0(a1)
+	csrr	a0, CSR_MARCHID
+	sw	a0, 4(a1)
+	csrr	a0, CSR_MIMPID
+	sw	a0, 8(a1)
+
+	/* Delegate interrupts and exceptions to S: */
+	not	a0, zero
+	csrw	CSR_MIDELEG, a0
+	csrw	CSR_MEDELEG, a0
+
+	la	a0, 1f
+	csrw 	CSR_MEPC, a0
+	/* Return to Supervisor mode */
+	li	a0, (1 << 11)	/* MPP[1:0] = 01 */
+	csrw	CSR_MSTATUS, a0
+	mret
+1:
+	ret
+
+m_vectors:
+	/*
+	 * Fall through: FIXME: synthesise return to S-mode panic.
+	 * We'll eventually want to use mscratch if we handle
+	 * anything here.
+	 */
+m_trap_black_hole:
+1:	lui	x0, 0xdeadb
+	j	1b
 #endif
