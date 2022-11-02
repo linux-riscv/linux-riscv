@@ -8,19 +8,26 @@
 
 #include "dpa_daffy.h"
 
-// DUC-SS register layout
-#define DUC_BAR_SIZE				0x1000
+#define PCI_VENDOR_ID_RIVOS         0x1efd
+#define PCI_DEVICE_ID_RIVOS_DPA     0x0012
 
-#define DUC_REGS_STATUS				0x0000
-#define DUC_REGS_FW					0x0008
-#define DUC_REGS_DMA				0x0030
+// DUC-SS register regions
+#define DUC_REGS_DISPATCH			0x0000
+#define DUC_REGS_INTERNAL_VF		0x0ec0
+#define DUC_REGS_INTERNAL_PF		0x0f18
+#define DUC_REGS_FW					0x1368
+#define DUC_REGS_CTN				0x1390
+#define DUC_REGS_DMA				0x13a0
+#define DUC_REGS_DOORBELLS			0x2000
 
-// Individual DUC FW regs
-#define DUC_REGS_FW_VER				0x0008
-#define DUC_REGS_FW_DESC			0x0010
-#define DUC_REGS_FW_DOORBELL		0x0018
-#define DUC_REGS_FW_PASID			0x0020
-#define DUC_REGS_FW_TIMESTAMP		0x0028
+// Individual regs within DUC_REGS_FW region
+#define DUC_REGS_FW_VER				0x1368
+#define DUC_REGS_FW_PASID			0x1370
+#define DUC_REGS_FW_DESC			0x1378
+#define DUC_REGS_FW_DOORBELL		0x1380
+#define DUC_REGS_FW_TIMESTAMP		0x1388
+
+#define DUC_MMIO_SIZE				0x80000
 
 #define DPA_PROCESS_MAX (16)
 
@@ -52,8 +59,6 @@ struct dpa_device {
 
 	int drm_minor;
 
-	// XXX use explicit 4k
-#define DPA_MMIO_SIZE (PAGE_SIZE)
 	volatile char *regs;
 
 	struct dpa_fwq_info qinfo;
