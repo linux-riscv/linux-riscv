@@ -223,6 +223,13 @@ pmp_done:
 #endif
 #endif /* CONFIG_RISCV_M_MODE */
 
+#if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
+	/*
+	 * Enable access to the 'time' CSR (and Sstc's stimecmp)
+	 */
+	call m_enable_timers
+#endif
+
 #if !defined(CONFIG_RISCV_SBI) || defined(CONFIG_RISCV_M_MODE)
 	/*
 	 * The hartid in a0 is expected later on, and we have no firmware
@@ -446,3 +453,14 @@ ENTRY(reset_regs)
 	ret
 END(reset_regs)
 #endif /* CONFIG_RISCV_M_MODE */
+
+#if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
+m_enable_timers:
+	li	a0, 1
+	slli	a0, a0, 63
+	csrw	CSR_MENVCFG, a0		/* STCE=1 */
+
+	li	a0, 2
+	csrw	CSR_MCOUNTEREN, a0	/* time/rdtime now accessible! */
+	ret
+#endif
