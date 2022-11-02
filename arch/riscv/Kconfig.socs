@@ -93,4 +93,10 @@ config RISCV_HAVE_PMP
         bool
 	default y if !SOC_RIVOS_SIM_TINY
 
+config RISCV_HAVE_MTIMECMP
+        bool
+	default y
+	depends on SOC_RIVOS_SIM_TINY
+	depends on RISCV_M_MODE
+
 endmenu # "SoC selection"

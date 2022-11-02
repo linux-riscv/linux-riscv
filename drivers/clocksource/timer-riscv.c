@@ -42,8 +42,22 @@ static int riscv_clock_next_event(unsigned long delta,
 #else
 		csr_write(CSR_STIMECMP, next_tval);
 #endif
-	} else
+	} else {
+#ifdef CONFIG_RISCV_SBI
 		sbi_set_timer(next_tval);
+#else
+#ifdef CONFIG_RISCV_M_MODE
+#ifdef CONFIG_RISCV_HAVE_MTIMECMP
+		csr_write(CSR_MTIMECMP, next_tval);
+#else
+#error "timer-riscv: No SBI or MTIMECMP"
+#endif
+#else
+		/* S-mode */
+#error "timer-riscv: FIXME: Add support for stimecmp"
+#endif /* !CONFIG_RISCV_M_MODE */
+#endif /* !CONFIG_RISCV_SBI */
+	}
 
 	return 0;
 }
@@ -184,10 +198,12 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 		pr_err("cpu hp setup state failed for RISCV timer [%d]\n",
 		       error);
 
+#ifndef CONFIG_RISCV_M_MODE
 	if (riscv_isa_extension_available(NULL, SSTC)) {
 		pr_info("Timer interrupt in S-mode is available via sstc extension\n");
 		static_branch_enable(&riscv_sstc_available);
 	}
+#endif
 
 	return error;
 }
