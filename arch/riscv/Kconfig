@@ -48,7 +48,8 @@ config RISCV
 	select BINFMT_FLAT_NO_DATA_START_OFFSET if !MMU
 	select BUILDTIME_TABLE_SORT if MMU
 	select CLONE_BACKWARDS
-	select CLINT_TIMER if !MMU
+# ME: Hacky to disable this here: can Kconfig.socs deal pls?
+	select CLINT_TIMER if (!MMU && !SOC_RIVOS_SIM_TINY)
 	select COMMON_CLK
 	select CPU_PM if CPU_IDLE
 	select EDAC_SUPPORT
@@ -147,7 +148,7 @@ config ARCH_MMAP_RND_COMPAT_BITS_MAX
 config RISCV_M_MODE
 	bool
 	default !MMU
-	select CLINT_TIMER_MMIO
+	select CLINT_TIMER_MMIO if !RISCV_TIMER
 
 # set if we are running in S-mode and can use SBI calls
 config RISCV_SBI
