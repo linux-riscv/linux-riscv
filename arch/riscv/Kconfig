@@ -147,6 +147,7 @@ config ARCH_MMAP_RND_COMPAT_BITS_MAX
 config RISCV_M_MODE
 	bool
 	default !MMU
+	select CLINT_TIMER_MMIO
 
 # set if we are running in S-mode and can use SBI calls
 config RISCV_SBI
