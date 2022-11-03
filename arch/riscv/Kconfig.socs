@@ -111,4 +111,10 @@ config RISCV_NO_IDREGS
 	  Default values are assumed for mhartid, mvendorid, marchid and mimpid,
 	  if N.
 
+config RISCV_NEED_M_TIMER_SETUP
+	bool "Machine needs STCE/TM setup"
+	default y if RISCV_TIMER && !RISCV_M_MODE && !RISCV_SBI
+	depends on !RISCV_SBI
+	depends on RISCV_TIMER
+
 endmenu # "SoC selection"

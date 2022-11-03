@@ -223,11 +223,16 @@ ENTRY(_start_kernel)
 pmp_done:
 #endif /* CONFIG_RISCV_M_MODE && CONFIG_RISCV_HAVE_PMP */
 
-#if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
+#ifdef CONFIG_RISCV_NEED_M_TIMER_SETUP
 	/*
 	 * Enable access to the 'time' CSR (and Sstc's stimecmp)
 	 */
-	call m_enable_timers
+	li	a0, 1
+	slli	a0, a0, 63
+	csrw	CSR_MENVCFG, a0		/* STCE=1 */
+
+	li	a0, 2
+	csrw	CSR_MCOUNTEREN, a0	/* time/rdtime now accessible! */
 #endif
 
 #if !defined(CONFIG_RISCV_SBI) && !defined(CONFIG_RISCV_M_MODE)
@@ -458,17 +463,6 @@ ENTRY(reset_regs)
 	ret
 END(reset_regs)
 #endif /* CONFIG_RISCV_M_MODE || !CONFIG_RISCV_SBI */
-
-#if (defined(CONFIG_RISCV_M_MODE) || !defined(CONFIG_RISCV_SBI)) && defined(CONFIG_RISCV_TIMER)
-m_enable_timers:
-	li	a0, 1
-	slli	a0, a0, 63
-	csrw	CSR_MENVCFG, a0		/* STCE=1 */
-
-	li	a0, 2
-	csrw	CSR_MCOUNTEREN, a0	/* time/rdtime now accessible! */
-	ret
-#endif
 
 #if !defined(CONFIG_RISCV_SBI) && !defined(CONFIG_RISCV_M_MODE)
 m_to_s:
