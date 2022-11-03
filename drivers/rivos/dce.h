@@ -118,6 +118,7 @@ typedef struct DataAddrNode {
 
 #define NUM_WQ      64
 #define DEFAULT_NUM_DSC_PER_WQ 64
+
 typedef struct __attribute__((packed)) WQITE {
     uint64_t DSCBA;
     uint8_t  DSCSZ;
@@ -127,13 +128,19 @@ typedef struct __attribute__((packed)) WQITE {
     // TBA: key slot management
 } WQITE;
 
+/* shared with HW which expects both head and tail
+ * to be 64B aligned and 64B apart */
 typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
-	u64 head;
+	/* init by driver, read by driver/SW, written by HW */
+	volatile u64 head;
 	u64 padding1[7];
+	/* init by driver, read by HW, written by SW/Driver */
+	/* TODO: Remove _Atomic and use kernel atomic stuff */
 	_Atomic u64 tail;
 	u64 padding2[7];
 } HeadTailIndex;
 
+/*struct shared with HW, expects exact layout */
 typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
@@ -148,19 +155,21 @@ typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
 	uint64_t operand4;
 } DCEDescriptor;
 
+/* representation of a WQ, holds both HW shared regions and managmement */
 typedef struct DescriptorRing {
 	/* Data structures shared with HW*/
 	DCEDescriptor* descriptors;
 	HeadTailIndex* hti;
 
-	/* Local cached copy of WQITE.DSCSZ TODO: Change to mask? */
+	/* Local cached copy of WQITE.DSCSZ
+	 * TODO: Change to mask? */
 	size_t length;
 
 	/* Sequence num of the last job where clean up was performed */
 	uint32_t clean_up_index;
 
 	/* IOVA for configuration of the data strucs shared with HW
-	 * TODO: Do we need to keep them? We never use them */
+	 * Kept for cleanup*/
 	dma_addr_t desc_dma;
 	dma_addr_t hti_dma;
 
@@ -227,7 +236,7 @@ struct dce_driver_priv
 	uint64_t mmio_start;
 	uint64_t mmio_start_phys;
 
-
+	/* Kernel space memory area, read by HW */
 	WQITE * WQIT;
 	dma_addr_t WQIT_dma;
 

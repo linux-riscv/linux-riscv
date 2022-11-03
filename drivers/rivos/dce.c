@@ -139,6 +139,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 			/* clean up the descriptor ring */
 			DescriptorRing * ring = get_desc_ring(priv, wq_num);
 			if (ring->desc_dma) {
+				/* TODO: Check that the memory is correctly aligned */
 				dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
 					ring->descriptors, ring->desc_dma);
 				dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
@@ -274,6 +275,7 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	ring->length = length;
+	/* TODO: Check alignment for both*/
 	ring->descriptors = (DCEDescriptor *)ua->descriptors;
 	ring->hti = (HeadTailIndex *)ua->hti;
 
@@ -570,7 +572,8 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 
 	// printk(KERN_INFO"dma_mask: 0x%lx\n",dev->dma_mask);
 	/* WQIT is 4KiB */
-	// TODO: Error handling, alloc DMA can fail
+	/* TODO: Error handling, dma_alloc can fail
+	 * TODO: check alignement, the idea is to have a page aligned alloc */
 	drv_priv->WQIT = dma_alloc_coherent(dev, 0x1000,
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
