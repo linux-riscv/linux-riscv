@@ -240,7 +240,7 @@ pmp_done:
 	 * The hartid in a0 is expected later on, and we have no firmware
 	 * to hand it to us.
 	 */
-#if defined(CONFIG_SOC_RIVOS_SIM_TINY)
+#if defined(CONFIG_RISCV_NO_IDREGS)
 	li	a0, 0
 #else
 	csrr a0, CSR_MHARTID
@@ -487,13 +487,21 @@ m_to_s:
 	la gp, __global_pointer$
 .option pop
 
-	la 	a1, m_cpu_info
-	csrr	a0, CSR_MVENDORID
-	sw	a0, 0(a1)
-	csrr	a0, CSR_MARCHID
-	sw	a0, 4(a1)
-	csrr	a0, CSR_MIMPID
-	sw	a0, 8(a1)
+#ifdef CONFIG_RISCV_ALTERNATIVE
+	la 	a0, m_cpu_info
+#ifdef CONFIG_RISCV_NO_IDREGS
+	li 	t0, 0
+	li 	t1, 5
+	li 	t2, 0
+#else
+	csrr	t0, CSR_MVENDORID
+	csrr	t1, CSR_MARCHID
+	csrr	t2, CSR_MIMPID
+#endif
+	sw	t0, 0(a0)
+	sw	t1, 4(a0)
+	sw	t2, 8(a0)
+#endif
 
 	/* Delegate interrupts and exceptions to S: */
 	not	a0, zero
