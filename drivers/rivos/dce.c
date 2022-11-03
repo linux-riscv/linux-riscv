@@ -49,6 +49,7 @@ void clean_up_work(struct work_struct *work) {
 		/* break early if we are done */
 		if (!irq_sts) break;
 		if (irq_sts & BIT(wq_num)) {
+			mutex_lock(&dce_priv->wq[wq_num].wq_clean_lock);
 			DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 			int head = ring->hti->head;
 			int curr = ring->clean_up_index;
@@ -67,6 +68,7 @@ void clean_up_work(struct work_struct *work) {
 			}
 			ring->clean_up_index = curr;
 			irq_sts &= ~BIT(wq_num);
+			mutex_unlock(&dce_priv->wq[wq_num].wq_clean_lock);
 		}
 	}
 
@@ -131,8 +133,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 {
 	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
-	/* FIXME: do we need lock here? */
-	mutex_lock(&priv->lock);
+
 	for(int wq_num = 1; wq_num < NUM_WQ; wq_num++) {
 		if (priv->wq[wq_num].owner == file) {
 			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
@@ -151,9 +152,11 @@ int dce_ops_release(struct inode *inode, struct file *file)
 			priv->wq[wq_num].owner = 0;
 
 			/* Clear the enable bit in dce */
+			mutex_lock(&priv->dce_reg_lock);
 			uint64_t wq_enable = dce_reg_read(priv, DCE_REG_WQENABLE);
 			wq_enable &= (~BIT(wq_num));
 			dce_reg_write(priv, DCE_REG_WQENABLE, wq_enable);
+			mutex_unlock(&priv->dce_reg_lock);
 
 			/* mark the WQ as disabled in driver */
 			priv->wq[wq_num].enable = false;
@@ -197,13 +200,17 @@ static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
 
 static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor, int wq_num)
 {
+	mutex_lock(&priv->wq[wq_num].wq_tail_lock);
 	DescriptorRing * ring = get_desc_ring(priv, wq_num);
 	uint64_t tail_idx = ring->hti->tail;
+	uint64_t head_idx = ring->hti->head;
+	if (tail_idx == head_idx + 63) {
+		/* TODO: ring is full, handle it */
+	}
 	uint64_t base = ring->descriptors;
 	int num_desc_in_wq = get_num_desc_for_wq(priv, wq_num);
 	uint8_t * tail_ptr = base + ((tail_idx % num_desc_in_wq) * sizeof(DCEDescriptor));
 
-	// TODO: handle the case where ring will be full
 	// TODO: something here with error handling
 	memcpy(tail_ptr, descriptor, sizeof(DCEDescriptor));
 	wmb();
@@ -213,7 +220,8 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	/* notify DCE */
 	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
 	dce_reg_write(priv, WQCR_REG, 1);
-	// TODO: release semantics here
+
+	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
 }
 
 static int parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
@@ -289,9 +297,11 @@ static void setup_memory_for_wq_from_user(struct file * file,
 
 
 	/* set the enable bit in dce*/
+	mutex_lock(&dce_priv->dce_reg_lock);
 	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
 	wq_enable |= BIT(wq_num);
 	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
+	mutex_unlock(&dce_priv->dce_reg_lock);
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].enable = true;
@@ -340,17 +350,22 @@ void setup_memory_for_wq(
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
 	/* set the enable bit in dce*/
+	mutex_lock(&dce_priv->dce_reg_lock);
 	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
 	wq_enable |= BIT(wq_num);
 	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
+	mutex_unlock(&dce_priv->dce_reg_lock);
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].enable = true;
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
 }
 
-static void free_resources(struct dce_driver_priv *priv, DCEDescriptor * input)
+static void free_resources(struct device * dev, struct dce_driver_priv *priv)
 {
+	/* TODO: Free each WQ as well? */
+	if (priv->WQIT)
+		dma_free_coherent(priv->pci_dev, 0x1000, priv->WQIT, priv->WQIT_dma);
 	return;
 }
 
@@ -624,7 +639,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		drv_priv->sva_enabled = false;
 		dev_err(dev, "DCE:Unable to turn on user SVA feature. Device disabled\n");
-		goto free_resources_and_fail;
+		goto disable_device_and_fail;
 	} else {
 		dev_info(dev, "DCE:SVA feature enabled.\n");
 		drv_priv->sva_enabled = true;
@@ -676,6 +691,11 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* init mutex */
 	mutex_init(&drv_priv->lock);
+	mutex_init(&drv_priv->dce_reg_lock);
+	for (int i = 0; i < NUM_WQ; i++) {
+		mutex_init(&drv_priv->wq[i].wq_tail_lock);
+		mutex_init(&drv_priv->wq[i].wq_clean_lock);
+	}
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
 	setup_memory_for_wq(drv_priv, 0, NULL);
@@ -683,13 +703,11 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	return 0;
 
+	free_resources_and_fail:
+		free_resources(dev, drv_priv);
+
 	disable_device_and_fail:
 		pci_disable_device(pdev);
-		return err;
-
-	free_resources_and_fail:
-		pci_disable_device(pdev);
-		// free_resources(dev, drv_priv);
 		return err;
 }
 
@@ -708,7 +726,7 @@ static int dev_sriov_configure(struct pci_dev *dev, int numvfs)
 
 static void dce_remove(struct pci_dev *pdev)
 {
-	// free_resources(&pdev->dev, pci_get_drvdata(pdev));
+	free_resources(&pdev->dev, pci_get_drvdata(pdev));
 }
 
 static SIMPLE_DEV_PM_OPS(vmd_dev_pm_ops, vmd_suspend, vmd_resume);
