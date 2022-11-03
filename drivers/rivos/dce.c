@@ -78,6 +78,7 @@ void clean_up_work(struct work_struct *work) {
 struct submitter_dce_ctx {
 	struct dce_driver_priv *dev;
 	struct iommu_sva *sva;
+	int wq_num;
 	unsigned int pasid;
 };
 
@@ -95,6 +96,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	ctx->dev = dev;
 	ctx->sva = NULL;
 	ctx->pasid = 0;
+	ctx->wq_num = -1;
 
 	if (dev->sva_enabled) {
 		ctx->sva = iommu_sva_bind_device(dev->pci_dev, current->mm, NULL);
@@ -369,23 +371,10 @@ static void free_resources(struct device * dev, struct dce_driver_priv *priv)
 	return;
 }
 
-static int find_wq_number(struct file * file, struct dce_driver_priv * priv) {
-	bool wq_found = false;
-	int wq_num = 0;
-	for(wq_num = 0; wq_num < NUM_WQ; wq_num++) {
-		if (priv->wq[wq_num].owner == file) {
-			wq_found = true;
-			break;
-		}
-	}
-	/* error out if no WQ found */
-	if (!wq_found) return -1;
-	return wq_num;
-}
-
-static int assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
+static void assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
 	/* start from wq num 1 as 0 is reserved for KERNEL_SHARED */
 	bool found = false;
+	struct submitter_dce_ctx * ctx = file->private_data;
 	int wq_num;
 	mutex_lock(&priv->lock);
 	for(wq_num = 1; wq_num < NUM_WQ; wq_num++) {
@@ -398,11 +387,11 @@ static int assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
 		}
 	}
 	mutex_unlock(&priv->lock);
-	/* FIXME: should not reach here, return 0 if not able to assign */
+	/* Assign 0 if not able to assign */
 	if (found)
-		return wq_num;
+		ctx->wq_num = wq_num;
 	else
-		return 0;
+		ctx->wq_num = 0;
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -455,16 +444,16 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 					return -EFAULT;
 
 			/* WQ shouldn't havve been assigned at this point */
-			int wq_num = find_wq_number(file, priv);
-			if (wq_num != -1) return -EFAULT;
+			if (ctx->wq_num != -1) return -EFAULT;
 
 			/* assign WQ to file descriptor */
-			wq_num = assign_wq_to_fd(file, priv);
+			assign_wq_to_fd(file, priv);
+
 			// printk(KERN_INFO "Requested kernel managed WQ %d\n", wq_num);
 
 			/* wq_num meaning falling back to shared kernel WQ */
-			if (wq_num > 0)
-				setup_memory_for_wq(priv, wq_num, &kqr);
+			if (ctx->wq_num > 0)
+				setup_memory_for_wq(priv, ctx->wq_num, &kqr);
 
 			break;
 		}
@@ -481,15 +470,19 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			/* WQ shouldn't havve been assigned at this point */
-			int wq_num = find_wq_number(file, priv);
-			if (wq_num != -1) return -EFAULT;
+			if (ctx->wq_num != -1) return -EFAULT;
 
 			/* assign WQ to file descriptor */
-			wq_num = assign_wq_to_fd(file, priv);
-			if (wq_num == 0) return -EFAULT;
+			assign_wq_to_fd(file, priv);
+
+			/* User managed WQ cannot be WQ 0 */
+			if (ctx->wq_num == 0) {
+				ctx->wq_num = -1;
+				return -EFAULT;
+			}
 
 			/* The WQ is not enabled to be setuped already */
-			setup_memory_for_wq_from_user(file, wq_num, &ua);
+			setup_memory_for_wq_from_user(file, ctx->wq_num, &ua);
 
 			break;
 		}
@@ -503,27 +496,25 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			/* Default to WQ 0 (Shared kernel) if not assigned */
-			int wq_num = find_wq_number(file, priv);
-			if (wq_num == -1)
-				wq_num = 0;
+			if (ctx->wq_num == -1) ctx->wq_num = 0;
 
 			/* Make sure selected WQ is owned by Kernel */
-			if (priv->wq[wq_num].type == USER_OWNED_WQ)
+			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
 				return -EFAULT;
 
 			/* WQ should be enabled at this point */
-			if (priv->wq[wq_num].enable == false)
+			if (priv->wq[ctx->wq_num].enable == false)
 				return -EFAULT;
 
 			if (parse_descriptor_based_on_opcode(priv, &descriptor,
-				&descriptor_input, wq_num, ctx) < 0) {
+				&descriptor_input, ctx->wq_num , ctx) < 0) {
 				return -EFAULT;
 			}
 
 			// printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
 			// 	wq_num, descriptor.opcode);
 			// printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
-			dce_push_descriptor(priv, &descriptor, wq_num);
+			dce_push_descriptor(priv, &descriptor, ctx->wq_num );
 		}
 	}
 
@@ -534,12 +525,11 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 
-	int wq_num = find_wq_number(file, priv);
-	if (wq_num == -1) return -EFAULT;
+	if (ctx->wq_num == -1) return -EFAULT;
 
 	unsigned long pfn = phys_to_pfn(priv->mmio_start_phys);
 	/* coompute the door bell page with wq num */
-	pfn += (wq_num + 1);
+	pfn += (ctx->wq_num + 1);
 
 	vma->vm_flags |= VM_IO;
 	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
