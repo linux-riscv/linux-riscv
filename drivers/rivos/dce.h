@@ -219,6 +219,9 @@ typedef struct work_queue {
 
 	/* The actual ring */
 	DescriptorRing descriptor_ring;
+
+	struct mutex wq_tail_lock;
+	struct mutex wq_clean_lock;
 } work_queue;
 
 struct dce_driver_priv
@@ -232,6 +235,7 @@ struct dce_driver_priv
 	struct cdev cdev;
 
 	struct mutex lock;
+	struct mutex dce_reg_lock;
 
 	uint64_t mmio_start;
 	uint64_t mmio_start_phys;
