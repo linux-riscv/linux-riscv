@@ -96,6 +96,7 @@ typedef enum {
 
 /* WQ type based on ownership */
 typedef enum {
+	DISABLED=0,
 	KERNEL_WQ,
 	USER_OWNED_WQ,
 	SHARED_KERNEL_WQ,
@@ -165,7 +166,8 @@ typedef struct DescriptorRing {
 	 * TODO: Change to mask? */
 	size_t length;
 
-	/* Sequence num of the last job where clean up was performed */
+	/* Sequence num of the last job where clean up was performed
+	 * written by clean_up_worker, read by dce_push_descriptor */
 	uint32_t clean_up_index;
 
 	/* IOVA for configuration of the data strucs shared with HW
@@ -209,7 +211,6 @@ static const struct pci_device_id pci_use_msi[] = {
 };
 
 typedef struct work_queue {
-	bool enable;
 	wq_type type;
 	struct file * owner;
 
@@ -221,6 +222,9 @@ typedef struct work_queue {
 	DescriptorRing descriptor_ring;
 
 	struct mutex wq_tail_lock;
+	/* Locks around modifications in the per WQ loop of clean_up_work
+	 * Probably unecessary if using atomic set of clean_up_index and
+	 * a single threaded kernel workqueue */
 	struct mutex wq_clean_lock;
 } work_queue;
 

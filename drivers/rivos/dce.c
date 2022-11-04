@@ -42,6 +42,7 @@ void clean_up_work(struct work_struct *work) {
 	struct dce_driver_priv* dce_priv =
 		container_of(work, struct dce_driver_priv, clean_up_worker);
 
+	/* getting per queue interrupt status */
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
 
@@ -51,6 +52,7 @@ void clean_up_work(struct work_struct *work) {
 		if (irq_sts & BIT(wq_num)) {
 			mutex_lock(&dce_priv->wq[wq_num].wq_clean_lock);
 			DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
+			/* Atomic read ? */
 			int head = ring->hti->head;
 			int curr = ring->clean_up_index;
 
@@ -72,6 +74,7 @@ void clean_up_work(struct work_struct *work) {
 		}
 	}
 
+	/* What if the value changed? */
 	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 }
 
@@ -160,7 +163,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 			mutex_unlock(&priv->dce_reg_lock);
 
 			/* mark the WQ as disabled in driver */
-			priv->wq[wq_num].enable = false;
+			priv->wq[wq_num].type = DISABLED;
 
 			/* Clean up the eventfd ctx */
 			if (priv->wq[wq_num].efd_ctx_valid)
@@ -305,7 +308,6 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	mutex_unlock(&dce_priv->dce_reg_lock);
 
 	/* mark the WQ as enabled in driver */
-	dce_priv->wq[wq_num].enable = true;
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
@@ -358,8 +360,13 @@ void setup_memory_for_wq(
 	mutex_unlock(&dce_priv->dce_reg_lock);
 
 	/* mark the WQ as enabled in driver */
-	dce_priv->wq[wq_num].enable = true;
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
+}
+
+static void init_wq(struct work_queue* wq){
+	wq->type = DISABLED;
+	mutex_init(&(wq->wq_tail_lock));
+	mutex_init(&(wq->wq_clean_lock));
 }
 
 static void free_resources(struct device * dev, struct dce_driver_priv *priv)
@@ -502,7 +509,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			/* WQ should be enabled at this point */
-			if (priv->wq[ctx->wq_num].enable == false)
+			if (priv->wq[ctx->wq_num].type == DISABLED)
 				return -EFAULT;
 
 			if (parse_descriptor_based_on_opcode(priv, &descriptor,
@@ -681,9 +688,9 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* init mutex */
 	mutex_init(&drv_priv->lock);
 	mutex_init(&drv_priv->dce_reg_lock);
+
 	for (int i = 0; i < NUM_WQ; i++) {
-		mutex_init(&drv_priv->wq[i].wq_tail_lock);
-		mutex_init(&drv_priv->wq[i].wq_clean_lock);
+		init_wq(drv_priv->wq+i);
 	}
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
