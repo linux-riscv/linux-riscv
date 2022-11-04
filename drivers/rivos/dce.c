@@ -84,8 +84,7 @@ struct submitter_dce_ctx {
 
 int dce_ops_open(struct inode *inode, struct file *file)
 {
-	file->private_data = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
-	struct dce_driver_priv *dev = file->private_data;
+	struct dce_driver_priv *dev = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
 	struct submitter_dce_ctx * ctx;
 	int ret;
 
