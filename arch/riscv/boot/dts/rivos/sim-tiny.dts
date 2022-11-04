@@ -8,8 +8,7 @@
 
 	chosen {
 		rng-seed = <0xe3845ee4 0xcf65761d 0x69df6405 0xec014342 0x3e5e2a59 0x81a65560 0x18d9e980 0x70f9ad1f>;
-		stdout-path = "/soc/serial@10000000";
-		bootargs = "console=hvc0 earlycon=ot,mmio32,0x10000000 init=/bin/sh";
+		stdout-path = "/soc/serial@11000000";
 	};
 
 	platform-bus@4000000 {
@@ -60,8 +59,8 @@
 		compatible = "simple-bus";
 		ranges;
 
-		serial@10000000 {
-			reg = <0x00 0x10000000 0x00 0x100>;
+		serial@11000000 {
+			reg = <0x00 0x11000000 0x00 0x100>;
 			compatible = "opentitan,uart";
 		};
 
