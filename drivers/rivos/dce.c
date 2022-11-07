@@ -497,10 +497,10 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Make sure selected WQ is owned by Kernel */
 			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
 				return -EFAULT;
-
+#ifdef CONFIG_IOMMU_SVA
 			if(ctx->pasid != current->mm->pasid)
-			  return -EBADFD;
-
+				return -EBADFD;
+#endif
 			if (parse_descriptor_based_on_opcode(&descriptor,
 				&descriptor_input, ctx->pasid) < 0) {
 				return -EFAULT;
