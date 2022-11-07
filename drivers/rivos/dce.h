@@ -100,6 +100,7 @@ typedef enum {
 	KERNEL_WQ,
 	USER_OWNED_WQ,
 	SHARED_KERNEL_WQ,
+	RESERVED_WQ,
 } wq_type;
 
 typedef struct AccessInfoRead {
@@ -212,7 +213,6 @@ static const struct pci_device_id pci_use_msi[] = {
 
 typedef struct work_queue {
 	wq_type type;
-	struct file * owner;
 
 	// eventfd structure
 	bool efd_ctx_valid;
@@ -232,29 +232,29 @@ struct dce_driver_priv
 {
 	struct work_struct clean_up_worker;
 
+	/* probe time assigned information*/
 	struct pci_dev *pdev;
 	struct device * pci_dev;
 	struct device dev;
 	dev_t dev_num;
 	struct cdev cdev;
-
-	struct mutex lock;
-	struct mutex dce_reg_lock;
-
+	int vf_number;/* VF only */
+	bool sva_enabled;/* PASID / SVA */
 	uint64_t mmio_start;
 	uint64_t mmio_start_phys;
+
+	/* protect against concurrent access to this struct */
+	struct mutex lock;
+	/* protect against concurrent access to the IO space */
+	struct mutex dce_reg_lock;
 
 	/* Kernel space memory area, read by HW */
 	WQITE * WQIT;
 	dma_addr_t WQIT_dma;
 
+	/* DCE workqueue configuration space*/
 	work_queue wq[NUM_WQ];
 
-	/* VF only */
-	int vf_number;
-
-	/* PASID / SVA */
-	bool sva_enabled;
 };
 
 void clean_up_work(struct work_struct *work);

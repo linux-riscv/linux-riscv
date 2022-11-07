@@ -138,13 +138,19 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 
-	for(int wq_num = 1; wq_num < NUM_WQ; wq_num++) {
-		if (priv->wq[wq_num].owner == file) {
+	int wq_num = ctx->wq_num;
+	{
+		struct work_queue* wq = priv->wq+wq_num;
+		/* release gets called when all references to the file are dropped
+		 * There should not be multiple calls to release if the fd was cloned on fork
+		 * as a result, for user and owned kernel queues, we can always tear down
+		 * data structures on call to release */
+		if(wq->type == KERNEL_WQ || wq->type == USER_OWNED_WQ){
+			/*TODO: Deal with running jobs, what is the policy? */
 			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
 			/* clean up the descriptor ring */
 			DescriptorRing * ring = get_desc_ring(priv, wq_num);
-			if (ring->desc_dma) {
-				/* TODO: Check that the memory is correctly aligned */
+			if (ring->desc_dma) { /* only set for kernel queues */
 				dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
 					ring->descriptors, ring->desc_dma);
 				dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
@@ -152,8 +158,6 @@ int dce_ops_release(struct inode *inode, struct file *file)
 			}
 			/* clean up the WQITE*/
 			memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
-
-			priv->wq[wq_num].owner = 0;
 
 			/* Clear the enable bit in dce */
 			mutex_lock(&priv->dce_reg_lock);
@@ -171,7 +175,6 @@ int dce_ops_release(struct inode *inode, struct file *file)
 
 			priv->wq[wq_num].efd_ctx_valid = false;
 			priv->wq[wq_num].efd_ctx = 0;
-			break;
 		}
 	}
 	if (ctx->sva) {
@@ -265,6 +268,7 @@ static int parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	return 0;
 }
 
+/* TODO: FIX!! This leaks the mem for descriptors and hti */
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
 	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
 	memset(ring, 0, sizeof(DescriptorRing));
@@ -377,27 +381,20 @@ static void free_resources(struct device * dev, struct dce_driver_priv *priv)
 	return;
 }
 
-static void assign_wq_to_fd(struct file * file, struct dce_driver_priv * priv) {
-	/* start from wq num 1 as 0 is reserved for KERNEL_SHARED */
-	bool found = false;
-	struct submitter_dce_ctx * ctx = file->private_data;
-	int wq_num;
-	mutex_lock(&priv->lock);
-	for(wq_num = 1; wq_num < NUM_WQ; wq_num++) {
-		if (priv->wq[wq_num].owner == 0) {
-			priv->wq[wq_num].owner = file;
-			printk(KERN_INFO "Assigning file 0x%p to wq[%d]\n",
-						file, wq_num);
-			found = true;
+/* return an unused workqueue number or -1*/
+static int reserve_unused_wq(struct dce_driver_priv * priv) {
+	int ret = -1;
+	mutex_lock(&(priv->lock));
+	for(int i=0; i<NUM_WQ; ++i){
+		struct work_queue* wq = priv->wq+i;
+		if(wq->type==DISABLED){
+			ret = i;
+			wq->type = RESERVED_WQ;
 			break;
 		}
 	}
-	mutex_unlock(&priv->lock);
-	/* Assign 0 if not able to assign */
-	if (found)
-		ctx->wq_num = wq_num;
-	else
-		ctx->wq_num = 0;
+	mutex_unlock(&(priv->lock));
+	return ret;
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -449,17 +446,20 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
 					return -EFAULT;
 
-			/* WQ shouldn't havve been assigned at this point */
+			/* WQ shouldn't have been assigned at this point */
 			if (ctx->wq_num != -1) return -EFAULT;
 
-			/* assign WQ to file descriptor */
-			assign_wq_to_fd(file, priv);
-
-			// printk(KERN_INFO "Requested kernel managed WQ %d\n", wq_num);
-
-			/* wq_num meaning falling back to shared kernel WQ */
-			if (ctx->wq_num > 0)
-				setup_memory_for_wq(priv, ctx->wq_num, &kqr);
+			/* allocate a queue to context or fallback to wq 0*/
+			{
+				int wqnum = reserve_unused_wq(priv);
+				if(wqnum<0){ /* no more free queues */
+					ctx->wq_num = 0; /*Fallback to shared queue*/
+				} else {
+					ctx->wq_num = wqnum;
+					/* TODO: Refactor, pass only &wq to setup_memory */
+					setup_memory_for_wq(priv, wqnum, &kqr);
+				}
+			}
 
 			break;
 		}
@@ -478,18 +478,18 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* WQ shouldn't havve been assigned at this point */
 			if (ctx->wq_num != -1) return -EFAULT;
 
-			/* assign WQ to file descriptor */
-			assign_wq_to_fd(file, priv);
-
-			/* User managed WQ cannot be WQ 0 */
-			if (ctx->wq_num == 0) {
-				ctx->wq_num = -1;
-				return -EFAULT;
+			/* assign workqueue or fail */
+			{
+				int wqnum = reserve_unused_wq(priv);
+				if(wqnum<0){ /* no more free queues */
+					ctx->wq_num = -1;
+					return -EFAULT; /* TODO: Better error code?*/	
+				} else {
+					ctx->wq_num = wqnum;
+					/* TODO: Refactor, pass only &wq to setup_memory */
+					setup_memory_for_wq_from_user(file, ctx->wq_num, &ua);
+				}
 			}
-
-			/* The WQ is not enabled to be setuped already */
-			setup_memory_for_wq_from_user(file, ctx->wq_num, &ua);
-
 			break;
 		}
 
@@ -554,13 +554,13 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 }
 
 static const struct file_operations dce_ops = {
-	.owner		= THIS_MODULE,
-	.open		= dce_ops_open,
-	.release	= dce_ops_release,
-	.read		= dce_ops_read,
-	.write		= dce_ops_write,
-	.mmap 		= dce_mmap,
-	.unlocked_ioctl	= dce_ioctl
+	.owner          = THIS_MODULE,
+	.open	          = dce_ops_open,
+	.release        = dce_ops_release,
+	.read           = dce_ops_read,
+	.write          = dce_ops_write,
+	.mmap           = dce_mmap,
+	.unlocked_ioctl = dce_ioctl
 };
 
 irqreturn_t handle_dce(int irq, void *dce_priv_p) {
