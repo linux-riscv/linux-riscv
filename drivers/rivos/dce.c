@@ -212,7 +212,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	uint64_t tail_idx = ring->hti->tail;
 	uint64_t head_idx = ring->hti->head;
 	if (tail_idx == head_idx + 63) {
-		/* TODO: ring is full, handle it */
+		/* TODO: ring is full, handle it, with the right size even better */
 	}
 	uint64_t base = ring->descriptors;
 	int num_desc_in_wq = get_num_desc_for_wq(priv, wq_num);
@@ -231,16 +231,9 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
 }
 
-static int parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
-	struct DCEDescriptor * desc, struct DCEDescriptor * input, int wq_num,
-	struct submitter_dce_ctx *ctx)
+static int parse_descriptor_based_on_opcode(
+		struct DCEDescriptor * desc, struct DCEDescriptor * input, u32 pasid)
 {
-	size_t size = 0, dest_size = 0, iv_size, aad_size, block_size, PI_size;
-	uint32_t num_lbas, PIF;
-	bool src_is_list = false;
-	bool src2_is_list = false;
-	bool dest_is_list = false;
-
 	desc->opcode = input->opcode;
 	desc->ctrl = input->ctrl | 1;
 	desc->operand0 = input->operand0;
@@ -255,16 +248,9 @@ static int parse_descriptor_based_on_opcode(struct dce_driver_priv *drv_priv,
 	desc->operand3 = input->operand3;
 	desc->operand4 = input->operand4;
 
-	if (ctx->sva) {
-		// Set the pasid and valid bits
-		desc->pasid = ctx->pasid;
-		desc->ctrl |= PASID_VALID;
-		// printk(KERN_INFO "Setting PASID fields");
-	}
-	else {
-		return -EFAULT;
-	}
-
+	// Set the pasid and valid bits
+	desc->pasid = pasid;
+	desc->ctrl |= PASID_VALID;
 	return 0;
 }
 
@@ -504,16 +490,19 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Default to WQ 0 (Shared kernel) if not assigned */
 			if (ctx->wq_num == -1) ctx->wq_num = 0;
 
-			/* Make sure selected WQ is owned by Kernel */
-			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
-				return -EFAULT;
-
 			/* WQ should be enabled at this point */
 			if (priv->wq[ctx->wq_num].type == DISABLED)
 				return -EFAULT;
 
-			if (parse_descriptor_based_on_opcode(priv, &descriptor,
-				&descriptor_input, ctx->wq_num , ctx) < 0) {
+			/* Make sure selected WQ is owned by Kernel */
+			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
+				return -EFAULT;
+
+			if(ctx->pasid != current->mm->pasid)
+			  return -EBADFD;
+
+			if (parse_descriptor_based_on_opcode(&descriptor,
+				&descriptor_input, ctx->pasid) < 0) {
 				return -EFAULT;
 			}
 
