@@ -358,7 +358,7 @@ static void init_wq(struct work_queue* wq){
 	mutex_init(&(wq->wq_clean_lock));
 }
 
-static void free_resources(struct device * dev, struct dce_driver_priv *priv)
+void free_resources(struct device * dev, struct dce_driver_priv *priv)
 {
 	/* TODO: Free each WQ as well? */
 	if (priv->WQIT)
@@ -565,7 +565,7 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 }
 
 
-void setup_memory_regions(struct dce_driver_priv * drv_priv)
+int setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
 	struct device * dev = drv_priv->pci_dev;
 	int err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
@@ -579,8 +579,16 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
 	// printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
+	if (drv_priv->WQIT_dma & GENMASK(11, 0) != 0) {
+		printk(KERN_ERR "DCE: WQITBA[11:0]:0x%lx is not all zero!",
+			drv_priv->WQIT_dma);
+		dma_free_coherent(drv_priv->pci_dev, 0x1000,
+			drv_priv->WQIT, drv_priv->WQIT_dma);
+		return -EFAULT;
+	}
 	dce_reg_write(drv_priv, DCE_REG_WQITBA,
-				 (uint64_t) drv_priv->WQIT_dma);
+				(uint64_t) drv_priv->WQIT_dma);
+	return 0;
 }
 static struct class *dce_char_class;
 
@@ -649,12 +657,14 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_drvdata(pdev, drv_priv);
 
 	/* priv mem regions setup */
-	/* TODO: need to be freed when device is released */
-	setup_memory_regions(drv_priv);
+	err = setup_memory_regions(drv_priv);
+	if (err)
+		goto disable_device_and_fail;
 
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
-		printk(KERN_INFO "cdev add failed\n");
+		printk(KERN_ERR "DCE: cdev add failed\n");
+		goto free_resources_and_fail;
 	}
 
 	/* MSI setup */
