@@ -1009,6 +1009,7 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 {
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
+	unsigned i;
 
 	buf = devm_kzalloc(dev, sizeof(*buf),  GFP_KERNEL);
 	if (!buf)
@@ -1016,17 +1017,26 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 
 	buf->type = flags;
 	buf->size = size;
-	// XXX need to alloc from reserved HBM region not system memory
-	buf->page = dma_alloc_pages(dev, size, &buf->dma_addr, DMA_BIDIRECTIONAL,
-				    GFP_KERNEL);
-
-	if (!buf->page) {
-		dev_warn(dev, "%s: unable to alloc size 0x%llx\n", __func__, size);
+	buf->page_count = buf->size >> PAGE_SHIFT;
+	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+	if (!buf->pages) {
+		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
 		devm_kfree(dev, buf);
 		return NULL;
 	}
-
+	if (alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages) <
+	    buf->page_count)
+		goto out_free;
 	return buf;
+
+out_free:
+	for (i = 0; i < buf->page_count; i++) {
+		if (buf->pages[i]) {
+			__free_pages(buf->pages[i], 0);
+		}
+	}
+	devm_kfree(dev, buf);
+	return NULL;
 }
 
 
@@ -1052,7 +1062,6 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	struct kfd_ioctl_alloc_memory_of_gpu_args *args = data;
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
-	int ret;
 
 	dev_warn(dev, "%s: flags 0x%x size 0x%llx\n", __func__,
 		 args->flags, args->size);
@@ -1062,28 +1071,8 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 
 	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
 		buf = dpa_alloc_vram(p, args->size, args->flags);
-		// XXX HACK if we don't have iommu wtih svm pass the address back via
-		// mmap
-		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
-
-	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
-		
-		// TODO: Setup of dma_addr not explicitly needed once PASID supported tested and working
-		buf->type = args->flags;
-		buf->size = args->size;
-		// buf->page_count = buf->size >> PAGE_SHIFT;
-		buf->dma_addr = args->va_addr;
-	}
-
-	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
-		buf = dpa_alloc_vram(p, args->size, args->flags);
-		// XXX HACK if we don't have iommu wtih svm pass the address back via
-		// mmap
-		args->mmap_offset = ((u64)DPA_GPU_ID << 48ULL) | buf->dma_addr;
-
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
 		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
@@ -1095,14 +1084,6 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		if (!buf->pages) {
 			dev_warn(dev, "%s: cannot alloc pages\n", __func__);
 			devm_kfree(dev, buf);
-		}
-
-
-		buf->sgt = devm_kzalloc(dev, sizeof(struct sg_table), GFP_KERNEL);
-		if (!buf->sgt) {
-			dev_warn(dev, "%s: cannot alloc sgl page_count %u\n", __func__, buf->page_count);
-			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf);
 			return -ENOMEM;
 		}
 
@@ -1111,7 +1092,6 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			mmap_read_unlock(current->mm);
 			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
 			devm_kfree(dev, buf->pages);
-			devm_kfree(dev, buf->sgt);
 			devm_kfree(dev, buf);
 			return -ENOMEM;
 		}
@@ -1122,12 +1102,14 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	// XXX use an IDR/IDA for this
 	buf->p = p;
 	buf->id = ++p->alloc_count;
+	INIT_LIST_HEAD(&buf->process_alloc_list);
 	list_add_tail(&buf->process_alloc_list, &p->buffers);
 	mutex_unlock(&p->dev->lock);
 
 	// use a macro for this
 	args->handle = (u64)DPA_GPU_ID << 32 | buf->id;
-	dev_warn(p->dev->dev, "%s: handle 0x%llx\n", __func__, args->handle);
+	dev_warn(p->dev->dev, "%s: buf id %u handle 0x%llx\n", __func__,
+		 buf->id, args->handle);
 
 	return 0;
 }
@@ -1145,8 +1127,8 @@ static int dpa_kfd_ioctl_map_memory_to_gpu(struct file *filep,
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
 		// XXX do mapping here?
-		if (buf->dma_addr)
-			args->n_success = 1;
+		//if (buf->dma_addr)
+		args->n_success = 1;
 	} else {
 		dev_warn(p->dev->dev, "%s: given buffer not found!\n", __func__);
 		return -EINVAL;
@@ -1180,18 +1162,15 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 		 __func__, buf->id);
 
 	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)  {
-		if (buf->dma_addr) {
-			dma_free_pages(dev, buf->size, buf->page,
-				       buf->dma_addr, DMA_BIDIRECTIONAL);
+		if (buf->page_count) {
+			int i;
+			for (i = 0; i < buf->page_count; i++) {
+				__free_pages(buf->pages[i], 0);
+			}
 		}
 	}
 
 	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-		if (buf->sgt) {
-			dma_unmap_sgtable(dev, buf->sgt, DMA_BIDIRECTIONAL, 0);
-			sg_free_table(buf->sgt);
-			devm_kfree(dev, buf->sgt);
-		}
 		if (buf->page_count) {
 			int i;
 			for (i = 0; i < buf->page_count; i++) {

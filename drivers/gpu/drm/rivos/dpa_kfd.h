@@ -52,9 +52,6 @@ struct dpa_device {
 #define DPA_MMIO_SIZE (PAGE_SIZE)
 	volatile char *regs;
 
-	// just keep it per process for now
-	//struct list_head buffers;
-
 	struct dpa_fwq_info qinfo;
 };
 
@@ -84,7 +81,7 @@ struct dpa_kfd_process {
 
 	unsigned alloc_count;
 
-	// hack for now -- just maintain a list of allocations in vram
+	// maintain a list of allocations in vram
 	struct list_head buffers;
 
 	// event stuff
@@ -104,18 +101,10 @@ struct dpa_kfd_buffer {
 	unsigned int id;
 	unsigned int type;
 
-	// used by vram single page
-	struct page *page;
-
-
 	u64 size;
 	unsigned page_count;
-	struct sg_table *sgt;
 	struct page **pages;
 
-	dma_addr_t dma_addr;
-
-	//unsigned num_pages;
 	struct dpa_kfd_process *p;
 };
 
