@@ -181,7 +181,6 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		iommu_sva_unbind_device(ctx->sva);
 	}
 	kfree(ctx);
-	mutex_unlock(&priv->lock);
 	// printk(KERN_INFO "Closing file 0x%lx\n", file);
 	/* FIXME: Identify and free all allocated memories */
 	return 0;
