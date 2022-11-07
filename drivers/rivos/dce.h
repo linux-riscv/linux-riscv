@@ -258,6 +258,7 @@ struct dce_driver_priv
 };
 
 void clean_up_work(struct work_struct *work);
+void free_resources(struct device * dev, struct dce_driver_priv *priv);
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg);
 void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value);
@@ -269,7 +270,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int dce_mmap(struct file *file, struct vm_area_struct *vma);
 irqreturn_t handle_dce(int irq, void *dce_priv_p);
 
-void setup_memory_regions(struct dce_driver_priv * drv_priv);
+int setup_memory_regions(struct dce_driver_priv * drv_priv);
 
 void setup_memory_for_wq(
 		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr);
