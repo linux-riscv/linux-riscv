@@ -1514,7 +1514,6 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 
 	dev_warn(dpa_device, "%s: associated with pid %d\n", __func__, current->tgid);
 	dpa_app->mm = current->mm;
-	mmget(dpa_app->mm);
 	mutex_init(&dpa_app->lock);
 	INIT_LIST_HEAD(&dpa_app->buffers);
 	idr_init(&dpa_app->event_idr);
@@ -1577,7 +1576,6 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 			 current->tgid);
 		// XXX mutex lock on process lock ?
 		dpa_kfd_release_process_buffers(p);
-		mmput(p->mm);
 		dpa_kfd_release_process_events(p);
 		idr_destroy(&p->event_idr);
 		if (p->event_page)
