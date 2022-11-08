@@ -1463,19 +1463,50 @@ err_i1:
 	return retcode;
 }
 
-// hack, single process for now
-static struct dpa_kfd_process *dpa_app;
+static struct list_head dpa_processes;
+static struct mutex dpa_processes_lock;
+static unsigned int dpa_process_count;
 
 static int dpa_kfd_open(struct inode *inode, struct file *filep)
 {
-	// look for process in some structure
-	// XXX for now just have a single opening process
-	if (dpa_app)
-		return -EBUSY;
+	struct dpa_kfd_process *dpa_app = NULL;
+	struct list_head *cur;
 
+
+	// big lock for this
+	mutex_lock(&dpa_processes_lock);
+	// look for process in a list
+	list_for_each(cur, &dpa_processes) {
+		struct dpa_kfd_process *cur_process =
+			container_of(cur, struct dpa_kfd_process,
+				     dpa_process_list);
+		if (cur_process->mm == current->mm) {
+			dpa_app = cur_process;
+			break;
+		}
+	}
+
+	if (dpa_app) {
+		// using existing dpa_kfd_process
+		dev_warn(dpa_device, "%s: using existing kfd process\n", __func__);
+		filep->private_data = dpa_app;
+		return 0;
+	}
+	// new process
+	if (dpa_process_count >= DPA_PROCESS_MAX) {
+		dev_warn(dpa_device, "%s: max number of processes reached\n",
+			 __func__);
+		mutex_unlock(&dpa_processes_lock);
+		return -EBUSY;
+		}
 	dpa_app = devm_kzalloc(dpa_device, sizeof(*dpa_app), GFP_KERNEL);
-	if (!dpa_app)
+	if (!dpa_app) {
+		mutex_unlock(&dpa_processes_lock);
 		return -ENOMEM;
+	}
+	dpa_process_count++;
+	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
+	list_add_tail(&dpa_app->dpa_process_list, &dpa_processes);
 
 	dev_warn(dpa_device, "%s: associated with pid %d\n", __func__, current->tgid);
 	dpa_app->mm = current->mm;
@@ -1495,20 +1526,26 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	if (IS_ERR(dpa_app->sva)) {
 		int ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
+		list_del(&dpa_app->dpa_process_list);
+		dpa_process_count--;
 		kfree(dpa_app);
+		mutex_unlock(&dpa_processes_lock);
 		return -ENODEV;
 	}
 	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
 	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
 		dev_err(dpa_dev, "PASID allocation failed\n");
 		iommu_sva_unbind_device(dpa_app->sva);
+		list_del(&dpa_app->dpa_process_list);
+		dpa_process_count--;
 		kfree(dpa_app);
+		mutex_unlock(&dpa_processes_lock);
 		return -ENODEV;
 	}
 	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
 
 	filep->private_data = dpa_app;
-
+	mutex_unlock(&dpa_processes_lock);
 	return 0;
 }
 
@@ -1531,6 +1568,7 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 {
 	struct dpa_kfd_process *p = filep->private_data;
 	if (p) {
+		mutex_lock(&dpa_processes_lock);
 		dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 			 current->tgid);
 		// XXX mutex lock on process lock ?
@@ -1543,10 +1581,10 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 		if (p->fake_doorbell_page)
 			devm_kfree(p->dev->dev, p->fake_doorbell_page);
 		dpa_del_all_queues(p);
-		// XXX single process hack, clear the singleton
-		if (p == dpa_app)
-			dpa_app = NULL;
+		list_del(&p->dpa_process_list);
+		dpa_process_count--;
 		devm_kfree(dpa_device, p);
+		mutex_unlock(&dpa_processes_lock);
 	}
 
 	return 0;
@@ -1651,6 +1689,8 @@ static int __init dpa_init(void)
 		pr_err("Error creating DPA class: %d\n", ret);
 		return ret;
 	}
+	INIT_LIST_HEAD(&dpa_processes);
+	mutex_init(&dpa_processes_lock);
 
 	return pci_register_driver(&dpa_pci_driver);
 }

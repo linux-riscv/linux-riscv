@@ -22,6 +22,8 @@
 #define DUC_PCI_QUEUE_INFO_ADDRESS 0x00B9
 #define DUC_PCI_QUEUE_INFO_SIZE 0x00C1
 
+#define DPA_PROCESS_MAX (16)
+
 // contains info about the queue to fw
 struct dpa_fwq_info {
 
@@ -63,7 +65,8 @@ struct dpa_aql_queue {
 };
 
 struct dpa_kfd_process {
-	// list_head for list of processes using device
+	// list_head for list of processes using dpa
+	struct list_head dpa_process_list;
 
 	/* the DPA instance associated with this process */
 	struct dpa_device *dev;
