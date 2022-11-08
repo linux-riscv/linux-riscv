@@ -1096,6 +1096,10 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			return -ENOMEM;
 		}
 		mmap_read_unlock(current->mm);
+	} else {
+		dev_warn(dev, "%s: unsupported memory alloction type 0x%x\n",
+			 __func__, args->flags);
+		return -EINVAL;
 	}
 
 	mutex_lock(&p->dev->lock);
