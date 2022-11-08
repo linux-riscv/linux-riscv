@@ -181,7 +181,6 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		iommu_sva_unbind_device(ctx->sva);
 	}
 	kfree(ctx);
-	mutex_unlock(&priv->lock);
 	// printk(KERN_INFO "Closing file 0x%lx\n", file);
 	/* FIXME: Identify and free all allocated memories */
 	return 0;
@@ -359,7 +358,7 @@ static void init_wq(struct work_queue* wq){
 	mutex_init(&(wq->wq_clean_lock));
 }
 
-static void free_resources(struct device * dev, struct dce_driver_priv *priv)
+void free_resources(struct device * dev, struct dce_driver_priv *priv)
 {
 	/* TODO: Free each WQ as well? */
 	if (priv->WQIT)
@@ -497,10 +496,10 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Make sure selected WQ is owned by Kernel */
 			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
 				return -EFAULT;
-
+#ifdef CONFIG_IOMMU_SVA
 			if(ctx->pasid != current->mm->pasid)
-			  return -EBADFD;
-
+				return -EBADFD;
+#endif
 			if (parse_descriptor_based_on_opcode(&descriptor,
 				&descriptor_input, ctx->pasid) < 0) {
 				return -EFAULT;
@@ -528,6 +527,8 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 	vma->vm_flags |= VM_IO;
 	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
+	/* Make sure the door bell does not work with fork() */
+	vma->vm_flags |= VM_DONTCOPY;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	// printk(KERN_INFO "Mappping wq %d from 0x%lx to 0x%lx\n", wq_num, vma->vm_start,pfn);
@@ -544,7 +545,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 static const struct file_operations dce_ops = {
 	.owner          = THIS_MODULE,
-	.open	          = dce_ops_open,
+	.open           = dce_ops_open,
 	.release        = dce_ops_release,
 	.read           = dce_ops_read,
 	.write          = dce_ops_write,
@@ -564,7 +565,7 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 }
 
 
-void setup_memory_regions(struct dce_driver_priv * drv_priv)
+int setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
 	struct device * dev = drv_priv->pci_dev;
 	int err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
@@ -578,8 +579,16 @@ void setup_memory_regions(struct dce_driver_priv * drv_priv)
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
 	// printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
+	if (drv_priv->WQIT_dma & GENMASK(11, 0) != 0) {
+		printk(KERN_ERR "DCE: WQITBA[11:0]:0x%lx is not all zero!",
+			drv_priv->WQIT_dma);
+		dma_free_coherent(drv_priv->pci_dev, 0x1000,
+			drv_priv->WQIT, drv_priv->WQIT_dma);
+		return -EFAULT;
+	}
 	dce_reg_write(drv_priv, DCE_REG_WQITBA,
-				 (uint64_t) drv_priv->WQIT_dma);
+				(uint64_t) drv_priv->WQIT_dma);
+	return 0;
 }
 static struct class *dce_char_class;
 
@@ -648,12 +657,14 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_drvdata(pdev, drv_priv);
 
 	/* priv mem regions setup */
-	/* TODO: need to be freed when device is released */
-	setup_memory_regions(drv_priv);
+	err = setup_memory_regions(drv_priv);
+	if (err)
+		goto disable_device_and_fail;
 
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
-		printk(KERN_INFO "cdev add failed\n");
+		printk(KERN_ERR "DCE: cdev add failed\n");
+		goto free_resources_and_fail;
 	}
 
 	/* MSI setup */

@@ -101,11 +101,14 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	pci_set_drvdata(pdev, drv_priv);
 
 	/* priv mem regions setup */
-	setup_memory_regions(drv_priv);
+	err = setup_memory_regions(drv_priv);
+	if (err)
+		goto disable_device_and_fail;
 
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
-		printk(KERN_INFO "cdev add failed\n");
+		printk(KERN_ERR "DCE: cdev add failed\n");
+		goto free_resources_and_fail;
 	}
 
 	/* MSI setup */
@@ -133,9 +136,13 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
 
 	return 0;
-disable_device_and_fail:
-	printk(KERN_INFO "VF probe failed!\n");
-	return -1;
+
+	free_resources_and_fail:
+		free_resources(dev, drv_priv);
+
+	disable_device_and_fail:
+		pci_disable_device(pdev);
+		return err;
 }
 
 static SIMPLE_DEV_PM_OPS(vmd_dev_pm_ops, vmd_suspend, vmd_resume);
