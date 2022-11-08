@@ -1583,6 +1583,8 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 		if (p->fake_doorbell_page)
 			devm_kfree(p->dev->dev, p->fake_doorbell_page);
 		dpa_del_all_queues(p);
+		if (p->sva)
+			iommu_sva_unbind_device(p->sva);
 		list_del(&p->dpa_process_list);
 		dpa_process_count--;
 		devm_kfree(dpa_device, p);
