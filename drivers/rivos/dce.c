@@ -545,7 +545,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 static const struct file_operations dce_ops = {
 	.owner          = THIS_MODULE,
-	.open	          = dce_ops_open,
+	.open           = dce_ops_open,
 	.release        = dce_ops_release,
 	.read           = dce_ops_read,
 	.write          = dce_ops_write,
