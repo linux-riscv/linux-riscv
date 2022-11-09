@@ -123,6 +123,15 @@ config HVC_OT
 	  This enables support for console output on an OT UART.
 	  (First one found ;-) )
 
+config HVC_OT_CACHEABLE_HACK
+        bool "Hack for console in cacheable mem..."
+	default n
+	depends on HVC_OT
+	help
+	  A sim-special hack: output characters to a cached address, writing
+	  many values such that one of them will get cast out (and seen by
+	  a sim transactor).
+
 config HVCS
 	tristate "IBM Hypervisor Virtual Console Server support"
 	depends on PPC_PSERIES && HVC_CONSOLE

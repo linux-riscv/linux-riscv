@@ -38,12 +38,33 @@ static volatile u32 *ot_uart_base = 0;
 #define OT_UART_WDATA  (0x1c/4)
 
 
+#ifdef CONFIG_HVC_OT_CACHEABLE_HACK
+#define UART_OUT_ADDRESS	0x12000000
+#define CACHE_WAYS	      	12
+#define CACHE_IDX_STRIDE	(12*1024*1024/CACHE_WAYS)
+
+static void hack_putch(uint8_t ch)
+{
+    static uint32_t char_num = 0;
+    uint64_t val = ch | ((uint64_t)char_num++) << 8;
+    uintptr_t p = UART_OUT_ADDRESS;
+
+    /* Force an evict for at least one version of the written data */
+    for (int i = 0; i < CACHE_WAYS+1; i++) {
+	*(volatile uint64_t *)(p + (i * CACHE_IDX_STRIDE)) = val;
+    }
+}
+#endif
+
 static void ot_putch_blocking(volatile u32 *base, char c)
 {
 	while (base[OT_UART_STATUS] & OT_UART_STATUS_TXFULL)
 		cpu_relax();
 
 	base[OT_UART_WDATA] = c;
+#ifdef CONFIG_HVC_OT_CACHEABLE_HACK
+	hack_putch(c);
+#endif
 }
 
 static int hvc_ot_tty_put(uint32_t vtermno, const char *buf, int count)
