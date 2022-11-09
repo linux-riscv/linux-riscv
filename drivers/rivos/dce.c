@@ -288,7 +288,6 @@ static void setup_memory_for_wq_from_user(struct file * file,
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
 
-
 	/* set the enable bit in dce*/
 	mutex_lock(&dce_priv->dce_reg_lock);
 	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
@@ -389,6 +388,11 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
 
+#ifdef CONFIG_IOMMU_SVA
+	/* prevent all ioctl from succeeding if the fd is from a parent process*/
+	if(ctx->pasid != current->mm->pasid)
+		return -EBADFD;
+#endif
 	switch (cmd) {
 		case RAW_READ: {
 			struct AccessInfoRead __user *__access_info;
@@ -496,10 +500,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Make sure selected WQ is owned by Kernel */
 			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
 				return -EFAULT;
-#ifdef CONFIG_IOMMU_SVA
-			if(ctx->pasid != current->mm->pasid)
-				return -EBADFD;
-#endif
+
 			if (parse_descriptor_based_on_opcode(&descriptor,
 				&descriptor_input, ctx->pasid) < 0) {
 				return -EFAULT;
