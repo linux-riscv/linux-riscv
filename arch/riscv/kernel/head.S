@@ -202,8 +202,20 @@ ENTRY(_start_kernel)
 	/* flush the instruction cache */
 	fence.i
 
+	/* Initialise mstatus: assume nothing about reset state. */
+#ifdef CONFIG_64BIT
+	li	a0, 0xa
+	slli	a0, a0, 32
+	csrw	CSR_MSTATUS, a0
+#else
+	csrw	CSR_MSTATUS, zero
+#endif
 	/* Reset all registers except ra, a0, a1 */
 	call reset_regs
+
+#ifdef CONFIG_BUILTIN_DTB
+	li	a1, 0
+#endif
 #endif /* CONFIG_RISCV_M_MODE || !CONFIG_RISCV_SBI */
 
 #if defined(CONFIG_RISCV_M_MODE) && defined(CONFIG_RISCV_HAVE_PMP)
