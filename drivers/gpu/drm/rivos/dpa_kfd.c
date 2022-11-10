@@ -1009,7 +1009,7 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 {
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
-	unsigned i;
+	unsigned i, count;
 
 	buf = devm_kzalloc(dev, sizeof(*buf),  GFP_KERNEL);
 	if (!buf)
@@ -1024,9 +1024,24 @@ static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
 		devm_kfree(dev, buf);
 		return NULL;
 	}
-	if (alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages) <
-	    buf->page_count)
+#ifndef CONFIG_PAGE_OWNER
+	if ((count = alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages)) <
+	    buf->page_count) {
+		dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
+			 __func__, buf->page_count, count);
 		goto out_free;
+	}
+#else
+	for (i = 0; i < buf->page_count; i++) {
+		buf->pages[i] = alloc_page(GFP_KERNEL);
+		if (!buf->pages[i]) {
+			dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
+				 __func__, buf->page_count, count);
+			goto out_free;
+		}
+		count++;
+	}
+#endif
 	return buf;
 
 out_free:
@@ -1035,6 +1050,7 @@ out_free:
 			__free_pages(buf->pages[i], 0);
 		}
 	}
+	devm_kfree(dev, buf->pages);
 	devm_kfree(dev, buf);
 	return NULL;
 }
@@ -1071,8 +1087,10 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 
 	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
 		buf = dpa_alloc_vram(p, args->size, args->flags);
-		if (!buf)
+		if (!buf) {
+			dev_warn(dev, "%s: vram alloc failed\n", __func__);
 			return -ENOMEM;
+		}
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
 		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
