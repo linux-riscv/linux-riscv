@@ -528,11 +528,25 @@ static void axpy_kern_args_convert_nopasid(uint8_t *kern_args_ptr, uint64_t devi
 	dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
 }
 
+static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
+{
+	uint64_t *map = mmap(NULL, size, PROT_READ | PROT_WRITE,
+			     MAP_SHARED, kfd, doorbell_offset);
+
+	if (map == MAP_FAILED) {
+		perror("mmap doorbell");
+		exit(1);
+	}
+
+	return map;
+}
+
 
 int main(int argc, char *argv[])
 {
 	void *kern_ptr = NULL, *rw_ptr, *queue_ptr;
 	//size_t doorbell_size = getpagesize() * 2; // this AMD gpu expects 2 pages
+	size_t doorbell_size = getpagesize();
 	size_t queue_size = getpagesize();
 	size_t aql_queue_size = getpagesize();
 	size_t rwptr_size = getpagesize();
@@ -548,6 +562,8 @@ int main(int argc, char *argv[])
 
 	uint64_t doorbell_offset;
 	uint32_t queue_id;
+
+	uint64_t *doorbell_map = NULL;
 
 	int kern_fd = -1;
 	struct stat kstat;
@@ -610,7 +626,7 @@ int main(int argc, char *argv[])
 	create_queue(queue_ptr, aql_queue_size, NULL, 0, 0, q_read_ptr, q_write_ptr,
 			&doorbell_offset, &queue_id);
 
-	// TODO map doorbell page
+	doorbell_map = mmap_doorbell(doorbell_offset, doorbell_size);
 
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
@@ -668,6 +684,8 @@ int main(int argc, char *argv[])
 			*q_read_ptr, *q_write_ptr);
 		*q_write_ptr += 1;
 		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
+		doorbell_map[queue_id] = *q_write_ptr;
+		fprintf(stderr, "Rang the doorbell\n");
 		while ((wait_count < 10) && (*q_read_ptr == 0)) {
 			fprintf(stderr, "Waiting for read index to increment: %lu\n",
 				*q_read_ptr);
@@ -678,6 +696,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "DUC read AQL Packet! read index %lu\n", *q_read_ptr);
 		} else {
 			fprintf(stderr, "Read index failed to increment, DUC is likely stuck parsing AQL packet\n");
+			munmap(doorbell_map, doorbell_size);
 			exit(1);
 		}
 		fprintf(stderr, "axpy y buffer after execution: \n");
@@ -687,6 +706,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "No kernel to launch, exiting\n");
 	}
 
+	munmap(doorbell_map, doorbell_size);
 	close(kfd);
 	return 0;
 }
