@@ -132,7 +132,7 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	mutex_init(&drv_priv->lock);
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
-	setup_memory_for_wq(drv_priv, 0, NULL);
+	setup_kernel_wq(drv_priv, 0, NULL);
 	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
 
 	return 0;
