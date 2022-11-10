@@ -196,7 +196,8 @@ ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *pp
 	return 0;
 }
 
-/* compute number of descriptors in a WQ using DSCSZ */
+/* compute number of descriptors in a WQ using DSCSZ 
+ * should probably replace by a shift at some point */
 static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
 	int DSCSZ = priv->WQIT[wq_num].DSCSZ;
 	int num_desc = DEFAULT_NUM_DSC_PER_WQ;
@@ -275,20 +276,28 @@ static int reserve_unused_wq(struct dce_driver_priv * priv) {
 	return ret;
 }
 
-static void setup_memory_for_wq_from_user(struct file * file,
+static int setup_user_wq(struct submitter_dce_ctx* ctx,
 					  int wq_num, UserArea * ua)
 {
-	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv * dce_priv = ctx->dev;
 	size_t length = ua->numDescs;
-
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
+	struct work_queue* wq = dce_priv->wq+wq_num;
+	if(wq->type != RESERVED_WQ){
+		pr_err("User queue setup only possible on reserved queue, clean/reserve first \n");
+		return -EFAULT;
+	}
+
 	int size = length * sizeof(DCEDescriptor);
 	/* make sure size is multiple of 4K */
-	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) { /* insert error here */}
+	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) {
+		pr_warn("Invalid size requested for User queue: %d", size);
+		return -EBADR;
+	}
 	int DSCSZ = fls(size) - fls(0x1000);
 
 	// printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
+	/* TODO: Remove and properly tear down on release */
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	ring->length = length;
@@ -313,6 +322,21 @@ static void setup_memory_for_wq_from_user(struct file * file,
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
+	return 0;
+}
+
+static int request_user_wq(struct submitter_dce_ctx* ctx, UserArea* ua){
+	struct dce_driver_priv* priv = ctx->dev;
+	/*TODO: Could make sense to do UserArea validation here */
+	int wqnum = reserve_unused_wq(priv);
+	if(wqnum<0){ /* no more free queues */
+		return -ENOBUFS;
+	} else {
+		ctx->wq_num = wqnum;
+		/* TODO: Refactor, pass only &wq to setup_memory */
+		return setup_user_wq(ctx, ctx->wq_num, ua);
+	}
+	return 0;
 }
 
 int setup_kernel_wq(
@@ -320,6 +344,7 @@ int setup_kernel_wq(
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 	int DSCSZ = 0;
+	/* Only setup reserved queues */
 	if(dce_priv->wq[wq_num].type != RESERVED_WQ) {
 		pr_err("Queue setup only possible on reserved queue, clean/reserve first \n");
 		return -EFAULT;
@@ -336,6 +361,7 @@ int setup_kernel_wq(
 	/* Supervisor memory setup */
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
 	size_t length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
+	/* TODO: Remove and properly tear down on release */
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	// Allcate the descriptors as coherent DMA memory
@@ -404,7 +430,7 @@ static int request_kernel_wq(struct submitter_dce_ctx* ctx, KernelQueueReq* kqr)
 		int wqnum = reserve_unused_wq(ctx->dev);
 		if(wqnum<0){ /* no more free queues */
 			ctx->wq_num = 0; /* Fallback to shared queue */
-			/* Would it make more sense to just fault here*/
+			/* TODO: Would it make more sense to just fault here*/
 			pr_info("Out of wq!");
 		} else {
 			ctx->wq_num = wqnum;
@@ -506,19 +532,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			/* WQ shouldn't havve been assigned at this point */
 			if (ctx->wq_num != -1) return -EFAULT;
-
-			/* assign workqueue or fail */
-			{
-				int wqnum = reserve_unused_wq(priv);
-				if(wqnum<0){ /* no more free queues */
-					ctx->wq_num = -1;
-					return -EFAULT; /* TODO: Better error code?*/	
-				} else {
-					ctx->wq_num = wqnum;
-					/* TODO: Refactor, pass only &wq to setup_memory */
-					setup_memory_for_wq_from_user(file, ctx->wq_num, &ua);
-				}
-			}
+			return request_user_wq(ctx, &ua);
 			break;
 		}
 
