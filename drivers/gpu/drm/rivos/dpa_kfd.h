@@ -94,7 +94,7 @@ struct dpa_kfd_process {
 
 	// aql queues
 	struct list_head queue_list;
-	void *fake_doorbell_page;
+	struct page *fake_doorbell_page;
 };
 
 // tracks buffers -- especially vram allocations
