@@ -1581,7 +1581,7 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 		if (p->event_page)
 			devm_kfree(p->dev->dev, p->event_page);
 		if (p->fake_doorbell_page)
-			devm_kfree(p->dev->dev, p->fake_doorbell_page);
+			__free_pages(p->fake_doorbell_page, 0);
 		dpa_del_all_queues(p);
 		if (p->sva)
 			iommu_sva_unbind_device(p->sva);
@@ -1647,13 +1647,18 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 		}
 		break;
 	case KFD_MMAP_TYPE_DOORBELL:
+		if (size != PAGE_SIZE) {
+			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
+				 __func__);
+			return -EINVAL;
+		}
+
 		// XXX hack for now until real doorbell mmio is implemented
 		// allocate a regular page and put it there, device will be
 		// polling on the queues until real doorbells are implemented
 		mutex_lock(&p->lock);
 		if (!p->fake_doorbell_page) {
-			p->fake_doorbell_page = devm_kzalloc(p->dev->dev, size,
-							     GFP_KERNEL);
+			p->fake_doorbell_page = alloc_page(GFP_KERNEL);
 			if (!p->fake_doorbell_page) {
 				dev_warn(p->dev->dev, "%s: failed to alloc fake"
 					 " db page\n", __func__);
@@ -1664,11 +1669,8 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 		}
 		mutex_unlock(&p->lock);
 
-		pfn = __pa(p->fake_doorbell_page);
-		pfn >>= PAGE_SHIFT;
-
-		ret = remap_pfn_range(vma, vma->vm_start, pfn,
-				      vma->vm_end - vma->vm_start, vma->vm_page_prot);
+		ret = vm_insert_page(vma, vma->vm_start,
+				     p->fake_doorbell_page);
 		if (ret) {
 			dev_warn(p->dev->dev, "%s: failed to map doorbell page"
 				 "ret %d\n",
