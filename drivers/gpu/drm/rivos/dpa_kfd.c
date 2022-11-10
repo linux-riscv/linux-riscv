@@ -259,8 +259,8 @@ MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 
 void setup_queue(struct dpa_device *dpa) {
 	dev_warn(dpa->dev, "DMA address of queue is: %llx\n", dpa->qinfo.fw_queue_dma_addr);
-	writeq(dpa->qinfo.fw_queue_dma_addr, dpa->regs + DUC_PCI_QUEUE_INFO_ADDRESS);
-	writeq(0x1000, dpa->regs + DUC_PCI_QUEUE_INFO_SIZE);
+	writeq(dpa->qinfo.fw_queue_dma_addr, dpa->regs + DUC_REGS_FW_DESC);
+	writeq(0, dpa->regs + DUC_REGS_FW_PASID);
 }
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -312,7 +312,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dpa_device, "%s: unable to allocate memory\n", __func__);
 		goto unmap;
 	}
-	// write the queue parameters to the shared area
+	// Write Daffy information to FW queue regs
 	setup_queue(dpa);
 
 	/* XXX need DRM init */
@@ -327,7 +327,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			__func__, ret);
 	}
 
-	writeb(0x4, dpa->regs);
+	writeq(0x4, dpa->regs);
 	if ((ret = daffy_get_version_cmd(dpa, &version))) {
 		dev_err(dpa_device, "%s: get version failed %d\n",
 			__func__, ret);
@@ -335,8 +335,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dpa_device, "%s: got version %u\n", __func__,
 			 version);
 	}
-
-
 
 	return 0;
 
