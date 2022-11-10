@@ -171,6 +171,9 @@ struct dpa_kfd_event_waiter {
 #define KFD_MMAP_TYPE_EVENTS (0x2ULL)
 #define KFD_MMAP_TYPE_DOORBELL (0x1ULL)
 
+// temporary until DRM/GEM
+#define KFD_MMAP_TYPE_VRAM (0x0ULL)
+
 #define KFD_GPU_ID_HASH_WIDTH (4)
 #define KFD_MMAP_GPU_ID_SHIFT (48)
 #define KFD_MMAP_GPU_ID_MASK ((1ULL << KFD_GPU_ID_HASH_WIDTH) - 1) \
