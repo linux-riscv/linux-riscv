@@ -259,6 +259,22 @@ void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
 	memset(ring, 0, sizeof(DescriptorRing));
 }
 
+/* return an unused workqueue number or -1*/
+static int reserve_unused_wq(struct dce_driver_priv * priv) {
+	int ret = -1;
+	mutex_lock(&(priv->lock));
+	for(int i=0; i<NUM_WQ; ++i){
+		struct work_queue* wq = priv->wq+i;
+		if(wq->type==DISABLED){
+			ret = i;
+			wq->type = RESERVED_WQ;
+			break;
+		}
+	}
+	mutex_unlock(&(priv->lock));
+	return ret;
+}
+
 static void setup_memory_for_wq_from_user(struct file * file,
 					  int wq_num, UserArea * ua)
 {
@@ -299,12 +315,15 @@ static void setup_memory_for_wq_from_user(struct file * file,
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 }
 
-void setup_memory_for_wq(
+int setup_kernel_wq(
 		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr)
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
-
 	int DSCSZ = 0;
+	if(dce_priv->wq[wq_num].type != RESERVED_WQ) {
+		pr_err("Queue setup only possible on reserved queue, clean/reserve first \n");
+		return -EFAULT;
+	}
 
 	// Parse KernelQueueReq if provided
 	if (kqr) {
@@ -349,7 +368,57 @@ void setup_memory_for_wq(
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
+
+	return 0;
 }
+
+/* set up default shared kernel submission queue 0
+ * type of queue is set late, but it is ok because this is done
+ * before device is published */
+int setup_default_kernel_queue(struct dce_driver_priv* dce_priv){
+	struct work_queue* wq = &(dce_priv->wq[0]);
+	/* Reserve WQ 0 */
+	mutex_lock(&dce_priv->lock);
+	if(wq->type != DISABLED){
+		pr_err("Default queue already used\n");
+		return -EFAULT;
+	}
+	wq->type = RESERVED_WQ;
+	mutex_unlock(&dce_priv->lock);
+	if(setup_kernel_wq(dce_priv, 0, NULL)<0){
+		pr_err("Error setting up default queue\n");
+		/* TODO: return queue to unused */
+		return -EFAULT;
+	}
+	wq->type = SHARED_KERNEL_WQ;
+	return 0;
+}
+
+static int request_kernel_wq(struct submitter_dce_ctx* ctx, KernelQueueReq* kqr){
+	/* WQ shouldn't have been assigned at this point */
+	if (ctx->wq_num != -1)
+		return -EFAULT;
+
+	/* allocate a queue to context or fallback to wq 0*/
+	{
+		int wqnum = reserve_unused_wq(ctx->dev);
+		if(wqnum<0){ /* no more free queues */
+			ctx->wq_num = 0; /* Fallback to shared queue */
+			/* Would it make more sense to just fault here*/
+			pr_info("Out of wq!");
+		} else {
+			ctx->wq_num = wqnum;
+			/* TODO: Refactor, pass only &wq to setup_memory
+			 * requires a separate activation function for the queue */
+			if(setup_kernel_wq(ctx->dev, wqnum, kqr)<0){
+				//TODO: Print an error
+				return -EFAULT;
+			}
+		}
+	}
+	return 0;
+}
+
 
 static void init_wq(struct work_queue* wq){
 	wq->type = DISABLED;
@@ -360,25 +429,10 @@ static void init_wq(struct work_queue* wq){
 void free_resources(struct device * dev, struct dce_driver_priv *priv)
 {
 	/* TODO: Free each WQ as well? */
+	/* also take the HW down properly, waiting for it to be unpluggable?*/
 	if (priv->WQIT)
 		dma_free_coherent(priv->pci_dev, 0x1000, priv->WQIT, priv->WQIT_dma);
 	return;
-}
-
-/* return an unused workqueue number or -1*/
-static int reserve_unused_wq(struct dce_driver_priv * priv) {
-	int ret = -1;
-	mutex_lock(&(priv->lock));
-	for(int i=0; i<NUM_WQ; ++i){
-		struct work_queue* wq = priv->wq+i;
-		if(wq->type==DISABLED){
-			ret = i;
-			wq->type = RESERVED_WQ;
-			break;
-		}
-	}
-	mutex_unlock(&(priv->lock));
-	return ret;
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -435,21 +489,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
 					return -EFAULT;
 
-			/* WQ shouldn't have been assigned at this point */
-			if (ctx->wq_num != -1) return -EFAULT;
-
-			/* allocate a queue to context or fallback to wq 0*/
-			{
-				int wqnum = reserve_unused_wq(priv);
-				if(wqnum<0){ /* no more free queues */
-					ctx->wq_num = 0; /*Fallback to shared queue*/
-				} else {
-					ctx->wq_num = wqnum;
-					/* TODO: Refactor, pass only &wq to setup_memory */
-					setup_memory_for_wq(priv, wqnum, &kqr);
-				}
-			}
-
+			return request_kernel_wq(ctx, &kqr);
 			break;
 		}
 
@@ -491,18 +531,26 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			/* Default to WQ 0 (Shared kernel) if not assigned */
-			if (ctx->wq_num == -1) ctx->wq_num = 0;
+			if (ctx->wq_num == -1){
+				pr_info("Falling back to default queue\n");
+				ctx->wq_num = 0;
+			}
 
 			/* WQ should be enabled at this point */
-			if (priv->wq[ctx->wq_num].type == DISABLED)
+			if (priv->wq[ctx->wq_num].type == DISABLED){
+				pr_warn("Submitting to disabled queue %d, ignored", ctx->wq_num);
 				return -EFAULT;
+			}
 
 			/* Make sure selected WQ is owned by Kernel */
-			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ)
+			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ){
+				pr_warn("Submitting to user managed queue through iocctl. Ignored\n");
 				return -EFAULT;
+			}
 
 			if (parse_descriptor_based_on_opcode(&descriptor,
 				&descriptor_input, ctx->pasid) < 0) {
+				pr_warn("Failed to parse descriptor for submission\n");
 				return -EFAULT;
 			}
 
@@ -695,8 +743,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
-	setup_memory_for_wq(drv_priv, 0, NULL);
-	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
+	err = setup_default_kernel_queue(drv_priv);
+	if(err<0) goto free_resources_and_fail;
 
 	return 0;
 
