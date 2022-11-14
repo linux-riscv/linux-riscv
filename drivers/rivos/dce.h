@@ -272,7 +272,6 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p);
 
 int setup_memory_regions(struct dce_driver_priv * drv_priv);
 
-int setup_kernel_wq(
-		struct dce_driver_priv * dce_priv, int wq_num, KernelQueueReq * kqr);
+int setup_default_kernel_queue(struct dce_driver_priv * dce_priv);
 
 #endif

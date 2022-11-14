@@ -36,14 +36,15 @@ static const struct file_operations dcevf_ops = {
 static DEFINE_IDA(dce_minor_ida);
 
 static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
-	printk(KERN_INFO "in %s\n", __func__);
-
 	int bar, err;
 	u16 vendor, device;
 	struct cdev *cdev;
 	// unsigned long mmio_start,mmio_len;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
+	int minor;
+
+	printk(KERN_INFO "in %s\n", __func__);
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
@@ -86,11 +87,18 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	dev->class = dcevf_char_class;
 	dev->parent = &pdev->dev;
 
-	int minor = ida_simple_get(&dce_minor_ida, 0, 0, GFP_KERNEL);
+	minor = ida_simple_get(&dce_minor_ida, 0, 0, GFP_KERNEL);
+	if(minor <0){
+		dev_err(dev, "Failure to get minor\n");
+		goto free_resources_and_fail;
+	}
 
 	dev->devt = MKDEV(MAJOR(dev_num), minor);
-	dev_set_name(dev, "dcevf%d", minor);
-	printk(KERN_INFO "Got minor number %d, name: %s\n", minor, dev_name(dev));
+	err= dev_set_name(dev, "dcevf%d", minor);
+	if(err<0){
+		dev_err(dev, "Failure naming device\n");
+	}
+	dev_info(dev,"Got minor number %d, name: %s\n", minor, dev_name(dev));
 	cdev = &drv_priv->cdev;
 	cdev_init(cdev, &dcevf_ops);
 	cdev->owner = THIS_MODULE;
@@ -113,16 +121,29 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
+		int vec;
 		dev_info(dev, "Using MSI(-X) interrupts\n");
 		pci_set_master(pdev);
-		printk(KERN_INFO"dev->msi_enabled: %d\n", pdev->msix_enabled);
+		dev_info(dev, "dev->msi_enabled: %d\n", pdev->msix_enabled);
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
-		int vec = pci_irq_vector(pdev, 0);
-		printk(KERN_INFO"err: %d, IRQ vector is %d\n",err, vec);
+		if(err<0){
+			dev_err(dev, "Failled to allocate interrupt vectors\n");
+			goto free_resources_and_fail;
+		}
+		vec = pci_irq_vector(pdev, 0);
+		if(vec<0){
+			dev_err(dev, "DCE-VF: Failure getting IRQ nr");
+			goto free_resources_and_fail;
+		}
+		dev_info(dev, "IRQ vector is %d\n", vec);
 		/* auto frees on device detach, nice */
-		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
+		err = devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
+		if(err<0){
+			dev_err(dev, "DCE-VF: Failure registering irq handler\n");
+			goto free_resources_and_fail;
+		}
 	} else {
-		dev_warn(dev, "DCE: MSI enable failed\n");
+		dev_warn(dev, "DCE-VF: MSI enable failed\n");
 	}
 
 	/* work queue setup */
@@ -132,15 +153,14 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	mutex_init(&drv_priv->lock);
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
-	setup_kernel_wq(drv_priv, 0, NULL);
-	drv_priv->wq[0].type = SHARED_KERNEL_WQ;
+	setup_default_kernel_queue(drv_priv);
 
 	return 0;
 
-	free_resources_and_fail:
+free_resources_and_fail:
+		dev_err(dev, "Failure in probe, device unavailable\n");
 		free_resources(dev, drv_priv);
-
-	disable_device_and_fail:
+disable_device_and_fail:
 		pci_disable_device(pdev);
 		return err;
 }
@@ -164,16 +184,19 @@ static struct pci_driver dcevf_driver = {
 	},
 };
 
+/* TODO: remove if not useful, currently unused, keeping here just incase
+
 static char *pci_char_devnode(struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, DEVICE_VF_NAME);
 }
+*/
 
 static int __init dcevf_driver_init(void)
 {
 	int err;
 	err = alloc_chrdev_region(&dev_num, 0, DCE_NR_VIRTFN, DEVICE_VF_NAME);
-	if (err) return -err;
+	if (err) return err;
 
 	printk(KERN_INFO "DCEVF: in module init\n");
 	dcevf_char_class = class_create(THIS_MODULE, DEVICE_VF_NAME);
@@ -182,7 +205,11 @@ static int __init dcevf_driver_init(void)
 		return err;
 	}
 
-	//dcevf_char_class->devnode = pci_char_devnode;
+	/* TODO: Check whqtthis is for, seems to generate device name
+	 * from device struct device and umode_t
+	 * The current impl makes all VF named dcevf, unsurpisingly from impl
+	dcevf_char_class->devnode = pci_char_devnode;
+	*/
 
 	err = pci_register_driver(&dcevf_driver);
 	return err;
