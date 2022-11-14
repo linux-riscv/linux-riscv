@@ -186,6 +186,8 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/*TODO: cleanup*/
+#if 0
 ssize_t dce_ops_write(struct file *fp, const char __user *buf, size_t count, loff_t *ppos)
 {
 	return 0;
@@ -195,8 +197,9 @@ ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *pp
 {
 	return 0;
 }
+#endif
 
-/* compute number of descriptors in a WQ using DSCSZ 
+/* compute number of descriptors in a WQ using DSCSZ
  * should probably replace by a shift at some point */
 static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
 	int DSCSZ = priv->WQIT[wq_num].DSCSZ;
@@ -474,6 +477,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EBADFD;
 #endif
 	switch (cmd) {
+/*TODO: cleanup*/
+#if 0
 		case RAW_READ: {
 			struct AccessInfoRead __user *__access_info;
 			struct AccessInfoRead access_info;
@@ -502,7 +507,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			break;
 		}
-
+#endif
 		case REQUEST_KERNEL_WQ: {
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
@@ -585,7 +590,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	if (ctx->wq_num == -1) return -EFAULT;
 
 	unsigned long pfn = phys_to_pfn(priv->mmio_start_phys);
-	/* coompute the door bell page with wq num */
+	/* compute the door bell page with wq num */
 	pfn += (ctx->wq_num + 1);
 
 	vma->vm_flags |= VM_IO;
@@ -610,8 +615,11 @@ static const struct file_operations dce_ops = {
 	.owner          = THIS_MODULE,
 	.open           = dce_ops_open,
 	.release        = dce_ops_release,
+/*TODO: cleanup*/
+#if 0
 	.read           = dce_ops_read,
 	.write          = dce_ops_write,
+#endif
 	.mmap           = dce_mmap,
 	.unlocked_ioctl = dce_ioctl
 };

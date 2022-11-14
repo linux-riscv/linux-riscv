@@ -27,8 +27,10 @@ static const struct file_operations dcevf_ops = {
 	.owner		= THIS_MODULE,
 	.open		= dce_ops_open,
 	.release	= dce_ops_release,
+#if 0
 	.read		= dce_ops_read,
 	.write		= dce_ops_write,
+#endif
 	.mmap 		= dce_mmap,
 	.unlocked_ioctl = dce_ioctl,
 };
