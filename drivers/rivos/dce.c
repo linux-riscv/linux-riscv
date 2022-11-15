@@ -50,16 +50,17 @@ void clean_up_work(struct work_struct *work) {
 		/* break early if we are done */
 		if (!irq_sts) break;
 		if (irq_sts & BIT(wq_num)) {
+			DescriptorRing * ring;
+			int head, curr;
 			mutex_lock(&dce_priv->wq[wq_num].wq_clean_lock);
-			DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
+			ring = get_desc_ring(dce_priv, wq_num);
 			/* Atomic read ? */
-			int head = ring->hti->head;
-			int curr = ring->clean_up_index;
+			head = ring->hti->head;
+			curr = ring->clean_up_index;
 
 			while(curr < head) {
-				// Position in queue
-				int qi = (curr % ring->length);
-				// printk(KERN_INFO "curr :%d, head: %d\n", curr, head);
+				/* Position in queue
+				int qi = (curr % ring->length); */
 				/* for every clean up, notify user via eventfd when applicable
 				 * TODO: Find out an optimal policy for eventfd */
 				if (dce_priv->wq[wq_num].efd_ctx_valid) {
@@ -85,6 +86,7 @@ struct submitter_dce_ctx {
 	unsigned int pasid;
 };
 
+static void set_queue_enable(struct dce_driver_priv * dev_ctx, int wq_num, bool enable);
 int dce_ops_open(struct inode *inode, struct file *file)
 {
 	struct dce_driver_priv *dev = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
@@ -146,10 +148,10 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		 * as a result, for user and owned kernel queues, we can always tear down
 		 * data structures on call to release */
 		if(wq->type == KERNEL_WQ || wq->type == USER_OWNED_WQ){
-			/*TODO: Deal with running jobs, what is the policy? */
-			printk(KERN_INFO "Unassigning file handle 0x%lx from slot %u\n", file, wq_num);
 			/* clean up the descriptor ring */
+			/*TODO: Deal with running jobs, what is the policy? */
 			DescriptorRing * ring = get_desc_ring(priv, wq_num);
+			dev_info(priv->pci_dev, "Unassigning file handle 0x%pK from slot %u\n", file, wq_num);
 			if (ring->desc_dma) { /* only set for kernel queues */
 				dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
 					ring->descriptors, ring->desc_dma);
@@ -159,12 +161,8 @@ int dce_ops_release(struct inode *inode, struct file *file)
 			/* clean up the WQITE*/
 			memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
 
-			/* Clear the enable bit in dce */
-			mutex_lock(&priv->dce_reg_lock);
-			uint64_t wq_enable = dce_reg_read(priv, DCE_REG_WQENABLE);
-			wq_enable &= (~BIT(wq_num));
-			dce_reg_write(priv, DCE_REG_WQENABLE, wq_enable);
-			mutex_unlock(&priv->dce_reg_lock);
+			/* Clear the enable bit for queue in HW */
+			set_queue_enable(priv, wq_num, false);
 
 			/* mark the WQ as disabled in driver */
 			priv->wq[wq_num].type = DISABLED;
@@ -200,7 +198,9 @@ ssize_t dce_ops_read(struct file *fp, char __user *buf, size_t count, loff_t *pp
 #endif
 
 /* compute number of descriptors in a WQ using DSCSZ
- * should probably replace by a shift at some point */
+ * should probably replace by a shift at some point
+ * and also used the driver copy rather than fetch from HW...
+ * TODO: remove */
 static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
 	int DSCSZ = priv->WQIT[wq_num].DSCSZ;
 	int num_desc = DEFAULT_NUM_DSC_PER_WQ;
@@ -208,30 +208,35 @@ static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num) {
 	return num_desc;
 }
 
+static void notify_queue_update(struct dce_driver_priv * dev_ctx, int wq_num);
+
 static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* descriptor, int wq_num)
 {
+	DescriptorRing * ring;
+	u64 tail_idx, head_idx;
+	struct DCEDescriptor* dest;
+	int queue_size =  get_num_desc_for_wq(priv, wq_num);
+
 	mutex_lock(&priv->wq[wq_num].wq_tail_lock);
-	DescriptorRing * ring = get_desc_ring(priv, wq_num);
-	uint64_t tail_idx = ring->hti->tail;
-	uint64_t head_idx = ring->hti->head;
-	if (tail_idx == head_idx + 63) {
+	ring = get_desc_ring(priv, wq_num);
+	tail_idx = ring->hti->tail;
+	head_idx = ring->hti->head;
+	/*always leave one slot free */
+	if (tail_idx == (head_idx + queue_size -1)) {
 		/* TODO: ring is full, handle it, with the right size even better */
 	}
-	uint64_t base = ring->descriptors;
-	int num_desc_in_wq = get_num_desc_for_wq(priv, wq_num);
-	uint8_t * tail_ptr = base + ((tail_idx % num_desc_in_wq) * sizeof(DCEDescriptor));
-
-	// TODO: something here with error handling
-	memcpy(tail_ptr, descriptor, sizeof(DCEDescriptor));
+	dest = ring->descriptors + (tail_idx % queue_size);
+	/*copy descriptor to queue and make it observable */
+	*dest = *descriptor;
 	wmb();
-	/* increment tail index */
+	/* increment tail index, and make sure the write is observable
+	 * the previous write should be observable to HW before the write
+	 * to tail is, otherwise corrupted job data might be considered */
 	ring->hti->tail++;
 	wmb();
-	/* notify DCE */
-	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
-	dce_reg_write(priv, WQCR_REG, 1);
 
 	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
+	notify_queue_update(priv, wq_num);
 }
 
 static int parse_descriptor_based_on_opcode(
@@ -279,6 +284,24 @@ static int reserve_unused_wq(struct dce_driver_priv * priv) {
 	return ret;
 }
 
+/* set the enable bit for queue in dce HW */
+static void set_queue_enable(struct dce_driver_priv * dev_ctx, int wq_num, bool enable){
+	u64 wq_enable;
+	mutex_lock(&dev_ctx->dce_reg_lock);
+	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
+	if(enable)
+		wq_enable |= BIT(wq_num);
+	else
+		wq_enable &= (~BIT(wq_num));
+	dce_reg_write(dev_ctx, DCE_REG_WQENABLE, wq_enable);
+	mutex_unlock(&dev_ctx->dce_reg_lock);
+}
+
+static void notify_queue_update(struct dce_driver_priv * dev_ctx, int wq_num){
+	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
+	dce_reg_write(dev_ctx, WQCR_REG, 1);
+}
+
 static int setup_user_wq(struct submitter_dce_ctx* ctx,
 					  int wq_num, UserArea * ua)
 {
@@ -286,18 +309,21 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 	size_t length = ua->numDescs;
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 	struct work_queue* wq = dce_priv->wq+wq_num;
+	int size = length * sizeof(DCEDescriptor);
+	int DSCSZ;
+
 	if(wq->type != RESERVED_WQ){
-		pr_err("User queue setup only possible on reserved queue, clean/reserve first \n");
+		dev_err(ctx->dev->pci_dev, "User queue setup only possible on reserved queue, clean/reserve first \n");
 		return -EFAULT;
 	}
 
-	int size = length * sizeof(DCEDescriptor);
 	/* make sure size is multiple of 4K */
+	/* TODO: Check alignement as per spec, i.e. naturally aligne to full queue size*/
 	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) {
-		pr_warn("Invalid size requested for User queue: %d", size);
+		dev_warn(ctx->dev->pci_dev, "Invalid size requested for User queue: %d", size);
 		return -EBADR;
 	}
-	int DSCSZ = fls(size) - fls(0x1000);
+	DSCSZ = fls(size) - fls(0x1000);
 
 	// printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
 	/* TODO: Remove and properly tear down on release */
@@ -308,22 +334,18 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 	ring->descriptors = (DCEDescriptor *)ua->descriptors;
 	ring->hti = (HeadTailIndex *)ua->hti;
 
-	dce_priv->WQIT[wq_num].DSCBA = ring->descriptors;
-	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
-	dce_priv->WQIT[wq_num].DSCPTA =	ring->hti;
+	dce_priv->WQIT[wq_num].DSCBA  = (u64) ring->descriptors;
+	dce_priv->WQIT[wq_num].DSCSZ  = DSCSZ;
+	dce_priv->WQIT[wq_num].DSCPTA = (u64) ring->hti;
 	/* set the PASID fields in TRANSCTL */
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 0) |
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
 
-	/* set the enable bit in dce*/
-	mutex_lock(&dce_priv->dce_reg_lock);
-	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
-	wq_enable |= BIT(wq_num);
-	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
-	mutex_unlock(&dce_priv->dce_reg_lock);
+	/* enable queue in HW */
+	set_queue_enable(dce_priv, wq_num, true);
 
-	/* mark the WQ as enabled in driver */
+	/* enabled queue in driver */
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
 	return 0;
 }
@@ -347,6 +369,7 @@ int setup_kernel_wq(
 {
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 	int DSCSZ = 0;
+	size_t length;
 	/* Only setup reserved queues */
 	if(dce_priv->wq[wq_num].type != RESERVED_WQ) {
 		pr_err("Queue setup only possible on reserved queue, clean/reserve first \n");
@@ -362,8 +385,9 @@ int setup_kernel_wq(
 	}
 
 	/* Supervisor memory setup */
-	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
-	size_t length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
+	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12)
+	 * TODO: Some commonality with user queue code, regroup in the same place*/
+	length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
 	/* TODO: Remove and properly tear down on release */
 	dce_reset_descriptor_ring(dce_priv, wq_num);
 
@@ -388,12 +412,8 @@ int setup_kernel_wq(
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
-	/* set the enable bit in dce*/
-	mutex_lock(&dce_priv->dce_reg_lock);
-	uint64_t wq_enable = dce_reg_read(dce_priv, DCE_REG_WQENABLE);
-	wq_enable |= BIT(wq_num);
-	dce_reg_write(dce_priv, DCE_REG_WQENABLE, wq_enable);
-	mutex_unlock(&dce_priv->dce_reg_lock);
+	/* enable the queue in HW */
+	set_queue_enable(dce_priv, wq_num, true);
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
@@ -466,7 +486,6 @@ void free_resources(struct device * dev, struct dce_driver_priv *priv)
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	uint64_t val;
 	struct DCEDescriptor descriptor;
 	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
@@ -508,29 +527,33 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 #endif
-		case REQUEST_KERNEL_WQ: {
+	case REQUEST_KERNEL_WQ:
+		{
+			KernelQueueReq __user *__kqr_input;
+			KernelQueueReq kqr ={.DSCSZ = 0, .eventfd_vld = false, .eventfd = 0};
+
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
 
-			KernelQueueReq __user * __kqr_input;
-			KernelQueueReq kqr = {.DSCSZ = 0, .eventfd_vld = false, .eventfd = 0};
 			__kqr_input = (KernelQueueReq __user *) arg;
-			if (__kqr_input)
+			if (__kqr_input) /* TODO: What if NULL ?, should it be -EFAULT as well?*/
 				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
 					return -EFAULT;
 
 			return request_kernel_wq(ctx, &kqr);
-			break;
 		}
+		break;
 
-		case SETUP_USER_WQ: {
+	case SETUP_USER_WQ:
+		{
+			UserArea __user * __UserArea_input;
+			UserArea ua;
+
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
 
-			UserArea __user * __UserArea_input;
-			UserArea ua;
 			__UserArea_input = (struct UserArea __user *) arg;
 			if (copy_from_user(&ua, __UserArea_input, sizeof(UserArea)))
 				return -EFAULT;
@@ -538,8 +561,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* WQ shouldn't havve been assigned at this point */
 			if (ctx->wq_num != -1) return -EFAULT;
 			return request_user_wq(ctx, &ua);
-			break;
 		}
+		break;
 
 		case SUBMIT_DESCRIPTOR: {
 			struct DCEDescriptor __user *__descriptor_input;
@@ -586,10 +609,11 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	struct submitter_dce_ctx * ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
+	unsigned long pfn;
 
 	if (ctx->wq_num == -1) return -EFAULT;
 
-	unsigned long pfn = phys_to_pfn(priv->mmio_start_phys);
+	pfn = phys_to_pfn(priv->mmio_start_phys);
 	/* compute the door bell page with wq num */
 	pfn += (ctx->wq_num + 1);
 
@@ -650,9 +674,9 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 								  &drv_priv->WQIT_dma, GFP_KERNEL);
 
 	// printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
-	if (drv_priv->WQIT_dma & GENMASK(11, 0) != 0) {
-		printk(KERN_ERR "DCE: WQITBA[11:0]:0x%lx is not all zero!",
-			drv_priv->WQIT_dma);
+	if ((drv_priv->WQIT_dma & GENMASK(11, 0)) != 0) {
+		dev_err(dev, "DCE: WQITBA[11:0]:0x%pad is not all zero!",
+			&drv_priv->WQIT_dma);
 		dma_free_coherent(drv_priv->pci_dev, 0x1000,
 			drv_priv->WQIT, drv_priv->WQIT_dma);
 		return -EFAULT;
@@ -666,16 +690,12 @@ static struct class *dce_char_class;
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int bar, err;
-
-	// printk(KERN_INFO " in %s\n", __func__);
-	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
-
 	u16 vendor, device;
-	// unsigned long mmio_start,mmio_len;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
 	struct cdev *cdev;
 
+	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
@@ -740,15 +760,20 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* MSI setup */
 	if (pci_match_id(pci_use_msi, pdev)) {
+		int vec;
 		dev_info(dev, "Using MSI(-X) interrupts\n");
 		printk(KERN_INFO"dev->msix_enabled: %d\n", pdev->msi_enabled);
 		pci_set_master(pdev);
+		/* TODO: error check */
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
-		int vec = pci_irq_vector(pdev, 0);
+		vec = pci_irq_vector(pdev, 0);
 		printk(KERN_INFO"err: %d, IRQ vector is %d\n",err, vec);
 
 		/* auto frees on device detach, nice */
-		devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
+		err=devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
+		if(err<0){
+			dev_err(dev, "Failed setting up IRQ\n");
+		}
 	} else {
 		dev_warn(dev, "DCE: MSI enable failed\n");
 	}
