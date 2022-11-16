@@ -1509,6 +1509,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 				     dpa_process_list);
 		if (cur_process->mm == current->mm) {
 			dpa_app = cur_process;
+			kref_get(&dpa_app->ref);
 			break;
 		}
 	}
@@ -1543,6 +1544,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	idr_init(&dpa_app->event_idr);
 	INIT_LIST_HEAD(&dpa_app->event_list);
 	INIT_LIST_HEAD(&dpa_app->queue_list);
+	kref_init(&dpa_app->ref);
 
 	// only one DPA for now
 	dpa_app->dev = dpa;
@@ -1591,29 +1593,35 @@ static void dpa_kfd_release_process_buffers(struct dpa_kfd_process *p)
 	mutex_unlock(&p->dev->lock);
 }
 
+static void dpa_kfd_release_process(struct kref *ref)
+{
+	struct dpa_kfd_process *p = container_of(ref, struct dpa_kfd_process,
+						 ref);
+	mutex_lock(&dpa_processes_lock);
+	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
+		 current->tgid);
+	// XXX mutex lock on process lock ?
+	dpa_kfd_release_process_buffers(p);
+	dpa_kfd_release_process_events(p);
+	idr_destroy(&p->event_idr);
+	if (p->event_page)
+		devm_kfree(p->dev->dev, p->event_page);
+	if (p->fake_doorbell_page)
+		__free_pages(p->fake_doorbell_page, 0);
+	dpa_del_all_queues(p);
+	if (p->sva)
+		iommu_sva_unbind_device(p->sva);
+	list_del(&p->dpa_process_list);
+	dpa_process_count--;
+	devm_kfree(dpa_device, p);
+	mutex_unlock(&dpa_processes_lock);
+}
+
 static int dpa_kfd_release(struct inode *inode, struct file *filep)
 {
 	struct dpa_kfd_process *p = filep->private_data;
-	if (p) {
-		mutex_lock(&dpa_processes_lock);
-		dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
-			 current->tgid);
-		// XXX mutex lock on process lock ?
-		dpa_kfd_release_process_buffers(p);
-		dpa_kfd_release_process_events(p);
-		idr_destroy(&p->event_idr);
-		if (p->event_page)
-			devm_kfree(p->dev->dev, p->event_page);
-		if (p->fake_doorbell_page)
-			__free_pages(p->fake_doorbell_page, 0);
-		dpa_del_all_queues(p);
-		if (p->sva)
-			iommu_sva_unbind_device(p->sva);
-		list_del(&p->dpa_process_list);
-		dpa_process_count--;
-		devm_kfree(dpa_device, p);
-		mutex_unlock(&dpa_processes_lock);
-	}
+	if (p)
+		kref_put(&p->ref, dpa_kfd_release_process);
 
 	return 0;
 }
