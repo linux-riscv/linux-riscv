@@ -73,6 +73,9 @@ struct dpa_kfd_process {
 
 	struct mutex lock;
 
+	// use this for multiple opens by same process
+	struct kref ref;
+
 	/* mm struct of the process */
 	void *mm;
 
