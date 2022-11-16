@@ -11,9 +11,10 @@ TAG_NEXT="tjeznach/rivos-next"
 COMPONENTS=( \
     'origin/dev/bend/rivos-v6.1-rc3/feature/rivos-main' \
     'avpatel-linux/riscv_kvm_aia_v1' \
-    'tjeznach-linux/tjeznach/riscv-iommu' \
-    'origin/dev/bend/feature/dce' \
+    'origin/dev/tjeznach/feature/riscv-iommu' \
+    'origin/dev/tjeznach/feature/qemu-edu' \
     'origin/dev/tjeznach/feature/dpa' \
+    'origin/dev/bend/feature/dce' \
 )
 
 # Checkout new merge branch based on current 'next' tag.
