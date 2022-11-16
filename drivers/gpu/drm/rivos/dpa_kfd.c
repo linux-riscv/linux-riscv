@@ -1514,6 +1514,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	}
 
 	if (dpa_app) {
+		mutex_unlock(&dpa_processes_lock);
 		// using existing dpa_kfd_process
 		dev_warn(dpa_device, "%s: using existing kfd process\n", __func__);
 		filep->private_data = dpa_app;
