@@ -778,14 +778,14 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/*TODO: Check. pci_match_id is marked as deprecated in kernel doc */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		int vec;
-		/*TODO: Not sure what this is supposed to be showing, but it shows 0s at the moment */
+		pci_set_master(pdev);
+		/* TODO: error check */
+		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
 		dev_info(dev,
 				"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
 				pdev->msi_enabled,
 				pdev->msix_enabled);
-		pci_set_master(pdev);
-		/* TODO: error check */
-		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+
 		vec = pci_irq_vector(pdev, 0);
 		dev_info(dev, "irqcount: %d, IRQ vector is %d\n",err, vec);
 
