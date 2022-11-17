@@ -708,7 +708,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	/*TODO: this reads 0xffff for both vendor id and device id */
+
 	dev_info(dev, "Probing DCE: %x:%x\n", vendor, device);
 	if (device != DEVICE_ID)
 		isPF = false;
@@ -798,8 +798,10 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (pci_match_id(pci_use_msi, pdev)) {
 		int vec;
 		pci_set_master(pdev);
-		/* TODO: error check */
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+		if(err<0)
+			dev_err(dev, "Failed setting up IRQ\n");
+
 		dev_info(dev,
 				"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
 				pdev->msi_enabled,
@@ -810,9 +812,9 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 		/* auto frees on device detach, nice */
 		err=devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
-		if(err<0){
+		if(err<0)
 			dev_err(dev, "Failed setting up IRQ\n");
-		}
+
 	} else {
 		dev_warn(dev, "DCE: MSI enable failed\n");
 	}
