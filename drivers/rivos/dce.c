@@ -111,7 +111,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			return -ENODEV;
 		}
 		else {
-			printk(KERN_INFO "SVA allocation success!\n");
+			dev_info(dev->pci_dev, "SVA allocation success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
 		// printk(KERN_INFO "PASID assigned is %d\n", ctx->pasid);
@@ -122,7 +122,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			return -ENODEV;
 		}
 		else {
-			printk(KERN_INFO "PASID allocation success!\n");
+			dev_info(dev->pci_dev, "PASID allocation success!\n");
 		}
 	}
 	else {
@@ -627,7 +627,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE,
 			vma->vm_page_prot)) {
-		printk(KERN_INFO "Mapping failed!\n");
+		dev_info(priv->pci_dev, "Mapping failed!\n");
 		return -EAGAIN;
 	}
 	// printk(KERN_INFO "mmap completed\n");
@@ -653,7 +653,7 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 	struct dce_driver_priv *dce_priv=dce_priv_p;
 
 	/* FIXME: multiple thread running this? schedule_work reentrant safe?*/
-	printk(KERN_INFO "Got interrupt %d, work scheduled!\n", irq);
+	dev_info(dce_priv->pci_dev, "Got interrupt %d, work scheduled!\n", irq);
 	schedule_work(&dce_priv->clean_up_worker);
 
 	return IRQ_HANDLED;
@@ -664,7 +664,7 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 {
 	struct device * dev = drv_priv->pci_dev;
 	int err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
-	if (err) printk(KERN_INFO "DMA set mask failed: %d\n", err);
+	if (err) dev_info(drv_priv->pci_dev, "DMA set mask failed: %d\n", err);
 
 	// printk(KERN_INFO"dma_mask: 0x%lx\n",dev->dma_mask);
 	/* WQIT is 4KiB */
@@ -762,7 +762,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
-		printk(KERN_ERR "DCE: cdev add failed\n");
+		dev_err(dev, "DCE: cdev add failed\n");
 		goto free_resources_and_fail;
 	}
 
