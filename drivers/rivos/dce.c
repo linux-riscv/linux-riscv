@@ -613,8 +613,8 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 	if (ctx->wq_num == -1) return -EFAULT;
 
+	/* WQCR are in a page each, page offset wq_num+1 */
 	pfn = phys_to_pfn(priv->mmio_start_phys);
-	/* compute the door bell page with wq num */
 	pfn += (ctx->wq_num + 1);
 
 	vma->vm_flags |= VM_IO;
@@ -689,31 +689,39 @@ static struct class *dce_char_class;
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	int bar, err;
+	int err;
 	u16 vendor, device;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
 	struct cdev *cdev;
 
+	/*TODO: Feels like the VF should be declared after the PF is up.
+	 * also check error... */
 	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	//printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
 	err = pci_enable_device(pdev);
-	if (err) goto disable_device_and_fail;
+	if (err){
+		dev_err(dev, "pci_enable_device fail\n");
+		goto disable_device_and_fail;
+	}
 
-	bar = pci_select_bars(pdev, IORESOURCE_MEM);
-	// printk(KERN_INFO "io bar: 0x%X\n", bar);
-
-	err = pci_request_selected_regions(pdev, bar, DEVICE_NAME);
-	if (err) goto disable_device_and_fail;
-
+	err = pci_request_selected_regions( pdev,
+			pci_select_bars(pdev, IORESOURCE_MEM),
+			DEVICE_NAME );
+	if (err){
+		dev_err(dev, "pci_request_selected_regions fail\n");
+		goto disable_device_and_fail;
+	}
 
 	drv_priv = kzalloc_node(sizeof(struct dce_driver_priv), GFP_KERNEL,
 			     dev_to_node(dev));
-	if (!drv_priv) goto disable_device_and_fail;
+	if (!drv_priv){
+		err = -ENOMEM;
+		goto disable_device_and_fail;
+	}
 
 	drv_priv->pdev = pdev;
 	drv_priv->pci_dev = dev;
@@ -759,15 +767,19 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	/* MSI setup */
+	/*TODO: Check. pci_match_id is marked as deprecated in kernel doc */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		int vec;
-		dev_info(dev, "Using MSI(-X) interrupts\n");
-		printk(KERN_INFO"dev->msix_enabled: %d\n", pdev->msi_enabled);
+		/*TODO: Not sure what this is supposed to be showing, but it shows 0s at the moment */
+		dev_info(dev,
+				"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
+				pdev->msi_enabled,
+				pdev->msix_enabled);
 		pci_set_master(pdev);
 		/* TODO: error check */
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
 		vec = pci_irq_vector(pdev, 0);
-		printk(KERN_INFO"err: %d, IRQ vector is %d\n",err, vec);
+		dev_info(dev, "irqcount: %d, IRQ vector is %d\n",err, vec);
 
 		/* auto frees on device detach, nice */
 		err=devm_request_threaded_irq(dev, vec, handle_dce, NULL, IRQF_ONESHOT, DEVICE_NAME, drv_priv);
