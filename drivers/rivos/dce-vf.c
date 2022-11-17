@@ -51,7 +51,6 @@ static int dcevf_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	printk(KERN_INFO "Device vaid: 0x%X pid: 0x%X\n", vendor, device);
 
 	err = pci_enable_device(pdev);
 	if (err) goto disable_device_and_fail;
