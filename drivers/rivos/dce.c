@@ -228,13 +228,11 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	dest = ring->descriptors + (tail_idx % queue_size);
 	/*copy descriptor to queue and make it observable */
 	*dest = *descriptor;
-	wmb();
+	dma_wmb();
 	/* increment tail index, and make sure the write is observable
 	 * the previous write should be observable to HW before the write
 	 * to tail is, otherwise corrupted job data might be considered */
 	ring->hti->tail++;
-	wmb();
-
 	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
 	notify_queue_update(priv, wq_num);
 }
@@ -287,6 +285,11 @@ static int reserve_unused_wq(struct dce_driver_priv * priv) {
 /* set the enable bit for queue in dce HW */
 static void set_queue_enable(struct dce_driver_priv * dev_ctx, int wq_num, bool enable){
 	u64 wq_enable;
+	/* Ensure that writes to the in mem structures are observable before enable */
+	if(enable)
+		wmb();
+	/* TODO: This is the best we can do for now before HW offers a solution
+	 * for atomic clear/set of enable bits */
 	mutex_lock(&dev_ctx->dce_reg_lock);
 	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
 	if(enable)
@@ -299,6 +302,9 @@ static void set_queue_enable(struct dce_driver_priv * dev_ctx, int wq_num, bool 
 
 static void notify_queue_update(struct dce_driver_priv * dev_ctx, int wq_num){
 	uint64_t WQCR_REG = ((wq_num + 1) * PAGE_SIZE) + DCE_REG_WQCR;
+	/* We want all previous writes to be observable before
+	 * the dce_reg_write which is an io_write*/
+	wmb();
 	dce_reg_write(dev_ctx, WQCR_REG, 1);
 }
 
@@ -334,6 +340,7 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 	ring->descriptors = (DCEDescriptor *)ua->descriptors;
 	ring->hti = (HeadTailIndex *)ua->hti;
 
+	/*Setup WQITE */
 	dce_priv->WQIT[wq_num].DSCBA  = (u64) ring->descriptors;
 	dce_priv->WQIT[wq_num].DSCSZ  = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = (u64) ring->hti;
@@ -342,7 +349,7 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
 
-	/* enable queue in HW */
+	/* enable queue in HW, does its own wmb()*/
 	set_queue_enable(dce_priv, wq_num, true);
 
 	/* enabled queue in driver */
@@ -394,6 +401,7 @@ int setup_kernel_wq(
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
+
 		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
 
@@ -412,7 +420,7 @@ int setup_kernel_wq(
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
-	/* enable the queue in HW */
+	/* enable the queue in HW, does its own wmb() */
 	set_queue_enable(dce_priv, wq_num, true);
 
 	/* mark the WQ as enabled in driver */

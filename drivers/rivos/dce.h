@@ -137,8 +137,7 @@ typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
 	volatile u64 head;
 	u64 padding1[7];
 	/* init by driver, read by HW, written by SW/Driver */
-	/* TODO: Remove _Atomic and use kernel atomic stuff */
-	_Atomic u64 tail;
+	u64 tail;
 	u64 padding2[7];
 } HeadTailIndex;
 
