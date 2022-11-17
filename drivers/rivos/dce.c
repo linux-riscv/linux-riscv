@@ -20,6 +20,7 @@
 #include "dce.h"
 
 static dev_t dev_num;
+static dev_t dev_vf_num;
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -694,7 +695,9 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 	return 0;
 }
 static struct class *dce_char_class;
+static struct class *dcevf_char_class;
 
+static DEFINE_IDA(dce_minor_ida);
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int err;
@@ -702,13 +705,20 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
 	struct cdev *cdev;
+	bool isPF = true;
+	int minor;
 
 	/*TODO: Feels like the VF should be declared after the PF is up.
 	 * also check error... */
-	err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
+
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
+
+	if (device != DEVICE_ID)
+		isPF = false;
+	else
+		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
 
 	err = pci_enable_device(pdev);
 	if (err){
@@ -750,11 +760,25 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev = &drv_priv->dev;
 
 	device_initialize(dev);
-	dev->class = dce_char_class;
+	if (isPF) {
+		dev->class = dce_char_class;
+		dev->devt = MKDEV(MAJOR(dev_num), 0);
+		dev_set_name(dev, "dce");
+	}
+	else {
+		dev->class = dcevf_char_class;
+		minor = ida_simple_get(&dce_minor_ida, 0, 0, GFP_KERNEL);
+		if(minor <0){
+			dev_err(dev, "Failure to get minor\n");
+			goto free_resources_and_fail;
+		}
+		dev->devt = MKDEV(MAJOR(dev_vf_num), minor);
+		err = dev_set_name(dev, "dcevf%d", minor);
+		drv_priv->vf_number = minor;
+	}
+
 	dev->parent = &pdev->dev;
 
-	dev->devt = MKDEV(MAJOR(dev_num), 0);
-	dev_set_name(dev, "dce");
 	cdev = &drv_priv->cdev;
 	cdev_init(cdev, &dce_ops);
 	cdev->owner = THIS_MODULE;
@@ -860,6 +884,21 @@ static struct pci_driver dce_driver = {
 	},
 };
 
+static const struct pci_device_id dcevf_id_table[] = {
+	{ PCI_DEVICE(VENDOR_ID, DEVICE_VF_ID) } ,
+	{0, },
+};
+
+static struct pci_driver dcevf_driver = {
+	.name     = DEVICE_VF_NAME,
+	.id_table = dcevf_id_table,
+	.probe    = dce_probe,
+	.remove   = dce_remove,
+	.driver	= {
+		.pm = &vmd_dev_pm_ops,
+	},
+};
+
 static char *pci_char_devnode(struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, DEVICE_NAME);
@@ -868,6 +907,7 @@ static char *pci_char_devnode(struct device *dev, umode_t *mode)
 static int __init dce_driver_init(void)
 {
 	int err;
+	/* PF driver init */
 	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
 	if (err) return err;
 
@@ -880,12 +920,25 @@ static int __init dce_driver_init(void)
 	dce_char_class->devnode = pci_char_devnode;
 
 	err = pci_register_driver(&dce_driver);
+	/* VF driver init */
+	err = alloc_chrdev_region(&dev_vf_num, 0, DCE_NR_VIRTFN, DEVICE_VF_NAME);
+	if (err) return err;
+
+	printk(KERN_INFO "DCEVF: in module init\n");
+	dcevf_char_class = class_create(THIS_MODULE, DEVICE_VF_NAME);
+	if (IS_ERR(dcevf_char_class)) {
+		err = PTR_ERR(dcevf_char_class);
+		return err;
+	}
+
+	err = pci_register_driver(&dcevf_driver);
 	return err;
 }
 
 static void __exit dce_driver_exit(void)
 {
 	pci_unregister_driver(&dce_driver);
+	pci_unregister_driver(&dcevf_driver);
 }
 
 MODULE_LICENSE("GPL");
