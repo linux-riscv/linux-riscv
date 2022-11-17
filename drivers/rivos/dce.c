@@ -688,8 +688,6 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 				(uint64_t) drv_priv->WQIT_dma);
 	return 0;
 }
-static struct class *dce_char_class;
-static struct class *dcevf_char_class;
 
 static DEFINE_IDA(dce_minor_ida);
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -756,12 +754,10 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	device_initialize(dev);
 	if (isPF) {
-		dev->class = dce_char_class;
 		dev->devt = MKDEV(MAJOR(dev_num), 0);
 		dev_set_name(dev, "dce");
 	}
 	else {
-		dev->class = dcevf_char_class;
 		minor = ida_simple_get(&dce_minor_ida, 0, 0, GFP_KERNEL);
 		if(minor <0){
 			dev_err(dev, "Failure to get minor\n");
@@ -896,11 +892,6 @@ static struct pci_driver dcevf_driver = {
 	},
 };
 
-static char *pci_char_devnode(struct device *dev, umode_t *mode)
-{
-	return kasprintf(GFP_KERNEL, DEVICE_NAME);
-}
-
 static int __init dce_driver_init(void)
 {
 	int err;
@@ -908,25 +899,10 @@ static int __init dce_driver_init(void)
 	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
 	if (err) return err;
 
-	dce_char_class = class_create(THIS_MODULE, DEVICE_NAME);
-	if (IS_ERR(dce_char_class)) {
-		err = PTR_ERR(dce_char_class);
-		return err;
-	}
-
-	dce_char_class->devnode = pci_char_devnode;
-
 	err = pci_register_driver(&dce_driver);
 	/* VF driver init */
 	err = alloc_chrdev_region(&dev_vf_num, 0, DCE_NR_VIRTFN, DEVICE_VF_NAME);
 	if (err) return err;
-
-	printk(KERN_INFO "DCEVF: in module init\n");
-	dcevf_char_class = class_create(THIS_MODULE, DEVICE_VF_NAME);
-	if (IS_ERR(dcevf_char_class)) {
-		err = PTR_ERR(dcevf_char_class);
-		return err;
-	}
 
 	err = pci_register_driver(&dcevf_driver);
 	return err;
