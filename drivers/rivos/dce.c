@@ -261,10 +261,8 @@ static int parse_descriptor_based_on_opcode(
 	return 0;
 }
 
-/* TODO: FIX!! This leaks the mem for descriptors and hti */
 void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num) {
-	DescriptorRing * ring = get_desc_ring(drv_priv, wq_num);
-	memset(ring, 0, sizeof(DescriptorRing));
+	/*TODO: repurpose this function */
 }
 
 /* return an unused workqueue number or -1*/
@@ -333,8 +331,6 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 	DSCSZ = fls(size) - fls(0x1000);
 
 	// printk(KERN_INFO"%s: DSCSZ is 0x%x\n",__func__, DSCSZ);
-	/* TODO: Remove and properly tear down on release */
-	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	ring->length = length;
 	/* TODO: Check alignment for both*/
@@ -396,8 +392,6 @@ int setup_kernel_wq(
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12)
 	 * TODO: Some commonality with user queue code, regroup in the same place*/
 	length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
-	/* TODO: Remove and properly tear down on release */
-	dce_reset_descriptor_ring(dce_priv, wq_num);
 
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
@@ -714,7 +708,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-
+	/*TODO: this reads 0xffff for both vendor id and device id */
+	dev_info(dev, "Probing DCE: %x:%x\n", vendor, device);
 	if (device != DEVICE_ID)
 		isPF = false;
 	else
