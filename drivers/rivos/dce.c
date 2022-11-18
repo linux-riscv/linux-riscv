@@ -180,8 +180,6 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		iommu_sva_unbind_device(ctx->sva);
 	}
 	kfree(ctx);
-	// printk(KERN_INFO "Closing file 0x%lx\n", file);
-	/* FIXME: Identify and free all allocated memories */
 	return 0;
 }
 
@@ -396,7 +394,6 @@ int setup_kernel_wq(
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
-
 		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
 
