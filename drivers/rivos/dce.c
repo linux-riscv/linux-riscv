@@ -159,6 +159,9 @@ int dce_ops_release(struct inode *inode, struct file *file)
 				dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
 					ring->hti, ring->hti_dma);
 			}
+			/* clean up the ring */
+			memset(ring, 0, sizeof(DescriptorRing));
+
 			/* clean up the WQITE*/
 			memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
 
