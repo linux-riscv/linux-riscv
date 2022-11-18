@@ -27,13 +27,19 @@
 #include <asm/sbi.h>
 #include <asm/timex.h>
 
+#ifdef CONFIG_RISCV_FAKE_TIMER
+u64 _hack_fake_time = 0;
+#endif
+
 static DEFINE_STATIC_KEY_FALSE(riscv_sstc_available);
 
 static int riscv_clock_next_event(unsigned long delta,
 		struct clock_event_device *ce)
 {
 	u64 next_tval = get_cycles64() + delta;
-
+#ifdef CONFIG_RISCV_FAKE_TIMER
+	return 0;
+#endif
 	csr_set(CSR_IE, IE_TIE);
 	if (static_branch_likely(&riscv_sstc_available)) {
 #if defined(CONFIG_32BIT)

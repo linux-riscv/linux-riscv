@@ -49,9 +49,17 @@ static inline unsigned long random_get_entropy(void)
 
 #else /* CONFIG_CLINT_TIMER_MMIO */
 
+#ifdef CONFIG_RISCV_FAKE_TIMER
+extern u64 _hack_fake_time;
+#endif
+
 static inline cycles_t get_cycles(void)
 {
+#ifdef CONFIG_RISCV_FAKE_TIMER
+	return _hack_fake_time++;
+#else
 	return csr_read(CSR_TIME);
+#endif
 }
 #define get_cycles get_cycles
 

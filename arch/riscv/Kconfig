@@ -435,6 +435,13 @@ config FPU
 
 	  If you don't know what to do here, say Y.
 
+config RISCV_FAKE_TIMER
+        bool "Fake timer value"
+	default n
+	help
+	  Don't use real CSR time read, but a monotonically
+	  incrementing soft value instead.
+
 endmenu # "Platform type"
 
 menu "Kernel features"
