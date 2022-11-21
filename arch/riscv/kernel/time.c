@@ -23,7 +23,12 @@ void __init time_init(void)
 	if (!cpu || of_property_read_u32(cpu, "timebase-frequency", &prop))
 		panic(KERN_WARNING "RISC-V system with no 'timebase-frequency' in DTS\n");
 	of_node_put(cpu);
-	riscv_timebase = prop;
+
+	/* Changing the timer via the DT is the correct way to do this, but
+	 * it's helpful to be able to do this via a config file rather than
+	 * using a proliferation of DTs.
+	 */
+	riscv_timebase = prop/CONFIG_RISCV_TIMER_DIV;
 
 	lpj_fine = riscv_timebase / HZ;
 

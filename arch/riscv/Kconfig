@@ -435,6 +435,13 @@ config FPU
 
 	  If you don't know what to do here, say Y.
 
+config RISCV_TIMER_DIV
+        int "Timebase speed-up factor"
+	range 1 1000
+	default 1
+	help
+	  Divide the default timebase-frequency, speeding it up.
+
 config RISCV_FAKE_TIMER
         bool "Fake timer value"
 	default n
