@@ -38,26 +38,39 @@ DescriptorRing * get_desc_ring(struct dce_driver_priv *priv, int wq_num) {
 }
 
 void clean_up_work(struct work_struct *work) {
-	/* FIXME: check which WQ has interrupt pending */
-
 	struct dce_driver_priv* dce_priv =
 		container_of(work, struct dce_driver_priv, clean_up_worker);
 
 	/* getting per queue interrupt status */
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
+	dev_info(dce_priv->pci_dev, "Cleanup start\n");
 
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
+		struct work_queue* wq = dce_priv->wq+wq_num;
+		bool irqbit = irq_sts & BIT(wq_num);
+		bool flush = (wq->type == KERNEL_FLUSHING_WQ);
+		if(wq->type != KERNEL_FLUSHING_WQ && wq->type != KERNEL_WQ){
+			continue;
+		}
 		/* break early if we are done */
-		if (!irq_sts) break;
-		if (irq_sts & BIT(wq_num)) {
+		//if (!irq_sts) break;
+		if (flush || irqbit) {
 			DescriptorRing * ring;
-			int head, curr;
-			mutex_lock(&dce_priv->wq[wq_num].wq_clean_lock);
+			uint64_t head, curr;
+			mutex_lock(&(wq->wq_clean_lock));
 			ring = get_desc_ring(dce_priv, wq_num);
+			if(!ring->hti){
+				dev_err(dce_priv->pci_dev, "Invalid ring for wq %d", wq_num);
+				mutex_unlock(&(wq->wq_clean_lock));
+				continue;
+			}
+
 			/* Atomic read ? */
 			head = ring->hti->head;
 			curr = ring->clean_up_index;
+			dev_info(dce_priv->pci_dev,
+					"Cleanup on %d, %llu->%llu", wq_num, curr, head);
 
 			while(curr < head) {
 				/* Position in queue
@@ -72,11 +85,13 @@ void clean_up_work(struct work_struct *work) {
 			}
 			ring->clean_up_index = curr;
 			irq_sts &= ~BIT(wq_num);
-			mutex_unlock(&dce_priv->wq[wq_num].wq_clean_lock);
+			mutex_unlock(&(wq->wq_clean_lock));
+			//mutex_unlock(&dce_priv->wq[wq_num].wq_clean_lock);
 		}
 	}
 
-	/* What if the value changed? */
+	/* TODO: What if more events happened since the read
+	 * They are currently lost*/
 	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 }
 
@@ -132,58 +147,127 @@ int dce_ops_open(struct inode *inode, struct file *file)
 
 	/* keep sva context linked to the file */
 	file->private_data = ctx;
-
 	return 0;
 }
 
+static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num){
+	/* Policy: wait for jobs to execute */
+	struct work_queue* wq = priv->wq+wq_num;
+	struct DescriptorRing *ring = &(wq->descriptor_ring);
+	/* Make queue unsuitable for submission */
+	wq->type = KERNEL_FLUSHING_WQ;
+	/* Wait for jobs to execute*/
+	/* TODO: Add timeout ? */
+	while(true){
+		uint64_t head = ring->hti->head;
+		uint64_t tail = ring->hti->tail; /* We hold the lock, this is not moving...*/
+		uint64_t clean = ring->clean_up_index;
+		if(clean >= tail)
+			break;
+		dev_info(priv->pci_dev,
+				"Waiting for queue %d flush - tail:%llu head:%llu, clean:%llu\n",
+				wq_num, tail, head, clean);
+		usleep_range(10000,100000);
+		schedule_work(&priv->clean_up_worker);
+	}
+	/* Disable queue in HW */
+	/* TODO: Need to poll for completion? */
+	set_queue_enable(priv, wq_num, false);
+
+	/* Deal with context*/
+	if (ring->desc_dma) {
+		dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
+			ring->descriptors, ring->desc_dma);
+	}
+	if(ring->hti_dma){
+		dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
+			ring->hti, ring->hti_dma);
+	}
+	/* Clean up the eventfd ctx */
+	if (wq->efd_ctx_valid){
+		eventfd_ctx_put(wq->efd_ctx);
+		wq->efd_ctx_valid = false;
+		wq->efd_ctx=0;
+	}
+
+	wq->type = DISABLED;
+	wmb();
+	memset(&(wq->descriptor_ring), 0, sizeof(DescriptorRing));
+	memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
+	return 0;
+}
+
+static int release_shared_kernel_queue(struct dce_driver_priv *priv, int wq_num){
+	/* Policy, wait for jobs for this context
+	 * to execute */
+	return 0;
+}
+
+static int release_user_queue(struct dce_driver_priv *priv, int wq_num){
+	// TODO: Policy, abort jobs in queue
+	// Let user deal with the flush as the
+	// head/tail and associated indices are in userspace
+
+	struct work_queue* wq = priv->wq+wq_num;
+	/* Disable queue in HW */
+	/* TODO: Need to poll for completion?
+	 * Should we use abort ? */
+	set_queue_enable(priv, wq_num, false);
+
+	memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
+	wq->type = DISABLED;
+	return 0;
+}
+
+/*
+ * Release gets called when all references to the file are dropped
+ * There should not be multiple calls to release if the fd was cloned on fork
+ * as a result, for user and owned kernel queues, we can always tear down
+ * relevant data structures on call to release */
 int dce_ops_release(struct inode *inode, struct file *file)
 {
 	struct submitter_dce_ctx *ctx = file->private_data;
 	struct dce_driver_priv *priv = ctx->dev;
-
 	int wq_num = ctx->wq_num;
-	{
-		struct work_queue* wq = priv->wq+wq_num;
-		/* release gets called when all references to the file are dropped
-		 * There should not be multiple calls to release if the fd was cloned on fork
-		 * as a result, for user and owned kernel queues, we can always tear down
-		 * data structures on call to release */
-		if(wq->type == KERNEL_WQ || wq->type == USER_OWNED_WQ){
-			/* clean up the descriptor ring */
-			/*TODO: Deal with running jobs, what is the policy? */
-			DescriptorRing * ring = get_desc_ring(priv, wq_num);
-			dev_info(priv->pci_dev, "Unassigning file handle 0x%pK from slot %u\n", file, wq_num);
-			if (ring->desc_dma) { /* only set for kernel queues */
-				dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
-					ring->descriptors, ring->desc_dma);
-				dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
-					ring->hti, ring->hti_dma);
-			}
-			/* clean up the ring */
-			memset(ring, 0, sizeof(DescriptorRing));
-
-			/* clean up the WQITE*/
-			memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
-
-			/* Clear the enable bit for queue in HW */
-			set_queue_enable(priv, wq_num, false);
-
-			/* mark the WQ as disabled in driver */
-			priv->wq[wq_num].type = DISABLED;
-
-			/* Clean up the eventfd ctx */
-			if (priv->wq[wq_num].efd_ctx_valid)
-				eventfd_ctx_put(priv->wq[wq_num].efd_ctx);
-
-			priv->wq[wq_num].efd_ctx_valid = false;
-			priv->wq[wq_num].efd_ctx = 0;
-		}
+	int err=0;
+	struct work_queue* wq;
+	if(wq_num <0){
+		/* clearing an unused ctx */
+		goto opencleanup;
 	}
+	wq = priv->wq+wq_num;
+   dev_info(priv->pci_dev, "Release on fd for queue %d\n", wq_num);
+	/*Lock the queue, this should make sure that not other operation happens on it
+	 * before it is marked as disabled */
+	mutex_lock(&(wq->wq_tail_lock));
+	switch(wq->type){
+	case KERNEL_WQ:
+		err = release_kernel_queue(priv, wq_num);
+		break;
+	case SHARED_KERNEL_WQ:
+		err = release_shared_kernel_queue(priv, wq_num);
+		break;
+	case USER_OWNED_WQ:
+		err = release_user_queue(priv, wq_num);
+		break;
+	/* Unexpected cases*/
+	case DISABLED:
+	case RESERVED_WQ:
+	case KERNEL_FLUSHING_WQ:
+	default:
+		err = -EFAULT;
+		dev_err(priv->pci_dev, "Release on queue in unexpected state\n");
+		break;
+	}
+	/* Do we need the dev level lock here ? */
+	mutex_unlock(&(wq->wq_tail_lock));
+
+opencleanup:
 	if (ctx->sva) {
 		iommu_sva_unbind_device(ctx->sva);
 	}
 	kfree(ctx);
-	return 0;
+	return err;
 }
 
 /*TODO: cleanup*/
@@ -224,6 +308,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor* des
 	tail_idx = ring->hti->tail;
 	head_idx = ring->hti->head;
 	/*always leave one slot free */
+	/*TODO: This needs to be clean_index not head */
 	if (tail_idx == (head_idx + queue_size -1)) {
 		/* TODO: ring is full, handle it, with the right size even better */
 	}
@@ -352,6 +437,7 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 
 	/* enabled queue in driver */
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
+	dev_info(ctx->dev->pci_dev, "wq %d as USER_OWNED_WQ\n", wq_num);
 	return 0;
 }
 
@@ -363,7 +449,8 @@ static int request_user_wq(struct submitter_dce_ctx* ctx, UserArea* ua){
 		return -ENOBUFS;
 	} else {
 		ctx->wq_num = wqnum;
-		/* TODO: Refactor, pass only &wq to setup_memory */
+		/* TODO: Refactor, pass only &wq to setup_memory
+		 * return WQ as DISABLED on error */
 		return setup_user_wq(ctx, ctx->wq_num, ua);
 	}
 	return 0;
@@ -375,10 +462,15 @@ int setup_kernel_wq(
 	DescriptorRing * ring = get_desc_ring(dce_priv, wq_num);
 	int DSCSZ = 0;
 	size_t length;
+	int err = 0;
+	struct work_queue* wq = dce_priv->wq+wq_num; /*TODO: Range check accessor*/
+
+	memset(ring, 0, sizeof(DescriptorRing));
 	/* Only setup reserved queues */
 	if(dce_priv->wq[wq_num].type != RESERVED_WQ) {
 		pr_err("Queue setup only possible on reserved queue, clean/reserve first \n");
-		return -EFAULT;
+		err = -EFAULT;
+		goto type_error;
 	}
 
 	// Parse KernelQueueReq if provided
@@ -393,20 +485,28 @@ int setup_kernel_wq(
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12)
 	 * TODO: Some commonality with user queue code, regroup in the same place*/
 	length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
+	ring->length = length;
 
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
 		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
+	if(!ring->descriptors){
+		dev_err(dce_priv->pci_dev, "Failed to allocate job storage\n");
+		err = -ENOMEM;
+		goto descriptor_alloc_error;
+	}
 
-	ring->length = length;
 	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
 	// 	(uint64_t)ring->descriptors);
 
-	// TODO: Error handling, alloc DMA can fail
 	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
+	if(!ring->hti){
+		dev_err(dce_priv->pci_dev, "Failed to allocate queue management structure\n");
+		goto hti_alloc_error;
+	}
 	ring->hti->head = 0;
 	ring->hti->tail = 0;
 
@@ -420,8 +520,20 @@ int setup_kernel_wq(
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
+	dev_info(dce_priv->pci_dev, "wq %d as KERNEL_WQ", wq_num);
 
 	return 0;
+
+hti_alloc_error:
+		dma_free_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
+			ring->descriptors, ring->desc_dma);
+descriptor_alloc_error:
+	if(wq->efd_ctx_valid){
+		eventfd_ctx_put(wq->efd_ctx);
+		wq->efd_ctx_valid = false;
+	}
+type_error:
+	return err;
 }
 
 /* set up default shared kernel submission queue 0
