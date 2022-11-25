@@ -98,6 +98,7 @@ typedef enum {
 typedef enum {
 	DISABLED=0,
 	KERNEL_WQ,
+	KERNEL_FLUSHING_WQ,
 	USER_OWNED_WQ,
 	SHARED_KERNEL_WQ,
 	RESERVED_WQ,
@@ -217,7 +218,7 @@ typedef struct work_queue {
 	bool efd_ctx_valid;
 	struct eventfd_ctx * efd_ctx;
 
-	/* The actual ring */
+	/* The actual ring, used for kernel queues*/
 	DescriptorRing descriptor_ring;
 
 	struct mutex wq_tail_lock;
@@ -253,7 +254,6 @@ struct dce_driver_priv
 
 	/* DCE workqueue configuration space*/
 	work_queue wq[NUM_WQ];
-
 };
 
 void clean_up_work(struct work_struct *work);
