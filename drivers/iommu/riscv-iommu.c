@@ -211,18 +211,43 @@ static struct riscv_iommu_dc *riscv_iommu_get_dc(struct riscv_iommu *iommu,
 static bool riscv_iommu_post(struct riscv_iommu *iommu,
 			     struct riscv_iommu_command *cmd)
 {
-	u32 head, tail, next;
+	u32 head, tail, next, last;
 	unsigned long flags;
 
-	/* TODO: rework to lock-less enqueue */
+	/*
+	 * FIXME
+	 * MMIO read occasionaly fails during initialization/boot sequence,
+	 * most likely when QEMU physical memory mapping is modified (ie. adding
+	 * BAR spaces), returning ~0U value.  While the issue is still not resolved
+	 * verification code is added below tracking last tail index update and
+	 * check for the most recent read value.
+	 */
 	spin_lock_irqsave(&iommu->cq_lock, flags);
 	head = __reg_get32(iommu, RIO_REG_CQH) & iommu->cq_mask;
 	tail = __reg_get32(iommu, RIO_REG_CQT) & iommu->cq_mask;
-	next = (tail + 1) & iommu->cq_mask;
-	if (next != head) {
-		memcpy(iommu->cq + tail, cmd, sizeof(*cmd));
-		__reg_set32(iommu, RIO_REG_CQT, next);
+	last = iommu->cq_tail;
+	if (tail != last) {
+		spin_unlock_irqrestore(&iommu->cq_lock, flags);
+		/* TRY AGAIN */
+		dev_err(iommu->dev, "IOMMU CQT: %x != %x (1st)\n", last, tail);
+		spin_lock_irqsave(&iommu->cq_lock, flags);
+		tail = __reg_get32(iommu, RIO_REG_CQT) & iommu->cq_mask;
+		last = iommu->cq_tail;
+		if (tail != last) {
+			spin_unlock_irqrestore(&iommu->cq_lock, flags);
+			dev_err(iommu->dev, "IOMMU CQT: %x != %x (2nd)\n", last, tail);
+			spin_lock_irqsave(&iommu->cq_lock, flags);
+		}
 	}
+
+	next = (iommu->cq_tail + 1) & iommu->cq_mask;
+	if (next != head) {
+		memcpy(iommu->cq + iommu->cq_tail, cmd, sizeof(*cmd));
+		wmb();
+		__reg_set32(iommu, RIO_REG_CQT, next);
+		iommu->cq_tail = next;
+	}
+
 	spin_unlock_irqrestore(&iommu->cq_lock, flags);
 
 	return next != head;
