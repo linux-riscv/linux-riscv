@@ -5,7 +5,7 @@ set -e
 ID=`date +%Y%m%d.%H%M`
 NEXT_BRANCH="dev/tjeznach/next/${ID}"
 
-TAG_BASE="v6.1-rc5"
+TAG_BASE="v6.1-rc7"
 TAG_NEXT="tjeznach/rivos-next"
 
 COMPONENTS=( \
