@@ -476,9 +476,16 @@ int setup_kernel_wq(
 	// Parse KernelQueueReq if provided
 	if (kqr) {
 		DSCSZ = kqr->DSCSZ;
-		dce_priv->wq[wq_num].efd_ctx_valid = kqr->eventfd_vld;
-		if (kqr->eventfd_vld)
-			dce_priv->wq[wq_num].efd_ctx = eventfd_ctx_fdget(kqr->eventfd);
+		if (kqr->eventfd_vld){
+			struct eventfd_ctx * efdctx = eventfd_ctx_fdget(kqr->eventfd);
+			if(IS_ERR(efdctx)){
+				err = PTR_ERR(efdctx);
+				dev_warn(dce_priv->pci_dev, "Unable to get eventfd");
+				goto efd_error;
+			}
+			wq->efd_ctx = efdctx;
+			wq->efd_ctx_valid = true;
+		}
 	}
 
 	/* Supervisor memory setup */
@@ -524,9 +531,10 @@ int setup_kernel_wq(
 
 	return 0;
 
+efd_error:
 hti_alloc_error:
-		dma_free_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
-			ring->descriptors, ring->desc_dma);
+	dma_free_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
+		ring->descriptors, ring->desc_dma);
 descriptor_alloc_error:
 	if(wq->efd_ctx_valid){
 		eventfd_ctx_put(wq->efd_ctx);
