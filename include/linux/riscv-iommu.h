@@ -366,6 +366,7 @@ struct riscv_iommu {
 	spinlock_t cq_lock;
 	struct riscv_iommu_command *cq;
 	unsigned cq_mask;
+	unsigned cq_tail;
 	int cq_irq;
 
 
