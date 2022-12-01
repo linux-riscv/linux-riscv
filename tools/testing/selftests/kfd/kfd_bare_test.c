@@ -569,7 +569,7 @@ int main(int argc, char *argv[])
 	struct stat kstat;
 	unsigned int kern_start_offset = 0;
 	hsa_kernel_dispatch_packet_t *aql_packet;
-
+	hsa_barrier_and_packet_t *aql_barrier_packet;
 	// if we have arguments expect an ELF file with a RIG binary
 	// we are only expecting a very specific axpy kernel binary
 	if (argc > 1) {
@@ -656,8 +656,14 @@ int main(int argc, char *argv[])
 		// axpy_kern_args_convert_nopasid(kern_args_ptr, kern_args_mmap_offset & 0xFFFFFFFFFFFFULL,
 		// 			       kern_args_size);
 
+		// send an empty barrier packet first to test multiple packets
+		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;
+		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
+		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
 
-		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr);
+		// this is the kernel dispatch packet
+		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr +
+							       sizeof(hsa_kernel_dispatch_packet_t));
 
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -682,7 +688,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Size of AQL packet: %lu\n", sizeof(*aql_packet));
 		fprintf(stderr, "Current read index: %lu write index: %lu\n",
 			*q_read_ptr, *q_write_ptr);
-		*q_write_ptr += 1;
+		*q_write_ptr += 2;
 		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
 		doorbell_map[queue_id] = *q_write_ptr;
 		fprintf(stderr, "Rang the doorbell\n");
