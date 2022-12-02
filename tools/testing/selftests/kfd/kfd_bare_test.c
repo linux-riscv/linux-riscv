@@ -19,6 +19,27 @@
 #define LITTLEENDIAN_CPU
 #include "hsa.h"
 
+// Currently we're using AMD HSA Kernel objects
+// AMDHSA Kernel descriptor (kept backwards compatible)
+struct KernelDescriptor {
+	uint32_t group_segment_fixed_size;
+	uint32_t private_segment_fixed_size;
+	uint32_t kernarg_size;
+	uint8_t reserved0[4];
+	int64_t kernel_code_entry_byte_offset;
+	uint8_t reserved1[20];
+	uint32_t compute_pgm_rsrc3;  // GFX10+ and GFX90A+
+	uint32_t compute_pgm_rsrc1;
+	uint32_t compute_pgm_rsrc2;
+	uint16_t kernel_code_properties;
+	uint8_t reserved2[6];
+};
+
+#define ALIGN_UP_PGSZ(addr, page_size) (((uint64_t)(addr) +	\
+					 (uint64_t)(page_size))		\
+					& ~((uint64_t)(page_size)	\
+					    - 1ULL))
+
 #define KFD_DEV "/dev/kfd"
 static int kfd;
 
@@ -570,6 +591,10 @@ int main(int argc, char *argv[])
 	unsigned int kern_start_offset = 0;
 	hsa_kernel_dispatch_packet_t *aql_packet;
 	hsa_barrier_and_packet_t *aql_barrier_packet;
+
+	struct KernelDescriptor *kd_ptr;
+	uint64_t kd_addr;
+
 	// if we have arguments expect an ELF file with a RIG binary
 	// we are only expecting a very specific axpy kernel binary
 	if (argc > 1) {
@@ -579,7 +604,8 @@ int main(int argc, char *argv[])
 		}
 		fprintf(stderr, "kernel object size %lu bytes\n",
 			kstat.st_size);
-		kernel_size = kstat.st_size + 4096;
+
+		kernel_size = kstat.st_size;
 		kern_fd = open(argv[1], O_RDONLY);
 		if (kern_fd < 0) {
 			perror("open");
@@ -591,8 +617,25 @@ int main(int argc, char *argv[])
 			perror("mmap kernel");
 			return 1;
 		}
-
+		// kernel descriptor will go after the kernel binary + one page gap
+		kd_addr = ALIGN_UP_PGSZ(kern_ptr + kernel_size, getpagesize()) +
+			getpagesize();
+		kd_ptr = mmap((void *)kd_addr,
+			  getpagesize(), PROT_READ | PROT_WRITE,
+			  MAP_ANONYMOUS | MAP_PRIVATE,
+			  -1, 0);
+		if (kd_ptr == MAP_FAILED) {
+			perror("mmap kernel descriptor");
+			return 1;
+		}
+		memset((void*)kd_ptr, -1, sizeof(*kd_ptr));
 		parse_kernels(kern_ptr, &kern_start_offset);
+		// the packet processor takes the address of kd and adds
+		// (signed) kernel_code_entry_byte_offset to that to get
+		// starting PC -- so this will be a negative 64-bit offset
+		kd_ptr->kernel_code_entry_byte_offset = (int64_t)(kern_ptr + kern_start_offset - (void*)kd_ptr);
+		fprintf(stderr, "kernel code byte offset 0x%" PRIx64 "\n",
+			kd_ptr->kernel_code_entry_byte_offset);
 	}
 
 	open_kfd();
@@ -633,6 +676,8 @@ int main(int argc, char *argv[])
 		int wait_count = 0;
 		uint64_t kern_mmap_offset = 0;
 		uint64_t kern_handle = 0;
+		uint64_t kd_mmap_offset = 0;
+		uint64_t kd_handle = 0;
 		
 		uint64_t kern_args_mmap_offset = 0;
 		uint64_t kern_args_handle = 0;
@@ -643,6 +688,10 @@ int main(int argc, char *argv[])
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
+
+		alloc_memory_of_gpu(kd_ptr, getpagesize(), USER, &kd_mmap_offset, &kd_handle);
+		fprintf(stderr, "kern_desc_ptr: 0x%lx\n", (unsigned long)kd_ptr);
+		fprintf(stderr, "kern_desc_mmap_offset: 0x%lx\n", kd_mmap_offset);
 
 		alloc_aligned_host_memory(&kern_args_ptr, kern_args_size);
 		alloc_memory_of_gpu(kern_args_ptr, kern_args_size, USER, &kern_args_mmap_offset,
@@ -677,7 +726,7 @@ int main(int argc, char *argv[])
 		aql_packet->grid_size_z = AXPY_Z_DIM;;
 		aql_packet->private_segment_size = 0;
 		aql_packet->group_segment_size = 0;
-		aql_packet->kernel_object = (uint64_t) ((uint8_t*) kern_ptr + kern_start_offset);
+		aql_packet->kernel_object = (uint64_t) kd_ptr;
 		aql_packet->kernarg_address = kern_args_ptr;
 		aql_packet->reserved2 = 0;
 		aql_packet->completion_signal.handle = 0;
