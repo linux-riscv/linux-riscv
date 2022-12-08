@@ -44,7 +44,7 @@ void clean_up_work(struct work_struct *work) {
 	/* getting per queue interrupt status */
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
-	dev_info(dce_priv->pci_dev, "Cleanup start\n");
+	dev_dbg(dce_priv->pci_dev, "Cleanup start\n");
 
 	for(int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		struct work_queue* wq = dce_priv->wq+wq_num;
@@ -69,7 +69,7 @@ void clean_up_work(struct work_struct *work) {
 			/* Atomic read ? */
 			head = ring->hti->head;
 			curr = ring->clean_up_index;
-			dev_info(dce_priv->pci_dev,
+			dev_dbg(dce_priv->pci_dev,
 					"Cleanup on %d, %llu->%llu", wq_num, curr, head);
 
 			while(curr < head) {
@@ -164,7 +164,7 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num){
 		uint64_t clean = ring->clean_up_index;
 		if(clean >= tail)
 			break;
-		dev_info(priv->pci_dev,
+		dev_dbg(priv->pci_dev,
 				"Waiting for queue %d flush - tail:%llu head:%llu, clean:%llu\n",
 				wq_num, tail, head, clean);
 		usleep_range(10000,100000);
@@ -750,7 +750,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE,
 			vma->vm_page_prot)) {
-		dev_info(priv->pci_dev, "Mapping failed!\n");
+		dev_warn(priv->pci_dev, "Mapping failed!\n");
 		return -EAGAIN;
 	}
 	// printk(KERN_INFO "mmap completed\n");
@@ -776,7 +776,7 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p) {
 	struct dce_driver_priv *dce_priv=dce_priv_p;
 
 	/* FIXME: multiple thread running this? schedule_work reentrant safe?*/
-	dev_info(dce_priv->pci_dev, "Got interrupt %d, work scheduled!\n", irq);
+	dev_dbg(dce_priv->pci_dev, "Got interrupt %d, work scheduled!\n", irq);
 	schedule_work(&dce_priv->clean_up_worker);
 
 	return IRQ_HANDLED;
