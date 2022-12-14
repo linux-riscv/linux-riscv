@@ -1092,6 +1092,10 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			return -ENOMEM;
 		}
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+		long page_count = 0;
+		unsigned int gup_flags = FOLL_LONGTERM;
+		struct vm_area_struct  *vma;
+
 		buf = devm_kzalloc(dev, sizeof(*buf), GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
@@ -1105,12 +1109,35 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 			return -ENOMEM;
 		}
 
+		// Until we support page-faults, we should pin all user allocations
 		mmap_read_lock(current->mm);
-		if (get_user_pages(args->va_addr, buf->page_count, 0, buf->pages, NULL) != buf->page_count) {
+		// if VMA is not writeable we should not pass FOLL_WRITE
+		// note: this doesn't correctly deal with multiple VMAs, shrug
+		vma = find_vma(current->mm, args->va_addr);
+		if (!vma) {
 			mmap_read_unlock(current->mm);
-			dev_warn(dev, "%s: get_user_pages() failed\n", __func__);
+			dev_warn(dev, "%s: find_vma() failed 0x%llx\n", __func__,
+				 args->va_addr);
 			devm_kfree(dev, buf->pages);
 			devm_kfree(dev, buf);
+			return -EFAULT;
+		}
+		if (vma->vm_flags & VM_WRITE)
+			gup_flags |= FOLL_WRITE;
+
+		if ((page_count = pin_user_pages(args->va_addr, buf->page_count,
+						gup_flags, buf->pages, NULL))
+		    != buf->page_count) {
+			mmap_read_unlock(current->mm);
+			dev_warn(dev, "%s: get_user_pages() failed %ld vs %u\n", __func__,
+				 page_count, buf->page_count);
+			devm_kfree(dev, buf->pages);
+			devm_kfree(dev, buf);
+
+			// negative page_count is an error code
+			if (page_count < 0)
+				return page_count;
+
 			return -ENOMEM;
 		}
 		mmap_read_unlock(current->mm);
@@ -1199,10 +1226,7 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 
 	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
 		if (buf->page_count) {
-			int i;
-			for (i = 0; i < buf->page_count; i++) {
-				put_page(buf->pages[i]);
-			}
+			unpin_user_pages(buf->pages, buf->page_count);
 			devm_kfree(dev, buf->pages);
 		}
 
