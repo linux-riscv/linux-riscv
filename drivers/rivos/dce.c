@@ -735,6 +735,8 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	unsigned long pfn;
 
 	if (ctx->wq_num == -1) return -EFAULT;
+	if (priv->wq[ctx->wq_num].type != USER_OWNED_WQ)
+		return -EACCES;
 
 	/* WQCR are in a page each, page offset wq_num+1 */
 	pfn = phys_to_pfn(priv->mmio_start_phys);
