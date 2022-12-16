@@ -21,6 +21,7 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/interrupt.h>
 #include <linux/of_irq.h>
+#include <linux/limits.h>
 #include <clocksource/timer-riscv.h>
 #include <asm/smp.h>
 #include <asm/hwcap.h>
@@ -28,13 +29,24 @@
 #include <asm/timex.h>
 
 static DEFINE_STATIC_KEY_FALSE(riscv_sstc_available);
+static bool riscv_timer_cannot_wake_cpu;
+
+static void riscv_clock_event_stop(void)
+{
+	if (static_branch_likely(&riscv_sstc_available)) {
+		csr_write(CSR_STIMECMP, ULONG_MAX);
+#if defined(CONFIG_32BIT)
+		csr_write(CSR_STIMECMPH, ULONG_MAX);
+#endif
+	} else
+		sbi_set_timer(U64_MAX);
+}
 
 static int riscv_clock_next_event(unsigned long delta,
 		struct clock_event_device *ce)
 {
 	u64 next_tval = get_cycles64() + delta;
 
-	csr_set(CSR_IE, IE_TIE);
 	if (static_branch_likely(&riscv_sstc_available)) {
 #if defined(CONFIG_32BIT)
 		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
@@ -85,6 +97,10 @@ static int riscv_timer_starting_cpu(unsigned int cpu)
 
 	ce->cpumask = cpumask_of(cpu);
 	ce->irq = riscv_clock_event_irq;
+	if (riscv_timer_cannot_wake_cpu)
+		ce->features |= CLOCK_EVT_FEAT_C3STOP;
+	if (static_branch_likely(&riscv_sstc_available))
+		ce->rating = 450;
 	clockevents_config_and_register(ce, riscv_timebase, 100, 0x7fffffff);
 
 	enable_percpu_irq(riscv_clock_event_irq,
@@ -110,18 +126,75 @@ static irqreturn_t riscv_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evdev = this_cpu_ptr(&riscv_clock_event);
 
-	csr_clear(CSR_IE, IE_TIE);
+	riscv_clock_event_stop();
 	evdev->event_handler(evdev);
 
 	return IRQ_HANDLED;
+}
+
+static int __init riscv_timer_init_common(void)
+{
+	int error;
+	struct fwnode_handle *intc_fwnode = riscv_get_intc_hwnode();
+	struct irq_domain *domain;
+
+	domain = irq_find_matching_fwnode(intc_fwnode, DOMAIN_BUS_ANY);
+	if (!domain) {
+		pr_err("Failed to find INTC node [%pfwP]\n", intc_fwnode);
+		return -ENODEV;
+	}
+
+	riscv_clock_event_irq = irq_create_mapping(domain, RV_IRQ_TIMER);
+	if (!riscv_clock_event_irq) {
+		pr_err("Failed to map timer interrupt for node [%pfwP]\n",
+		       intc_fwnode);
+		return -ENODEV;
+	}
+
+	error = clocksource_register_hz(&riscv_clocksource, riscv_timebase);
+	if (error) {
+		pr_err("clocksource register failed [%d]\n", error);
+		return error;
+	}
+
+	sched_clock_register(riscv_sched_clock, 64, riscv_timebase);
+
+	error = request_percpu_irq(riscv_clock_event_irq,
+				    riscv_timer_interrupt,
+				    "riscv-timer", &riscv_clock_event);
+	if (error) {
+		pr_err("registering percpu irq failed [%d]\n", error);
+		return error;
+	}
+
+	error = cpuhp_setup_state(CPUHP_AP_RISCV_TIMER_STARTING,
+			"clockevents/riscv/timer:starting",
+			riscv_timer_starting_cpu, riscv_timer_dying_cpu);
+	if (error)
+		pr_err("cpu hp setup state failed for RISCV timer [%d]\n",
+		       error);
+
+	if (riscv_isa_extension_available(NULL, SSTC))
+		static_branch_enable(&riscv_sstc_available);
+
+	pr_info("timer registered using %s\n",
+		(static_branch_likely(&riscv_sstc_available)) ?
+		"RISC-V Sstc" : "RISC-V SBI");
+
+	return error;
 }
 
 static int __init riscv_timer_init_dt(struct device_node *n)
 {
 	int cpuid, error;
 	unsigned long hartid;
-	struct device_node *child;
-	struct irq_domain *domain;
+	struct device_node *node;
+
+	node = of_find_compatible_node(NULL, NULL, "riscv,timer");
+	if (node) {
+		of_node_put(node);
+		return -ENODEV;
+	}
 
 	error = riscv_of_processor_hartid(n, &hartid);
 	if (error < 0) {
@@ -139,57 +212,15 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 	if (cpuid != smp_processor_id())
 		return 0;
 
-	domain = NULL;
-	child = of_get_compatible_child(n, "riscv,cpu-intc");
-	if (!child) {
-		pr_err("Failed to find INTC node [%pOF]\n", n);
-		return -ENODEV;
-	}
-	domain = irq_find_host(child);
-	of_node_put(child);
-	if (!domain) {
-		pr_err("Failed to find IRQ domain for node [%pOF]\n", n);
-		return -ENODEV;
-	}
-
-	riscv_clock_event_irq = irq_create_mapping(domain, RV_IRQ_TIMER);
-	if (!riscv_clock_event_irq) {
-		pr_err("Failed to map timer interrupt for node [%pOF]\n", n);
-		return -ENODEV;
-	}
-
-	pr_info("%s: Registering clocksource cpuid [%d] hartid [%lu]\n",
-	       __func__, cpuid, hartid);
-	error = clocksource_register_hz(&riscv_clocksource, riscv_timebase);
-	if (error) {
-		pr_err("RISCV timer register failed [%d] for cpu = [%d]\n",
-		       error, cpuid);
-		return error;
-	}
-
-	sched_clock_register(riscv_sched_clock, 64, riscv_timebase);
-
-	error = request_percpu_irq(riscv_clock_event_irq,
-				    riscv_timer_interrupt,
-				    "riscv-timer", &riscv_clock_event);
-	if (error) {
-		pr_err("registering percpu irq failed [%d]\n", error);
-		return error;
-	}
-
-	error = cpuhp_setup_state(CPUHP_AP_RISCV_TIMER_STARTING,
-			 "clockevents/riscv/timer:starting",
-			 riscv_timer_starting_cpu, riscv_timer_dying_cpu);
-	if (error)
-		pr_err("cpu hp setup state failed for RISCV timer [%d]\n",
-		       error);
-
-	if (riscv_isa_extension_available(NULL, SSTC)) {
-		pr_info("Timer interrupt in S-mode is available via sstc extension\n");
-		static_branch_enable(&riscv_sstc_available);
-	}
-
-	return error;
+	return riscv_timer_init_common();
 }
-
 TIMER_OF_DECLARE(riscv_timer, "riscv", riscv_timer_init_dt);
+
+static int __init riscv_timer_init_dt2(struct device_node *n)
+{
+	riscv_timer_cannot_wake_cpu = of_property_read_bool(n,
+					"riscv,timer-cannot-wake-cpu");
+
+	return riscv_timer_init_common();
+}
+TIMER_OF_DECLARE(riscv_timer2, "riscv,timer", riscv_timer_init_dt2);
