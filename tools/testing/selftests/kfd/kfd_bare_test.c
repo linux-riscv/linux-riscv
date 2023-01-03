@@ -232,8 +232,13 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 		perror("ioctl alloc memory of gpu");
 		exit(1);
 	}
-
-	fprintf(stderr, "%s: user_ptr 0x%" PRIx64 " mmap_offset 0x%" PRIx64
+	if (gpu_mem_type == USER)
+		fprintf(stderr, "%s: user_ptr 0x%" PRIx64 " mmap_offset 0x%" PRIx64
+			" handle 0x%" PRIx64 " va 0x%" PRIx64 "\n",
+			__func__, (uint64_t)user_ptr, (uint64_t)args.mmap_offset,
+			(uint64_t)args.handle, (uint64_t)args.va_addr);
+	else
+		fprintf(stderr, "%s: device 0x%" PRIx64 " mmap_offset 0x%" PRIx64
 		" handle 0x%" PRIx64 " va 0x%" PRIx64 "\n",
 		__func__, (uint64_t)user_ptr, (uint64_t)args.mmap_offset,
 		(uint64_t)args.handle, (uint64_t)args.va_addr);
@@ -243,7 +248,6 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 	*handle = args.handle;
 }
 
-#if 0
 static void mmap_gpu_obj(int fd, void *user_ptr, size_t size, uint64_t mmap_offset)
 {
 	// this set of flags is good for anything the host needs to access
@@ -291,7 +295,6 @@ static void map_memory_to_gpu(uint64_t handle)
 		exit(1);
 
 }
-#endif
 
 static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
 {
@@ -485,7 +488,7 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 
 	// we're not going to bother allocating separate buffers for x and y
 	// arrays, instead just put them somewhere on the kernel arguments page
-	
+
 
 	// layout is:
 	// 0 -- pointer to arg 0 (literal)
@@ -495,7 +498,7 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 	// 24 -- arg 0 -- 4 byte float
 	// 32 -- arg 1 -- pointer to x
 	// 40 -- arg 2 -- pointer to y
-	
+
 	// 64 -- arg 1 array
 	// 128 -- arg 2 array
 
@@ -510,7 +513,7 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 	dump_buffer_f32(host_x, AXPY_XY_BUFSIZE);
 	fprintf(stderr, "y array: \n");
 	dump_buffer_f32(host_y, AXPY_XY_BUFSIZE);
-	
+
 
 	memset(kern_args_ptr, 2, size);
 
@@ -518,14 +521,14 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 	memcpy(kern_args_ptr + 0 * sizeof(uint64_t), &a_arg_ptr, sizeof(a_arg_ptr));
 	memcpy(kern_args_ptr + 1 * sizeof(uint64_t), &x_arg_ptr, sizeof(x_arg_ptr));
 	memcpy(kern_args_ptr + 2 * sizeof(uint64_t), &y_arg_ptr, sizeof(y_arg_ptr));
-	
+
        	// copy literal first arg is at 24 bytes in
 	memcpy(kern_args_ptr + ARG0_LOC, &a, sizeof(a));
-	
+
 	// pointers to x and y arrays
 	memcpy(kern_args_ptr + ARG1_LOC, &x_ptr, sizeof(x_ptr));
 	memcpy(kern_args_ptr + ARG2_LOC, &y_ptr, sizeof(y_ptr));
-	
+
 	// copy arrays to their locations
 	memcpy(x_ptr, host_x, sizeof(host_x));
 	memcpy(y_ptr, host_y, sizeof(host_y));
@@ -647,11 +650,11 @@ int main(int argc, char *argv[])
 
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
-	alloc_memory_of_gpu(queue_ptr, queue_size, USER, &queue_mmap_offset, &queue_handle);
+	alloc_memory_of_gpu(queue_ptr, queue_size, DEVICE, &queue_mmap_offset, &queue_handle);
 	fprintf(stderr, "queue_ptr: 0x%lx\n", (unsigned long)queue_ptr);
 	fprintf(stderr, "queue_mmap_offset: 0x%lx\n", queue_mmap_offset);
+	mmap_dev_mem(queue_ptr, queue_size, queue_mmap_offset);
 
-	
 	alloc_aligned_host_memory(&rw_ptr, rwptr_size);
 	alloc_memory_of_gpu(rw_ptr, rwptr_size, USER, &rwptr_mmap_offset, &rwptr_handle);
 	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
@@ -678,13 +681,13 @@ int main(int argc, char *argv[])
 		uint64_t kern_handle = 0;
 		uint64_t kd_mmap_offset = 0;
 		uint64_t kd_handle = 0;
-		
+
 		uint64_t kern_args_mmap_offset = 0;
 		uint64_t kern_args_handle = 0;
 		void *kern_args_ptr;
 
 		uint64_t kern_args_size = getpagesize();
-		
+
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
