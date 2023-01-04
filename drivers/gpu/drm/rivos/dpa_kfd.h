@@ -3,6 +3,8 @@
 
 #include <linux/kernel.h>
 #include <linux/iommu.h>
+#include <drm/drm_gem.h>
+#include <drm/drm_device.h>
 
 #include "dpa_daffy.h"
 
@@ -45,6 +47,8 @@ struct dpa_device {
 	/* list of processes using device */
 	//struct list *plist;
 	struct device *dev;
+	struct pci_dev			*pdev;
+	struct drm_device		ddev;
 
 	int drm_minor;
 
@@ -68,6 +72,10 @@ struct dpa_kfd_process {
 
 	/* the DPA instance associated with this process */
 	struct dpa_device *dev;
+
+	/* XXX Do these belong here? */
+	struct file *drm_file;
+	void *drm_priv;
 
 	struct mutex lock;
 
@@ -102,6 +110,8 @@ struct dpa_kfd_process {
 struct dpa_kfd_buffer {
 	struct list_head process_alloc_list;
 
+	struct drm_gem_object gobj;
+
 	unsigned int id;
 	unsigned int type;
 
@@ -112,6 +122,7 @@ struct dpa_kfd_buffer {
 	struct dpa_kfd_process *p;
 };
 
+#define gem_to_dpa_buf(gobj) container_of((gobj), struct dpa_kfd_buffer, gobj)
 
 typedef int kfd_ioctl_t(struct file *filep, struct dpa_kfd_process *process,
 			void *data);
