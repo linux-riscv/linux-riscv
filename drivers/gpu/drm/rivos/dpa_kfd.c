@@ -9,11 +9,17 @@
 #include <linux/device.h>
 #include <linux/device/class.h>
 #include <linux/dev_printk.h>
+#include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/iommu.h>
+#include <linux/mm.h>
 #include <linux/pci.h>
 #include <linux/sched/mm.h>
 #include <uapi/linux/kfd_ioctl.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_file.h>
+#include <drm/drm_ioctl.h>
+#include <linux/pm_runtime.h>
 #include "dpa_kfd.h"
 
 static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
@@ -263,21 +269,230 @@ void setup_queue(struct dpa_device *dpa) {
 	writeq(0, dpa->regs + DUC_REGS_FW_PASID);
 }
 
+static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struct *vma) {
+
+	struct dpa_kfd_buffer *buf = gem_to_dpa_buf(gobj);
+	unsigned long size = vma->vm_end - vma->vm_start;
+	unsigned long vma_page_count = size >> PAGE_SHIFT;
+	int ret = -EFAULT;
+	if (buf) {
+		unsigned long num_pages = buf->page_count;
+		if (buf->type != KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+			dev_warn(dpa_device, "%s: unexpected type for buf %u\n",
+					__func__, buf->type);
+			return -EINVAL;
+		}
+		if (buf->page_count != vma_page_count) {
+			dev_warn(dpa_device, "%s: buf page count %u != vma %lu\n",
+					__func__, buf->page_count, vma_page_count);
+			return -EINVAL;
+		}
+		ret = vm_insert_pages(vma, vma->vm_start, buf->pages,
+						&num_pages);
+		if (ret || num_pages) {
+			dev_warn(dpa_device, "%s: vm_insert_pages ret = %d num = %lu\n",
+					__func__, ret, num_pages);
+			return ret;
+		}
+	} else {
+		dev_warn(dpa_device, "%s: buffer is not found\n",
+				__func__);
+		return -EINVAL;
+	}
+	vma->vm_flags = VM_DONTEXPAND;
+	return 0;
+}
+
+static const struct drm_gem_object_funcs dpa_gem_object_funcs = {
+	.mmap = dpa_gem_object_mmap,
+};
+
+long dpa_drm_ioctl(struct file *filp,
+		      unsigned int cmd, unsigned long arg)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev;
+	long ret;
+	dev = file_priv->minor->dev;
+	ret = pm_runtime_get_sync(dev->dev);
+	if (ret < 0)
+		goto out;
+
+	ret = drm_ioctl(filp, cmd, arg);
+
+	pm_runtime_mark_last_busy(dev->dev);
+out:
+	pm_runtime_put_autosuspend(dev->dev);
+	return ret;
+}
+
+static const struct file_operations dpa_driver_kms_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = dpa_drm_ioctl,
+	.mmap = drm_gem_mmap,
+	.poll = drm_poll,
+	.read = drm_read,
+};
+
+
+static void dpa_driver_release_kms(struct drm_device *dev)
+{
+	pci_set_drvdata(dpa->pdev, NULL);
+}
+
+static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv) {
+	return 0;
+}
+
+static const struct drm_driver dpa_drm_driver = {
+	.driver_features =
+	    DRIVER_ATOMIC |
+	    DRIVER_GEM |
+	    DRIVER_RENDER,
+	.open = dpa_driver_open_kms,
+	.release = &dpa_driver_release_kms,
+	.fops = &dpa_driver_kms_fops,
+
+	.name = "dpa-drm",
+};
+
+static const struct drm_driver dpa_drm_driver;
+
+
+int dpa_gem_object_create(unsigned long size,
+			     int alignment,
+			     u64 flags,
+			     struct drm_gem_object **obj)
+{
+	struct dpa_kfd_buffer * buf;
+	struct device * dev = dpa->dev;
+	unsigned i, count;
+
+	*obj = NULL;
+
+	/* Memory should be aligned at least to a page size. */
+	size = ALIGN(size, PAGE_SIZE);
+
+	buf = devm_kzalloc(dev, sizeof(struct dpa_kfd_buffer), GFP_KERNEL);
+	if (buf == NULL)
+		return -ENOMEM;
+	drm_gem_private_object_init(&dpa->ddev, &buf->gobj, size);
+
+	buf->type = flags;
+	buf->size = size;
+	buf->page_count = buf->size >> PAGE_SHIFT;
+	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+	if (!buf->pages) {
+		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
+		devm_kfree(dev, buf);
+		return -1;
+	}
+#ifndef CONFIG_PAGE_OWNER
+	if ((count = alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages)) <
+	    buf->page_count) {
+		dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
+			 __func__, buf->page_count, count);
+		goto out_free;
+	}
+#else
+	for (i = 0; i < buf->page_count; i++) {
+		buf->pages[i] = alloc_page(GFP_KERNEL);
+		if (!buf->pages[i]) {
+			dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
+				 __func__, buf->page_count, count);
+			goto out_free;
+		}
+		count++;
+	}
+#endif
+	/* create the node in vma manager */
+	drm_gem_create_mmap_offset_size(&buf->gobj, size);
+
+	*obj = &buf->gobj;
+	(*obj)->funcs = &dpa_gem_object_funcs;
+
+	return 0;
+
+out_free:
+	for (i = 0; i < buf->page_count; i++) {
+		if (buf->pages[i]) {
+			__free_pages(buf->pages[i], 0);
+		}
+	}
+	devm_kfree(dev, buf->pages);
+	devm_kfree(dev, buf);
+	return -1;
+}
+
+int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size, u32 alloc_flag)
+{
+	int ret = 0;
+	// XXX Actually implement this
+	// if (dpa) {
+	// 	dpa->vram_used += size;
+	// 	dpa->vram_used_aligned += ALIGN(size, VRAM_AVAILABLITY_ALIGN);
+	// }
+// release:
+	return ret;
+}
+
+
+int dpa_alloc_vram(
+		struct dpa_device *dpa,
+		uint64_t size,
+		void *drm_priv,
+		struct dpa_kfd_buffer** bo,
+		uint64_t *offset, uint32_t flags) //, bool criu_resume)
+{
+
+	struct drm_gem_object *gobj = NULL;
+	struct dpa_kfd_buffer* buf;
+	int ret;
+
+	ret = dpa_reserve_mem_limit(dpa, size, flags);
+	if (ret) {
+		pr_debug("Insufficient memory\n");
+		goto err;
+	}
+
+	ret = dpa_gem_object_create(size, 1, flags, &gobj);
+	if (ret) {
+		goto err;
+	}
+	printk(KERN_INFO "%s: Allowing drm_priv 0x%lx\n", __func__, drm_priv);
+	ret = drm_vma_node_allow(&gobj->vma_node, drm_priv);
+
+	*bo = gem_to_dpa_buf(gobj);
+	buf = *bo;
+
+	if (offset)
+		*offset = drm_vma_node_offset_addr(&buf->gobj.vma_node);
+	return 0;
+
+err:
+	return ret;
+}
+
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int ret = 0;
+	struct drm_device *ddev;
 	struct device *dev = &pdev->dev;
 	int err;
 	u16 vendor, device;
 	u32 version;
 
 	dev_warn(dev, "%s: start\n", __func__);
-	dpa = devm_kzalloc(dev, sizeof(*dpa_device), GFP_KERNEL);
-	if (!dpa)
+	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
+	if (IS_ERR(dpa))
 		return -ENOMEM;
 	dpa->dev = dev;
+	dpa->pdev = pdev;
+	ddev = &dpa->ddev;
 	dev_set_drvdata(dev, dpa);
-
+	pci_set_drvdata(pdev, ddev);
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
@@ -315,8 +530,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// Write Daffy information to FW queue regs
 	setup_queue(dpa);
 
-	/* XXX need DRM init */
-	dpa->drm_minor = 128;
+	dpa->drm_minor = ddev->render->index;
 	// LIST_HEAD_INIT(&dpa->buffers);
 
 	if ((ret = dpa_kfd_chardev_init()))
@@ -335,6 +549,11 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dpa_device, "%s: got version %u\n", __func__,
 			 version);
 	}
+
+	// init drm
+	ret = drm_dev_register(ddev, id->driver_data);
+	if (ret)
+		goto disable_device;
 
 	return 0;
 
@@ -362,6 +581,8 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 		// unmap regs
 		iounmap(dpa->regs);
 		pci_disable_device(pdev);
+		// Unregister and release DRM device
+		drm_dev_unplug(&dpa->ddev);
 		// character device_destroy();
 		devm_kfree(&pdev->dev, dpa);
 	}
@@ -996,63 +1217,30 @@ static int dpa_kfd_ioctl_get_process_apertures_new(struct file *filep,
 static int dpa_kfd_ioctl_acquire_vm(struct file *filep,
 				    struct dpa_kfd_process *p, void *data)
 {
-	dev_warn(dpa_device, "%s: doing nothing\n", __func__);
-	// we do the PASID allocation in the open call
+	struct kfd_ioctl_acquire_vm_args *args = data;
+	struct file *drm_file;
+	int ret;
+
+	drm_file = fget(args->drm_fd);
+	if (!drm_file)
+		return -EINVAL;
+
+	mutex_lock(&p->lock);
+	if (p->drm_file) {
+		ret = p->drm_file == drm_file ? 0 : -EBUSY;
+		goto err_drm_file;
+	}
+	p->drm_file = drm_file;
+	p->drm_priv = drm_file->private_data;
+
+	mutex_unlock(&p->lock);
 	return 0;
+
+err_drm_file:
+	mutex_unlock(&p->lock);
+	fput(drm_file);
+	return ret;
 }
-
-
-static struct dpa_kfd_buffer *dpa_alloc_vram(struct dpa_kfd_process *p,
-					     u64 size, u32 flags)
-{
-	struct device *dev = p->dev->dev;
-	struct dpa_kfd_buffer *buf;
-	unsigned i, count;
-
-	buf = devm_kzalloc(dev, sizeof(*buf),  GFP_KERNEL);
-	if (!buf)
-		return NULL;
-
-	buf->type = flags;
-	buf->size = size;
-	buf->page_count = buf->size >> PAGE_SHIFT;
-	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
-	if (!buf->pages) {
-		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
-		devm_kfree(dev, buf);
-		return NULL;
-	}
-#ifndef CONFIG_PAGE_OWNER
-	if ((count = alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages)) <
-	    buf->page_count) {
-		dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
-			 __func__, buf->page_count, count);
-		goto out_free;
-	}
-#else
-	for (i = 0; i < buf->page_count; i++) {
-		buf->pages[i] = alloc_page(GFP_KERNEL);
-		if (!buf->pages[i]) {
-			dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
-				 __func__, buf->page_count, count);
-			goto out_free;
-		}
-		count++;
-	}
-#endif
-	return buf;
-
-out_free:
-	for (i = 0; i < buf->page_count; i++) {
-		if (buf->pages[i]) {
-			__free_pages(buf->pages[i], 0);
-		}
-	}
-	devm_kfree(dev, buf->pages);
-	devm_kfree(dev, buf);
-	return NULL;
-}
-
 
 static struct dpa_kfd_buffer *find_buffer(struct dpa_kfd_process *p, u64 id)
 {
@@ -1076,6 +1264,8 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	struct kfd_ioctl_alloc_memory_of_gpu_args *args = data;
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
+	uint64_t offset = 0;
+	int r = 0;
 
 	dev_warn(dev, "%s: flags 0x%x size 0x%llx\n", __func__,
 		 args->flags, args->size);
@@ -1084,9 +1274,10 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		return -ENODEV;
 
 	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
-		buf = dpa_alloc_vram(p, args->size, KFD_IOC_ALLOC_MEM_FLAGS_VRAM);
-		if (!buf) {
-			dev_warn(dev, "%s: vram alloc failed\n", __func__);
+		r = dpa_alloc_vram(dpa, args->size, p->drm_priv, &buf, &offset,
+			KFD_IOC_ALLOC_MEM_FLAGS_VRAM);
+		if (r) {
+			dev_warn(dev, "%s: vram alloc failed %d\n", __func__, r);
 			return -ENOMEM;
 		}
 	} else if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
@@ -1145,6 +1336,10 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 		return -EINVAL;
 	}
 
+	if (!buf) {
+		dev_warn(dev, "%s: buf is NULL\n", __func__);
+		return -ENOMEM;
+	}
 	mutex_lock(&p->dev->lock);
 	// XXX use an IDR/IDA for this
 	buf->p = p;
@@ -1156,9 +1351,7 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	// use a macro for this
 	args->handle = (u64)DPA_GPU_ID << 32 | buf->id;
 	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
-		args->mmap_offset = ((u64)buf->id << PAGE_SHIFT) |
-			((u64)DPA_GPU_ID << KFD_MMAP_GPU_ID_SHIFT) |
-			(KFD_MMAP_TYPE_VRAM << KFD_MMAP_TYPE_SHIFT);
+		args->mmap_offset = offset;
 	}
 	dev_warn(p->dev->dev, "%s: buf id %u handle 0x%llx\n", __func__,
 		 buf->id, args->handle);
@@ -1213,13 +1406,14 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 	dev_warn(dev, "%s: freeing buf id %u\n",
 		 __func__, buf->id);
 
-	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)  {
+	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
 		if (buf->page_count) {
 			int i;
 			for (i = 0; i < buf->page_count; i++) {
 				__free_pages(buf->pages[i], 0);
 			}
 		}
+		drm_gem_object_release(&buf->gobj);
 	}
 
 	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
@@ -1625,6 +1819,10 @@ static void dpa_kfd_release_process(struct kref *ref)
 	// XXX mutex lock on process lock ?
 	dpa_kfd_release_process_buffers(p);
 	dpa_kfd_release_process_events(p);
+
+	if (p->drm_file)
+		fput(p->drm_file);
+
 	idr_destroy(&p->event_idr);
 	if (p->event_page)
 		devm_kfree(p->dev->dev, p->event_page);
