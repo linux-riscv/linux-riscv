@@ -14,22 +14,86 @@ prepare-version:
     # Debugging helper
     - cat gitvars.env
 
-docker-build:
+docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
-  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   stage: build
+  dependencies:
+    - prepare-version
   script:
-    - bash rivos/build.sh
+    - sudo apt update && sudo apt install -y kmod
+    - bash rivos/build.sh "defconfig" "defconfig" &> make_logs_defconfig.txt
   artifacts:
     paths:
-      - linux.tar.gz
+      - linux_defconfig.tar.gz
+      - make_logs_defconfig.txt
+    expire_in: 3 hours
+
+docker-build-ubuntu-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  script:
+    - sudo apt update && sudo apt install -y kmod
+    - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" &> make_logs_ubuntu_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_defconfig.tar.gz
+      - make_logs_ubuntu_defconfig.txt
+    expire_in: 3 hours
+
+.kasan-conf-generic: &kasan-conf-generic
+    - echo "CONFIG_KASAN=y" > kasan.conf
+    - echo "CONFIG_KUNIT=y" >> kasan.conf
+    - echo "CONFIG_KASAN_KUNIT_TEST=m" >> kasan.conf
+    - echo "CONFIG_KASAN_MODULE_TEST=m" >> kasan.conf
+
+docker-build-ubuntu-kasan-outline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  script:
+    - *kasan-conf-generic
+    - sudo apt update && sudo apt install -y kmod
+    - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_outline_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_outline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_outline_defconfig.txt
+    expire_in: 3 hours
+
+docker-build-ubuntu-kasan-inline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  script:
+    - *kasan-conf-generic
+    - sudo apt update && sudo apt install -y kmod
+    - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
+    - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_inline_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_inline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_inline_defconfig.txt
     expire_in: 3 hours
 
 package-deb:
   extends: .deploy-deb
   dependencies:
     - prepare-version
-    - docker-build
+    - docker-build-defconfig
+    - docker-build-ubuntu-defconfig
+    - docker-build-ubuntu-kasan-outline-defconfig
+    - docker-build-ubuntu-kasan-inline-defconfig
   variables:
     PKG_ARCH: "all"
     PKG_DESCRIPTION: "Linux kernel image for RISCV64."
@@ -39,7 +103,10 @@ package-deb:
   before_script:
     # clean up pre-built binaries from the rivos-sdk
     - rm -rf "${INSTALL_PATH}"
-    - tar -C/ -xzf linux.tar.gz
+    - tar -C/ -xzf linux_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
 
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
