@@ -29,7 +29,7 @@
 
 
 #include "dma-iommu.h"
-#include "iommu-sva-lib.h"
+#include "iommu-sva.h"
 
 #include <asm/csr.h>
 #include <asm/delay.h>
@@ -362,7 +362,13 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
 		goto skip_pgtable;
 	}
 
-	if (dom->type == IOMMU_DOMAIN_BLOCKED || ep->sva_enabled) {
+	if (dom->type == IOMMU_DOMAIN_SVA) {
+		WARN_ON(!ep->sva_enabled);
+		val = virt_to_pfn(ep->iommu->zero) | SATP_MODE;
+		goto skip_pgtable;
+	}
+
+	if (dom->type == IOMMU_DOMAIN_BLOCKED) {
 		val = virt_to_pfn(ep->iommu->zero) | SATP_MODE;
 		goto skip_pgtable;
 	}
@@ -445,14 +451,157 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
 	return 0;
 }
 
+struct riscv_iommu_sva {
+	struct iommu_sva sva;
+	struct mm_struct *mm;
+	struct list_head list;
+	refcount_t refs;
+};
+
+static void ___riscv_iommu_sva_remove_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+{
+	struct mm_struct *mm = domain->mm;
+	struct riscv_iommu_sva *sva = NULL, *i;
+	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
+	struct riscv_iommu_command cmd;
+
+	list_for_each_entry(i, &ep->bindings, list) {
+		if (i->mm == mm) {
+			sva = i;
+			break;
+		}
+	}
+
+	if (!WARN_ON(!sva) && refcount_dec_and_test(&sva->refs)) {
+		list_del(&sva->list);
+
+		ep->pc[pasid].ta = 0;
+		wmb();
+
+		/* 1. invalidate PDT entry */
+		__cmd_iodir_pasid(&cmd, ep->device_id, pasid);
+		riscv_iommu_post(ep->iommu, &cmd);
+
+		/* 2. invalidate all matching IOATC entries */
+		__cmd_inval_vma(&cmd);
+		__cmd_inval_set_gscid(&cmd, 0);
+		__cmd_inval_set_pscid(&cmd, pasid);
+		riscv_iommu_post(ep->iommu, &cmd);
+
+		/* 3. Wait IOATC flush to happen */
+		riscv_iommu_iofence_sync(ep->iommu);
+		kfree(sva);
+	}
+}
+
+static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+{
+	struct mm_struct *mm = domain->mm;
+	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
+	struct riscv_iommu_dc *dc = ep->dc;
+	struct riscv_iommu_pc *pc = ep->pc;
+	struct riscv_iommu_sva *sva;
+
+	if (!ep || !ep->sva_enabled)
+		return -ENODEV;
+
+	list_for_each_entry(sva, &ep->bindings, list) {
+		if (sva->mm == mm) {
+			refcount_inc(&sva->refs);
+			return 0;
+		}
+	}
+
+	sva = kzalloc(sizeof(*sva), GFP_KERNEL);
+	if (!sva)
+		return -ENOMEM;
+
+	sva->mm = mm;
+	sva->sva.dev = dev;
+	refcount_set(&sva->refs, 1);
+	list_add(&sva->list, &ep->bindings);
+
+	if (!pc)
+		pc = (struct riscv_iommu_pc *)get_zeroed_page(GFP_KERNEL);
+	if (!pc)
+		return -ENOMEM;
+
+	/* Use PASID for PSCID tag */
+	pc[pasid].ta = cpu_to_le64(FIELD_PREP(RIO_PCTA_MASK_PSCID, pasid) |
+				   RIO_PCTA_V);
+	pc[pasid].fsc = cpu_to_le64(virt_to_pfn(mm->pgd) | SATP_MODE);
+
+	/* update DC with sva->mm */
+	if (!(ep->dc->tc & RIO_DCTC_PDTV)) {
+		/* migrate to PD, domain mappings moved to PASID:0 */
+		pc[0].ta = dc->ta;
+		pc[0].fsc = dc->fsc;
+
+		dc->fsc = cpu_to_le64(virt_to_pfn(pc) |
+				FIELD_PREP(RIO_ATP_MASK_MODE, RIO_PDTP_MODE_PD8));
+		dc->tc = cpu_to_le64(RIO_DCTC_PDTV | RIO_DCTC_EN_ATS | RIO_DCTC_VALID);
+		ep->pc = pc;
+		wmb();
+
+		/* TODO: transition to PD steps */
+		riscv_iommu_iodir_inv_devid(ep->iommu, ep->device_id);
+	} else {
+		wmb();
+		riscv_iommu_iodir_inv_pasid(ep->iommu, ep->device_id, pasid);
+	}
+
+	riscv_iommu_iofence_sync(ep->iommu);
+
+	return 0;
+}
+
+static int riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+{
+	int ret;
+//	struct mm_struct *mm = domain->mm;
+
+//	mutex_lock(&sva_lock);
+	ret = __riscv_iommu_set_dev_pasid(domain, dev, pasid);
+//	mutex_unlock(&sva_lock);
+
+	return ret;
+}
+
+static void riscv_iommu_sva_domain_free(struct iommu_domain *domain)
+{
+	kfree(domain);
+}
+
+static const struct iommu_domain_ops riscv_iommu_sva_domain_ops = {
+	.free = riscv_iommu_sva_domain_free,
+	.set_dev_pasid = riscv_iommu_set_dev_pasid,
+};
+
+struct iommu_domain *riscv_iommu_sva_domain_alloc(void)
+{
+	struct iommu_domain *domain;
+
+	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
+	if (!domain)
+		return NULL;
+
+	domain->ops = &riscv_iommu_sva_domain_ops;
+
+	return domain;
+}
+
 static struct iommu_domain *riscv_iommu_domain_alloc(unsigned type)
 {
 	struct riscv_iommu_domain *domain;
 
+	if (type == IOMMU_DOMAIN_SVA)
+		return riscv_iommu_sva_domain_alloc();
+
 	if (type != IOMMU_DOMAIN_DMA &&
 	    type != IOMMU_DOMAIN_DMA_FQ &&
 	    type != IOMMU_DOMAIN_UNMANAGED &&
-	    type != IOMMU_DOMAIN_IDENTITY && type != IOMMU_DOMAIN_BLOCKED)
+	    type != IOMMU_DOMAIN_IDENTITY &&
+		type != IOMMU_DOMAIN_BLOCKED)
 		return NULL;
 
 	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
@@ -876,132 +1025,24 @@ static int riscv_iommu_dev_disable_feat(struct device *dev,
 	}
 }
 
-struct riscv_iommu_sva {
-	struct iommu_sva sva;
-	struct mm_struct *mm;
-	struct list_head list;
-	refcount_t refs;
-};
-
-static struct iommu_sva *riscv_iommu_sva_bind(struct device *dev,
-					      struct mm_struct *mm,
-					      void *drvdata)
-{
-	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
-	struct riscv_iommu_dc *dc = ep->dc;
-	struct riscv_iommu_pc *pc = ep->pc;
-	struct riscv_iommu_sva *sva;
-	ioasid_t max_pasid, pscid;
-	int ret;
-
-	if (!ep || !ep->sva_enabled)
-		return ERR_PTR(-ENODEV);
-
-	list_for_each_entry(sva, &ep->bindings, list) {
-		if (sva->mm == mm) {
-			refcount_inc(&sva->refs);
-			return &sva->sva;
-		}
-	}
-
-	sva = kzalloc(sizeof(*sva), GFP_KERNEL);
-	if (!sva)
-		return ERR_PTR(-ENOMEM);
-
-	max_pasid = (1U << ep->pasid_bits) - 1;
-	/* FIXME: remove limits due PD8 */
-	max_pasid = min(max_pasid, 255u);
-
-	ret = iommu_sva_alloc_pasid(mm, 1, max_pasid);
-	if (ret < 0) {
-		kfree(sva);
-		return ERR_PTR(ret);
-	}
-
-	sva->mm = mm;
-	sva->sva.dev = dev;
-	refcount_set(&sva->refs, 1);
-	list_add(&sva->list, &ep->bindings);
-
-	if (!pc)
-		pc = (struct riscv_iommu_pc *)get_zeroed_page(GFP_KERNEL);
-	if (!pc)
-		return ERR_PTR(-ENOMEM);
-
-	/* Use PASID for PSCID tag */
-	pscid = mm->pasid;
-	/* bind mm page table to device PDT */
-	pc[pscid].ta = cpu_to_le64(FIELD_PREP(RIO_PCTA_MASK_PSCID, pscid) |
-				   RIO_PCTA_V);
-	pc[pscid].fsc = cpu_to_le64(virt_to_pfn(mm->pgd) | SATP_MODE);
-
-	/* update DC with sva->mm */
-	if (!(ep->dc->tc & RIO_DCTC_PDTV)) {
-		/* migrate to PD, domain mappings moved to PASID:0 */
-		pc[0].ta = dc->ta;
-		pc[0].fsc = dc->fsc;
-
-		dc->fsc = cpu_to_le64(virt_to_pfn(pc) |
-				      FIELD_PREP(RIO_ATP_MASK_MODE,
-						 RIO_PDTP_MODE_PD8));
-		dc->tc = cpu_to_le64(RIO_DCTC_PDTV | RIO_DCTC_EN_ATS | RIO_DCTC_VALID);
-		ep->pc = pc;
-		wmb();
-
-		/* TODO: transition to PD steps */
-		riscv_iommu_iodir_inv_devid(ep->iommu, ep->device_id);
-	} else {
-		wmb();
-		riscv_iommu_iodir_inv_pasid(ep->iommu, ep->device_id,
-					    mm->pasid);
-	}
-
-	riscv_iommu_iofence_sync(ep->iommu);
-
-	return &sva->sva;
-}
-
-static void riscv_iommu_sva_unbind(struct iommu_sva *handle)
-{
-	/* TODO: merge dev/iopf */
-	struct riscv_iommu_sva *sva = (struct riscv_iommu_sva *)handle;
-	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(sva->sva.dev);
-	struct riscv_iommu_command cmd;
-
-	if (refcount_dec_and_test(&sva->refs)) {
-		list_del(&sva->list);
-
-		ep->pc[sva->mm->pasid].ta = 0;
-		wmb();
-
-		/* 1. invalidate PDT entry */
-		__cmd_iodir_pasid(&cmd, ep->device_id, sva->mm->pasid);
-		riscv_iommu_post(ep->iommu, &cmd);
-
-		/* 2. invalidate all matching IOATC entries */
-		__cmd_inval_vma(&cmd);
-		__cmd_inval_set_gscid(&cmd, 0);
-		__cmd_inval_set_pscid(&cmd, sva->mm->pasid);
-		riscv_iommu_post(ep->iommu, &cmd);
-
-		/* 3. Wait IOATC flush to happen */
-		riscv_iommu_iofence_sync(ep->iommu);
-		kfree(sva);
-	}
-}
-
-static u32 riscv_iommu_get_pasid(struct iommu_sva *handle)
-{
-	struct riscv_iommu_sva *sva = (struct riscv_iommu_sva *)handle;
-	return sva->mm->pasid;
-}
-
-int riscv_iommu_page_response(struct device *dev,
+static int riscv_iommu_page_response(struct device *dev,
 			      struct iommu_fault_event *evt,
 			      struct iommu_page_response *msg)
 {
 	/* TODO: merge dev/iopf */
 	return -ENODEV;
+}
+
+static void riscv_iommu_remove_dev_pasid(struct device *dev, ioasid_t pasid)
+{
+	struct iommu_domain *domain;
+
+	domain = iommu_get_domain_for_dev_pasid(dev, pasid, IOMMU_DOMAIN_SVA);
+	if (WARN_ON(IS_ERR(domain)) || !domain)
+		return;
+
+	// TODO: remove SVA bind.
+	___riscv_iommu_sva_remove_dev_pasid(domain, dev, pasid);
 }
 
 static const struct iommu_domain_ops riscv_iommu_domain_ops = {
@@ -1025,16 +1066,17 @@ static const struct iommu_ops riscv_iommu_ops = {
 	.probe_device = riscv_iommu_probe_device,
 	.probe_finalize = riscv_iommu_probe_finalize,
 	.release_device = riscv_iommu_release_device,
+	.remove_dev_pasid = riscv_iommu_remove_dev_pasid,
 	.device_group = riscv_iommu_device_group,
 	.get_resv_regions = riscv_iommu_get_resv_regions,
 	.of_xlate = riscv_iommu_of_xlate,
 	.dev_enable_feat = riscv_iommu_dev_enable_feat,
 	.dev_disable_feat = riscv_iommu_dev_disable_feat,
-	.sva_bind = riscv_iommu_sva_bind,
-	.sva_unbind = riscv_iommu_sva_unbind,
-	.sva_get_pasid = riscv_iommu_get_pasid,
 	.page_response = riscv_iommu_page_response,
 	.default_domain_ops = &riscv_iommu_domain_ops,
+	// N/A
+	//	bool (*is_attach_deferred)(struct device *dev);
+	//	int (*def_domain_type)(struct device *dev);
 };
 
 static void riscv_iommu_report_event(struct riscv_iommu *iommu, int idx)
@@ -1443,6 +1485,9 @@ static int riscv_iommu_probe(struct device *dev,
 		dev_err(dev, "cannot enable iommu device (%d)\n", ret);
 		goto err_dd;
 	}
+
+	// FIXME: use IOMMU capabilities to enable PASID
+	iommu->iommu.max_pasids = 1u << 20;
 
 	ret = iommu_device_sysfs_add(&iommu->iommu, NULL, riscv_iommu_groups,
 				     "riscv-iommu@%llx", iommu->reg_phys);
