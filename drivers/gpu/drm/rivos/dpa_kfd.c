@@ -21,11 +21,14 @@
 #include <drm/drm_ioctl.h>
 #include <linux/pm_runtime.h>
 #include "dpa_kfd.h"
+#include "dpa_daffy.h"
 
 static long dpa_kfd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 static int dpa_kfd_open(struct inode *inode, struct file *filep);
 static int dpa_kfd_release(struct inode *inode, struct file *filep);
 static int dpa_kfd_mmap(struct file *filp, struct vm_area_struct *vma);
+static void dpa_kfd_release_process(struct kref *ref);
+static const struct drm_driver dpa_drm_driver;
 
 /* AMD kfd presents a character device with this name */
 static const char kfd_dev_name[] = "kfd";
@@ -43,6 +46,25 @@ static int dpa_char_dev_major = -1;
 static struct class *dpa_class;
 struct device *dpa_device;
 struct dpa_device *dpa;
+
+static struct list_head dpa_processes;
+static struct mutex dpa_processes_lock;
+static unsigned int dpa_process_count;
+
+static struct dpa_kfd_process *get_current_process(void) {
+	struct list_head *cur;
+	struct dpa_kfd_process *dpa_app;
+	list_for_each(cur, &dpa_processes) {
+		struct dpa_kfd_process *cur_process =
+			container_of(cur, struct dpa_kfd_process,
+				     dpa_process_list);
+		if (cur_process->mm == current->mm) {
+			dpa_app = cur_process;
+			break;
+		}
+	}
+	return dpa_app;
+}
 
 int dpa_kfd_chardev_init(void)
 {
@@ -316,39 +338,43 @@ out:
 	return ret;
 }
 
+static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
+	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
+	if (type == KFD_MMAP_TYPE_VRAM) {
+		return drm_gem_mmap(filp, vma);
+	} else {
+		return dpa_kfd_mmap(filp, vma);
+	}
+}
+
 static const struct file_operations dpa_driver_kms_fops = {
 	.owner = THIS_MODULE,
 	.open = drm_open,
 	.release = drm_release,
 	.unlocked_ioctl = dpa_drm_ioctl,
-	.mmap = drm_gem_mmap,
+	.mmap = dpa_drm_mmap,
 	.poll = drm_poll,
 	.read = drm_read,
 };
 
-
-static void dpa_driver_release_kms(struct drm_device *dev)
+static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
+	struct dpa_kfd_process *p = file_priv->driver_priv;
+	if (p)
+		kref_put(&p->ref, dpa_kfd_release_process);
 	pci_set_drvdata(dpa->pdev, NULL);
 }
 
 static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv) {
-	return 0;
+
+	int ret = dpa_kfd_open(NULL, NULL);
+	mutex_lock(&dpa_processes_lock);
+	file_priv->driver_priv = get_current_process();
+	mutex_unlock(&dpa_processes_lock);
+	return ret;
 }
-
-static const struct drm_driver dpa_drm_driver = {
-	.driver_features =
-	    DRIVER_ATOMIC |
-	    DRIVER_GEM |
-	    DRIVER_RENDER,
-	.open = dpa_driver_open_kms,
-	.release = &dpa_driver_release_kms,
-	.fops = &dpa_driver_kms_fops,
-
-	.name = "dpa-drm",
-};
-
-static const struct drm_driver dpa_drm_driver;
 
 
 int dpa_gem_object_create(unsigned long size,
@@ -414,55 +440,6 @@ out_free:
 	devm_kfree(dev, buf->pages);
 	devm_kfree(dev, buf);
 	return -1;
-}
-
-int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size, u32 alloc_flag)
-{
-	int ret = 0;
-	// XXX Actually implement this
-	// if (dpa) {
-	// 	dpa->vram_used += size;
-	// 	dpa->vram_used_aligned += ALIGN(size, VRAM_AVAILABLITY_ALIGN);
-	// }
-// release:
-	return ret;
-}
-
-
-int dpa_alloc_vram(
-		struct dpa_device *dpa,
-		uint64_t size,
-		void *drm_priv,
-		struct dpa_kfd_buffer** bo,
-		uint64_t *offset, uint32_t flags) //, bool criu_resume)
-{
-
-	struct drm_gem_object *gobj = NULL;
-	struct dpa_kfd_buffer* buf;
-	int ret;
-
-	ret = dpa_reserve_mem_limit(dpa, size, flags);
-	if (ret) {
-		pr_debug("Insufficient memory\n");
-		goto err;
-	}
-
-	ret = dpa_gem_object_create(size, 1, flags, &gobj);
-	if (ret) {
-		goto err;
-	}
-	printk(KERN_INFO "%s: Allowing drm_priv 0x%lx\n", __func__, drm_priv);
-	ret = drm_vma_node_allow(&gobj->vma_node, drm_priv);
-
-	*bo = gem_to_dpa_buf(gobj);
-	buf = *bo;
-
-	if (offset)
-		*offset = drm_vma_node_offset_addr(&buf->gobj.vma_node);
-	return 0;
-
-err:
-	return ret;
 }
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -560,39 +537,59 @@ disable_device:
 	return ret;
 }
 
-static void dpa_pci_remove(struct pci_dev *pdev)
+int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size, u32 alloc_flag)
 {
-	if (dpa) {
-		// XXX other stuff
-		daffy_free_fw_queue(dpa);
-		// Disable PASID support
-		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
-		// unmap regs
-		iounmap(dpa->regs);
-		pci_disable_device(pdev);
-		// Unregister and release DRM device
-		drm_dev_unplug(&dpa->ddev);
-		// character device_destroy();
-		devm_kfree(&pdev->dev, dpa);
-	}
+	int ret = 0;
+	// XXX Actually implement this
+	// if (dpa) {
+	// 	dpa->vram_used += size;
+	// 	dpa->vram_used_aligned += ALIGN(size, VRAM_AVAILABLITY_ALIGN);
+	// }
+// release:
+	return ret;
 }
 
-static struct pci_driver dpa_pci_driver = {
-	.name = "dpa",
-	.id_table = dpa_pci_table,
-	.probe = dpa_pci_probe,
-	.remove = dpa_pci_remove,
-	/* .driver = { */
-	/*	.pm = &dpa_dev_pm_ops, */
-	/* }, */
-};
 
-/* Ioctl handlers */
-
-static int dpa_kfd_ioctl_get_version(struct file *filep,
-				     struct dpa_kfd_process *p, void *data)
+int dpa_alloc_vram(
+		struct dpa_device *dpa,
+		uint64_t size,
+		void *drm_priv,
+		struct dpa_kfd_buffer** bo,
+		uint64_t *offset, uint32_t flags) //, bool criu_resume)
 {
-	struct kfd_ioctl_get_version_args *args = data;
+
+	struct drm_gem_object *gobj = NULL;
+	struct dpa_kfd_buffer* buf;
+	int ret;
+
+	ret = dpa_reserve_mem_limit(dpa, size, flags);
+	if (ret) {
+		pr_debug("Insufficient memory\n");
+		goto err;
+	}
+
+	ret = dpa_gem_object_create(size, 1, flags, &gobj);
+	if (ret) {
+		goto err;
+	}
+	printk(KERN_INFO "%s: Allowing drm_priv 0x%lx\n", __func__, drm_priv);
+	ret = drm_vma_node_allow(&gobj->vma_node, drm_priv);
+
+	*bo = gem_to_dpa_buf(gobj);
+	buf = *bo;
+
+	if (offset)
+		*offset = drm_vma_node_offset_addr(&buf->gobj.vma_node);
+	return 0;
+
+err:
+	return ret;
+}
+/* Ioctl handlers */
+static int dpa_ioctl_get_version(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
+{
+	struct drm_dpa_get_version *args = data;
 
 	args->major_version = KFD_IOCTL_MAJOR_VERSION;
 	// this doesn't seem to actually effect behaviors of userspace so far
@@ -603,6 +600,8 @@ static int dpa_kfd_ioctl_get_version(struct file *filep,
 
 	return 0;
 }
+
+DRM_KFD_IOCTL(get_version)
 
 static int dpa_add_aql_queue(struct dpa_kfd_process *p, u32 queue_id,
 			     u32 doorbell_offset)
@@ -662,9 +661,10 @@ static void dpa_del_all_queues(struct dpa_kfd_process *p)
 	mutex_unlock(&p->lock);
 }
 
-static int dpa_kfd_ioctl_create_queue(struct file *filep, struct dpa_kfd_process *p, void *data)
+static int dpa_ioctl_create_queue(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_create_queue_args *args = data;
+	struct drm_dpa_create_queue *args = data;
 	u64 doorbell_mmap_offset;
 	int ret = daffy_create_queue_cmd(p->dev, p, args);
 
@@ -682,10 +682,12 @@ static int dpa_kfd_ioctl_create_queue(struct file *filep, struct dpa_kfd_process
 	args->doorbell_offset = doorbell_mmap_offset;
 	return ret;
 }
+DRM_KFD_IOCTL(create_queue)
 
-static int dpa_kfd_ioctl_destroy_queue(struct file *filep, struct dpa_kfd_process *p, void *data)
+static int dpa_ioctl_destroy_queue(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_destroy_queue_args *args = data;
+	struct drm_dpa_destroy_queue *args = data;
 	int ret;
 
 	ret = dpa_del_aql_queue(p, args->queue_id);
@@ -700,19 +702,24 @@ static int dpa_kfd_ioctl_destroy_queue(struct file *filep, struct dpa_kfd_proces
 	return ret;
 }
 
-static int dpa_kfd_ioctl_set_memory_policy(struct file *filep, struct dpa_kfd_process *p, void *data)
+DRM_KFD_IOCTL(destroy_queue)
+
+static int dpa_ioctl_set_memory_policy(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
 	/* we don't support any changes in coherency */
-	dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
+	dev_warn(dpa->dev, "%s: doing nothing\n", __func__);
 	return 0;
 }
 
-static int dpa_kfd_ioctl_get_clock_counters(struct file *filep, struct dpa_kfd_process *p, void *data)
+DRM_KFD_IOCTL(set_memory_policy)
+
+static int dpa_ioctl_get_clock_counters(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
+	struct drm_dpa_get_clock_counters *ctr_args = data;
 
-	struct kfd_ioctl_get_clock_counters_args *ctr_args = data;
-
-	dev_warn(p->dev->dev, "%s: gpu_id %d\n", __func__, ctr_args->gpu_id);
+	dev_warn(dpa->dev, "%s: gpu_id %d\n", __func__, ctr_args->gpu_id);
 
 	/* XXX when we have a common clock with DPA use it here */
 	ctr_args->gpu_clock_counter = ktime_get_raw_ns();
@@ -723,10 +730,13 @@ static int dpa_kfd_ioctl_get_clock_counters(struct file *filep, struct dpa_kfd_p
 	return 0;
 }
 
-static int dpa_kfd_ioctl_get_process_apertures(struct file *filep, struct dpa_kfd_process *p,
-					       void *data)
+DRM_KFD_IOCTL(get_clock_counters)
+
+
+static int dpa_ioctl_get_process_apertures(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_get_process_apertures_args *args = data;
+	struct drm_dpa_get_process_apertures *args = data;
 	struct kfd_process_device_apertures *aperture = &args->process_apertures[0];
 
 	dev_warn(dpa_device, "%s\n", __func__);
@@ -744,11 +754,15 @@ static int dpa_kfd_ioctl_get_process_apertures(struct file *filep, struct dpa_kf
 	return 0;
 }
 
-static int dpa_kfd_ioctl_update_queue(struct file *filep, struct dpa_kfd_process *p,
-				      void *data)
+DRM_KFD_IOCTL(get_process_apertures)
+
+static int dpa_ioctl_update_queue(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
 	return -ENOSYS;
 }
+
+DRM_KFD_IOCTL(update_queue)
 
 /* appropriate locks should already be taken for idr, event page */
 static struct dpa_kfd_event *dpa_kfd_alloc_event(struct dpa_kfd_process *p,
@@ -799,11 +813,10 @@ static int dpa_kfd_process_alloc_event_page(struct dpa_kfd_process *p)
 	return !!p->event_page;
 }
 
-static int dpa_kfd_ioctl_create_event(struct file *filep,
-				      struct dpa_kfd_process *p,
-				      void *data)
+static int dpa_ioctl_create_event(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_create_event_args *args = data;
+	struct drm_dpa_create_event *args = data;
 	struct dpa_kfd_event *ev;
 
 	dev_warn(p->dev->dev, "%s: type %u event_page_offset 0x%llx\n", __func__,
@@ -837,6 +850,8 @@ static int dpa_kfd_ioctl_create_event(struct file *filep,
 	return 0;
 }
 
+DRM_KFD_IOCTL(create_event)
+
 static void dpa_kfd_destroy_event(struct dpa_kfd_process *p, struct dpa_kfd_event *ev)
 {
 	spin_lock(&ev->lock);
@@ -849,10 +864,10 @@ static void dpa_kfd_destroy_event(struct dpa_kfd_process *p, struct dpa_kfd_even
 	devm_kfree(p->dev->dev, ev);
 }
 
-static int dpa_kfd_ioctl_destroy_event(struct file *filep, struct dpa_kfd_process *p,
-				      void *data)
+static int dpa_ioctl_destroy_event(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_destroy_event_args *args = data;
+	struct drm_dpa_destroy_event *args = data;
 	struct dpa_kfd_event *ev;
 	int ret = -EINVAL;
 
@@ -867,6 +882,8 @@ static int dpa_kfd_ioctl_destroy_event(struct file *filep, struct dpa_kfd_proces
 	mutex_unlock(&p->lock);
 	return ret;
 }
+
+DRM_KFD_IOCTL(destroy_event)
 
 static void dpa_kfd_release_process_events(struct dpa_kfd_process *p)
 {
@@ -893,10 +910,10 @@ static void dpa_set_event(struct dpa_kfd_event *ev)
 	wake_up_all(&ev->wq);
 }
 
-static int dpa_kfd_ioctl_set_event(struct file *filep, struct dpa_kfd_process *p,
-				      void *data)
+static int dpa_ioctl_set_event(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_set_event_args *args = data;
+	struct drm_dpa_set_event *args = data;
 	struct dpa_kfd_event *ev;
 	int ret = 0;
 
@@ -916,10 +933,12 @@ static int dpa_kfd_ioctl_set_event(struct file *filep, struct dpa_kfd_process *p
 	return ret;
 }
 
-static int dpa_kfd_ioctl_reset_event(struct file *filep, struct dpa_kfd_process *p,
-				      void *data)
+DRM_KFD_IOCTL(set_event)
+
+static int dpa_ioctl_reset_event(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_reset_event_args *args = data;
+	struct drm_dpa_reset_event *args = data;
 	struct dpa_kfd_event *ev;
 	int ret = 0;
 
@@ -939,6 +958,8 @@ static int dpa_kfd_ioctl_reset_event(struct file *filep, struct dpa_kfd_process 
 
 	return ret;
 }
+
+DRM_KFD_IOCTL(reset_event)
 
 static struct dpa_kfd_event_waiter *alloc_event_waiters(uint32_t num_events)
 {
@@ -1052,10 +1073,10 @@ static long user_timeout_to_jiffies(uint32_t user_timeout_ms)
 	return msecs_to_jiffies(user_timeout_ms) + 1;
 }
 
-static int dpa_kfd_ioctl_wait_events(struct file *filep,
-				     struct dpa_kfd_process *p, void *data)
+static int dpa_ioctl_wait_events(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_wait_events_args *args = data;
+	struct drm_dpa_wait_events *args = data;
 	struct dpa_kfd_event_waiter *waiters;
 	struct kfd_event_data __user *events =
 			(struct kfd_event_data __user *) args->events_ptr;
@@ -1170,18 +1191,12 @@ out:
 	return ret;
 }
 
-static int dpa_kfd_ioctl_not_implemented(struct file *filep, struct dpa_kfd_process *p,
-					 void *data)
-{
-	return -ENOSYS;
-}
+DRM_KFD_IOCTL(wait_events)
 
-
-static int dpa_kfd_ioctl_get_process_apertures_new(struct file *filep,
-						   struct dpa_kfd_process *p,
-						   void *data)
+static int dpa_ioctl_get_process_apertures_new(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_get_process_apertures_new_args *args = data;
+	struct drm_dpa_get_process_apertures_new *args = data;
 	struct kfd_process_device_apertures ap; // just one for now
 	int ret;
 
@@ -1203,10 +1218,12 @@ static int dpa_kfd_ioctl_get_process_apertures_new(struct file *filep,
 	return ret;
 }
 
+DRM_KFD_IOCTL(get_process_apertures_new)
+
 static int dpa_kfd_ioctl_acquire_vm(struct file *filep,
-				    struct dpa_kfd_process *p, void *data)
+                                struct dpa_kfd_process *p, void *data)
 {
-	struct kfd_ioctl_acquire_vm_args *args = data;
+	struct drm_dpa_acquire_vm *args = data;
 	struct file *drm_file;
 	int ret;
 
@@ -1230,7 +1247,35 @@ err_drm_file:
 	fput(drm_file);
 	return ret;
 }
+static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
+						 void *data, struct drm_file *file)
+{
+	struct dpa_kfd_process *p = file->driver_priv;
+	if (!p)
+		return -EINVAL;
+	struct drm_dpa_acquire_vm *args = data;
+	struct file *drm_file;
+	int ret;
 
+	drm_file = file->filp;
+	if (!drm_file)
+		return -EINVAL;
+
+	mutex_lock(&p->lock);
+	if (p->drm_file) {
+		ret = p->drm_file == file ? 0 : -EBUSY;
+		goto err_drm_file;
+	}
+	p->drm_file = drm_file;
+	p->drm_priv = drm_file->private_data;
+
+	mutex_unlock(&p->lock);
+	return 0;
+
+err_drm_file:
+	mutex_unlock(&p->lock);
+	return ret;
+}
 static struct dpa_kfd_buffer *find_buffer(struct dpa_kfd_process *p, u64 id)
 {
 	struct dpa_kfd_buffer *buf, *tmp;
@@ -1247,10 +1292,10 @@ static struct dpa_kfd_buffer *find_buffer(struct dpa_kfd_process *p, u64 id)
 	return NULL;
 }
 
-static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
-				    struct dpa_kfd_process *p, void *data)
+static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_alloc_memory_of_gpu_args *args = data;
+	struct drm_dpa_alloc_memory_of_gpu *args = data;
 	struct device *dev = p->dev->dev;
 	struct dpa_kfd_buffer *buf;
 	uint64_t offset = 0;
@@ -1348,10 +1393,12 @@ static int dpa_kfd_ioctl_alloc_memory_of_gpu(struct file *filep,
 	return 0;
 }
 
-static int dpa_kfd_ioctl_map_memory_to_gpu(struct file *filep,
-				    struct dpa_kfd_process *p, void *data)
+DRM_KFD_IOCTL(alloc_memory_of_gpu)
+
+static int dpa_ioctl_map_memory_to_gpu(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_map_memory_to_gpu_args *args = data;
+	struct drm_dpa_map_memory_to_gpu *args = data;
 
 	// XXX loop over gpu id verify ID passed in matches
 	// XXX check gpu id
@@ -1371,11 +1418,12 @@ static int dpa_kfd_ioctl_map_memory_to_gpu(struct file *filep,
 	return 0;
 }
 
-static int dpa_kfd_ioctl_unmap_memory_from_gpu(struct file *filep,
-					       struct dpa_kfd_process *p,
-					       void *data)
+DRM_KFD_IOCTL(map_memory_to_gpu)
+
+static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_unmap_memory_from_gpu_args *args = data;
+	struct drm_dpa_unmap_memory_from_gpu *args = data;
 
 	// XXX loop over gpu id verify ID passed in matches
 	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
@@ -1388,6 +1436,8 @@ static int dpa_kfd_ioctl_unmap_memory_from_gpu(struct file *filep,
 
 	return 0;
 }
+
+DRM_KFD_IOCTL(unmap_memory_from_gpu)
 
 static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 {
@@ -1416,11 +1466,10 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 
 }
 
-static int dpa_kfd_ioctl_free_memory_of_gpu(struct file *filep,
-					    struct dpa_kfd_process *p,
-					    void *data)
+static int dpa_ioctl_free_memory_of_gpu(struct dpa_kfd_process *p,
+	struct dpa_device *dpa, void *data)
 {
-	struct kfd_ioctl_free_memory_of_gpu_args *args = data;
+	struct drm_dpa_free_memory_of_gpu *args = data;
 	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
@@ -1433,6 +1482,8 @@ static int dpa_kfd_ioctl_free_memory_of_gpu(struct file *filep,
 
 	return 0;
 }
+
+DRM_KFD_IOCTL(free_memory_of_gpu)
 
 #define KFD_IOCTL_DEF(ioctl, _func, _flags) \
 	[_IOC_NR(ioctl)] = {.cmd = ioctl, .func = _func, .flags = _flags, \
@@ -1475,27 +1526,6 @@ static const struct kfd_ioctl_desc amdkfd_ioctls[] = {
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_WAIT_EVENTS,
 			dpa_kfd_ioctl_wait_events, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_DBG_REGISTER_DEPRECATED,
-			dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED,
-			 dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED,
-			 dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED,
-			 dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_SET_SCRATCH_BACKING_VA,
-			 dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_GET_TILE_CONFIG,
-			 dpa_kfd_ioctl_not_implemented, 0),
-
-	KFD_IOCTL_DEF(AMDKFD_IOC_SET_TRAP_HANDLER,
-			 dpa_kfd_ioctl_not_implemented, 0),
 
 	KFD_IOCTL_DEF(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW,
 			dpa_kfd_ioctl_get_process_apertures_new, 0),
@@ -1691,39 +1721,62 @@ err_i1:
 	if (retcode)
 		dev_warn(dpa_device, "ioctl cmd (#0x%x), arg 0x%lx, ret = %d\n",
 				nr, arg, retcode);
-
 	return retcode;
 }
 
-static struct list_head dpa_processes;
-static struct mutex dpa_processes_lock;
-static unsigned int dpa_process_count;
+static const struct drm_ioctl_desc dpadrm_ioctls[] = {
+	DRM_IOCTL_DEF_DRV(DPA_GET_VERSION, dpa_drm_ioctl_get_version, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_CREATE_QUEUE, dpa_drm_ioctl_create_queue, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_DESTROY_QUEUE, dpa_drm_ioctl_destroy_queue, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_SET_MEMORY_POLICY, dpa_drm_ioctl_set_memory_policy, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_GET_CLOCK_COUNTERS, dpa_drm_ioctl_get_clock_counters, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_GET_PROCESS_APERTURES, dpa_drm_ioctl_get_process_apertures, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_UPDATE_QUEUE, dpa_drm_ioctl_update_queue, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_CREATE_EVENT, dpa_drm_ioctl_create_event, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_DESTROY_EVENT, dpa_drm_ioctl_destroy_event, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_SET_EVENT, dpa_drm_ioctl_set_event, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_RESET_EVENT, dpa_drm_ioctl_reset_event, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_WAIT_EVENTS, dpa_drm_ioctl_wait_events, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_GET_PROCESS_APERTURES_NEW, dpa_drm_ioctl_get_process_apertures_new, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_ACQUIRE_VM, dpa_drm_ioctl_acquire_vm, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_ALLOC_MEMORY_OF_GPU, dpa_drm_ioctl_alloc_memory_of_gpu, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_FREE_MEMORY_OF_GPU, dpa_drm_ioctl_free_memory_of_gpu, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_MAP_MEMORY_TO_GPU, dpa_drm_ioctl_map_memory_to_gpu, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_UNMAP_MEMORY_FROM_GPU, dpa_drm_ioctl_unmap_memory_from_gpu, DRM_RENDER_ALLOW),
+};
+
+static const struct drm_driver dpa_drm_driver = {
+	.driver_features =
+	    DRIVER_ATOMIC |
+	    DRIVER_GEM |
+	    DRIVER_RENDER,
+	.open = dpa_driver_open_kms,
+	.postclose = dpa_driver_release_kms,
+	.fops = &dpa_driver_kms_fops,
+	.ioctls = dpadrm_ioctls,
+	.num_ioctls = ARRAY_SIZE(dpadrm_ioctls),
+
+	.name = "dpa-drm",
+};
+
+static const struct drm_driver dpa_drm_driver;
 
 static int dpa_kfd_open(struct inode *inode, struct file *filep)
 {
 	struct dpa_kfd_process *dpa_app = NULL;
-	struct list_head *cur;
-
 
 	// big lock for this
 	mutex_lock(&dpa_processes_lock);
 	// look for process in a list
-	list_for_each(cur, &dpa_processes) {
-		struct dpa_kfd_process *cur_process =
-			container_of(cur, struct dpa_kfd_process,
-				     dpa_process_list);
-		if (cur_process->mm == current->mm) {
-			dpa_app = cur_process;
-			kref_get(&dpa_app->ref);
-			break;
-		}
-	}
+	dpa_app = get_current_process();
 
 	if (dpa_app) {
+		kref_get(&dpa_app->ref);
 		mutex_unlock(&dpa_processes_lock);
 		// using existing dpa_kfd_process
 		dev_warn(dpa_device, "%s: using existing kfd process\n", __func__);
-		filep->private_data = dpa_app;
+		if (filep)
+			filep->private_data = dpa_app;
 		return 0;
 	}
 	// new process
@@ -1784,8 +1837,8 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 		dev_err(dpa_dev, "DPA failed to map doorbell registers\n");
 		return -EIO;
 	}
-
-	filep->private_data = dpa_app;
+	if (filep)
+		filep->private_data = dpa_app;
 	mutex_unlock(&dpa_processes_lock);
 	return 0;
 }
@@ -1842,7 +1895,9 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 
 static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 {
-	struct dpa_kfd_process *p = filep->private_data;
+	mutex_lock(&dpa_processes_lock);
+	struct dpa_kfd_process *p = get_current_process();
+	mutex_unlock(&dpa_processes_lock);
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
 	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
@@ -1955,6 +2010,30 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 out:
 	return ret;
 }
+
+static void dpa_pci_remove(struct pci_dev *pdev)
+{
+	if (dpa) {
+		// XXX other stuff
+		daffy_free_fw_queue(dpa);
+		// Disable PASID support
+		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
+		// unmap regs
+		iounmap(dpa->regs);
+		pci_disable_device(pdev);
+		// Unregister and release DRM device
+		drm_dev_unplug(&dpa->ddev);
+		// character device_destroy();
+		devm_kfree(&pdev->dev, dpa);
+	}
+}
+
+static struct pci_driver dpa_pci_driver = {
+	.name = "dpa",
+	.id_table = dpa_pci_table,
+	.probe = dpa_pci_probe,
+	.remove = dpa_pci_remove,
+};
 
 static int __init dpa_init(void)
 {

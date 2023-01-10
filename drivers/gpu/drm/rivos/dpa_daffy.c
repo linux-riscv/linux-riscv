@@ -2,7 +2,7 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <uapi/linux/kfd_ioctl.h>
-#include "dpa_kfd.h"
+
 #include "dpa_daffy.h"
 
 static int queue_has_space(struct dpa_fwq_info *qinfo)
@@ -172,7 +172,7 @@ out:
 
 int daffy_create_queue_cmd(struct dpa_device *dev,
 			   struct dpa_kfd_process *p,
-			   struct kfd_ioctl_create_queue_args *args)
+			   struct drm_dpa_create_queue *args)
 {
 	struct dpa_fw_queue_pkt pkt, *qpkt;
 	struct daffy_create_queue_cmd *cmd;
