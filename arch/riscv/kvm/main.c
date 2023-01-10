@@ -53,11 +53,15 @@ int kvm_arch_hardware_enable(void)
 
 	csr_write(CSR_HVIP, 0);
 
+	kvm_riscv_aia_enable();
+
 	return 0;
 }
 
 void kvm_arch_hardware_disable(void)
 {
+	kvm_riscv_aia_disable();
+
 	/*
 	 * After clearing the hideleg CSR, the host kernel will receive
 	 * spurious interrupts if hvip CSR has pending interrupts and the
@@ -72,6 +76,7 @@ void kvm_arch_hardware_disable(void)
 
 int kvm_arch_init(void *opaque)
 {
+	int rc;
 	const char *str;
 
 	if (!riscv_isa_extension_available(NULL, h)) {
@@ -92,6 +97,10 @@ int kvm_arch_init(void *opaque)
 	kvm_riscv_gstage_mode_detect();
 
 	kvm_riscv_gstage_vmid_detect();
+
+	rc = kvm_riscv_aia_init();
+	if (rc && rc != -ENODEV)
+		return rc;
 
 	kvm_info("hypervisor extension available\n");
 
@@ -115,11 +124,15 @@ int kvm_arch_init(void *opaque)
 
 	kvm_info("VMID %ld bits available\n", kvm_riscv_gstage_vmid_bits());
 
+	if (kvm_riscv_aia_available())
+		kvm_info("AIA available\n");
+
 	return 0;
 }
 
 void kvm_arch_exit(void)
 {
+	kvm_riscv_aia_exit();
 }
 
 static int __init riscv_kvm_init(void)
