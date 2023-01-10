@@ -6,8 +6,7 @@
 #include <linux/iommu.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_device.h>
-
-#include "dpa_daffy.h"
+#include <drm/drm_dpa.h>
 
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
@@ -31,6 +30,23 @@
 #define DUC_MMIO_SIZE				0x80000
 
 #define DPA_PROCESS_MAX (16)
+
+#define DRM_KFD_IOCTL(name)						        \
+static int dpa_drm_ioctl_##name(struct drm_device *dev, 	        \
+	void *data, struct drm_file *file)				\
+{									\
+	struct dpa_kfd_process *p = file->driver_priv;			\
+	if (!p)								\
+		return -EINVAL;						\
+	struct dpa_device* dpa = drm_to_dpa_dev(dev);			\
+	return dpa_ioctl_##name(p, dpa, data);				\
+}									\
+static int dpa_kfd_ioctl_##name(struct file *filep,			\
+                                struct dpa_kfd_process *p, void *data)	\
+{									\
+	struct dpa_device* dpa = p->dev;				\
+	return dpa_ioctl_##name(p, dpa, data);				\
+}									\
 
 // contains info about the queue to fw
 struct dpa_fwq_info {
@@ -131,6 +147,11 @@ struct dpa_kfd_buffer {
 };
 
 #define gem_to_dpa_buf(gobj) container_of((gobj), struct dpa_kfd_buffer, gobj)
+
+static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
+{
+	return container_of(ddev, struct dpa_device, ddev);
+}
 
 typedef int kfd_ioctl_t(struct file *filep, struct dpa_kfd_process *process,
 			void *data);
