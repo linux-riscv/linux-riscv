@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/kfd_ioctl.h>
+#include <drm_dpa.h>
 #include <elf.h>
 
 #define LITTLEENDIAN_CPU
@@ -81,8 +82,8 @@ static void open_kfd(void)
 
 static void get_version(void)
 {
-	struct kfd_ioctl_get_version_args args;
-	int ret = ioctl(kfd, AMDKFD_IOC_GET_VERSION, &args);
+	struct drm_dpa_get_version args;
+	int ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_VERSION, &args);
 	if (ret) {
 		perror("ioctl get version");
 		exit(1);
@@ -101,7 +102,7 @@ static void get_process_apertures_new(void)
 		&dev_apertures;
 	args.num_of_nodes = NUM_DEV_APERTURES;
 
-	ret = ioctl(kfd, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_PROCESS_APERTURES_NEW, &args);
 	if (ret) {
 		perror("ioctl get process apertures new");
 		exit(1);
@@ -155,7 +156,7 @@ static void acquire_vm(void)
 	args.drm_fd = drm_fd;
 	args.gpu_id = gpu_id;
 
-	ret = ioctl(kfd,  AMDKFD_IOC_ACQUIRE_VM, &args);
+	ret = ioctl(drm_fd,  DRM_IOCTL_DPA_ACQUIRE_VM, &args);
 	if (ret) {
 		perror("ioctl aquire vm");
 		exit(1);
@@ -175,7 +176,7 @@ static void set_memory_policy(void)
 	args.default_policy = KFD_IOC_CACHE_POLICY_NONCOHERENT;
 	args.alternate_policy = KFD_IOC_CACHE_POLICY_COHERENT;
 
-	ret = ioctl(kfd, AMDKFD_IOC_SET_MEMORY_POLICY, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_SET_MEMORY_POLICY, &args);
 	if (ret) {
 		perror("ioctl set memory policy");
 		exit(1);
@@ -233,7 +234,7 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 		exit(1);
 	}
 
-	ret = ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_ALLOC_MEMORY_OF_GPU, &args);
 	if (ret) {
 		perror("ioctl alloc memory of gpu");
 		exit(1);
@@ -289,7 +290,7 @@ static void map_memory_to_gpu(uint64_t handle)
 	args.n_devices = 1;
 	args.n_success = 0;
 
-	ret = ioctl(kfd, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_MAP_MEMORY_TO_GPU, &args);
 	fprintf(stderr, "%s: gpu_id 0x%x args.handle = 0x%lx n_success = %d\n",
 		__func__, gpu_id, (uint64_t)args.handle, args.n_success);
 
@@ -367,7 +368,7 @@ static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 	args.event_type = KFD_IOC_EVENT_SIGNAL;
 
 
-	ret = ioctl(kfd, AMDKFD_IOC_CREATE_EVENT, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_CREATE_EVENT, &args);
 	if (ret) {
 		perror("ioctl create event");
 		exit(1);
@@ -394,7 +395,7 @@ static void destroy_queue(uint32_t q_id)
 
 	fprintf(stderr, "%s: id %u\n", __func__, q_id);
 	args.queue_id = q_id;
-	ret = ioctl(kfd, AMDKFD_IOC_DESTROY_QUEUE, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_DESTROY_QUEUE, &args);
 	if (ret) {
 		perror("ioctl destroy queue");
 		exit(1);
@@ -408,7 +409,7 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 			 uint32_t *q_id)
 {
 	int ret;
-	struct kfd_ioctl_create_queue_args args;
+	struct drm_dpa_create_queue args;
 
 	args.ring_base_address = (uint64_t)ring_base;
 	args.ring_size = (uint32_t)ring_size;
@@ -426,7 +427,7 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 	args.ctx_save_restore_size = ctx_scratch_size;
 	args.ctl_stack_size = stack_size;
 
-	ret = ioctl(kfd, AMDKFD_IOC_CREATE_QUEUE, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_CREATE_QUEUE, &args);
 	if (ret) {
 		perror("ioctl create queue");
 		exit(1);
@@ -546,7 +547,7 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
 {
 	uint64_t *map = mmap(NULL, size, PROT_READ | PROT_WRITE,
-			     MAP_SHARED, kfd, doorbell_offset);
+			     MAP_SHARED, drm_fd, doorbell_offset);
 
 	if (map == MAP_FAILED) {
 		perror("mmap doorbell");
@@ -632,10 +633,9 @@ int main(int argc, char *argv[])
 			kd_ptr->kernel_code_entry_byte_offset);
 	}
 
-	open_kfd();
+	open_render_fd();
 	get_version();
 	get_process_apertures_new();
-	open_render_fd();
 	acquire_vm();
 	set_memory_policy();
 
@@ -753,6 +753,6 @@ int main(int argc, char *argv[])
 	}
 
 	munmap(doorbell_map, doorbell_size);
-	close(kfd);
+	close(drm_fd);
 	return 0;
 }
