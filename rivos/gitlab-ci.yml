@@ -1,0 +1,115 @@
+include:
+  - project: 'rv/it/int/rivos-sdk'
+    ref: rivos/main
+    file: '/packager/gitlab-ci-packaging-helper.yml'
+
+variables:
+  INSTALL_PATH: "/rivos/sysroot/riscv/boot"
+  # Trigger downstream projects testing
+  TEST_DOWNSTREAM: "true"
+  TEST_PATCHES: rv/sw/ext/qemu:dev/alex/ubuntu_ci_v1
+
+# Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
+prepare-version:
+  after_script:
+    - upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
+    - sed -i -e "s@GIT_TAG=.\+@GIT_TAG=${upstream_version:1}@" gitvars.env
+    # Debugging helper
+    - cat gitvars.env
+
+docker-build-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  stage: build
+  script:
+    - sudo apt update && sudo apt install -y kmod
+    - bash rivos/build.sh "defconfig" "defconfig" &> make_logs_defconfig.txt
+  artifacts:
+    paths:
+      - linux_defconfig.tar.gz
+      - make_logs_defconfig.txt
+    expire_in: 3 hours
+
+docker-build-ubuntu-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  stage: build
+  script:
+    - sudo apt update && sudo apt install -y kmod
+    - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" &> make_logs_ubuntu_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_defconfig.tar.gz
+      - make_logs_ubuntu_defconfig.txt
+    expire_in: 3 hours
+
+docker-build-ubuntu-kasan-outline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  stage: build
+  script:
+    - sudo apt update && sudo apt install -y kmod
+    - echo "CONFIG_KASAN=y" > kasan_outline.conf
+    - echo "CONFIG_KUNIT=y" >> kasan_outline.conf
+    - echo "CONFIG_KASAN_KUNIT_TEST=y" >> kasan_outline.conf
+    - echo "CONFIG_KASAN_MODULE_TEST=m" >> kasan_outline.conf
+    - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan_outline.conf" &> make_logs_ubuntu_kasan_outline_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_outline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_outline_defconfig.txt
+    expire_in: 3 hours
+
+docker-build-ubuntu-kasan-inline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  stage: build
+  script:
+    - sudo apt update && sudo apt install -y kmod
+    - echo "CONFIG_KASAN=y" > kasan_inline.conf
+    - echo "CONFIG_KASAN_INLINE=y" >> kasan_inline.conf
+    - echo "CONFIG_KUNIT=y" >> kasan_inline.conf
+    - echo "CONFIG_KASAN_KUNIT_TEST=y" >> kasan_inline.conf
+    - echo "CONFIG_KASAN_MODULE_TEST=m" >> kasan_inline.conf
+    - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan_inline.conf" &> make_logs_ubuntu_kasan_inline_defconfig.txt
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_inline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_inline_defconfig.txt
+    expire_in: 3 hours
+
+package-deb:
+  extends: .deploy-deb
+  dependencies:
+    - prepare-version
+    - docker-build-defconfig
+    - docker-build-ubuntu-defconfig
+    - docker-build-ubuntu-kasan-outline-defconfig
+    - docker-build-ubuntu-kasan-inline-defconfig
+  variables:
+    PKG_ARCH: "all"
+    PKG_DESCRIPTION: "Linux kernel image for RISCV64."
+    PKG_DIRECTORIES: "${INSTALL_PATH}"
+    PKG_LICENSE: "GPL-2.0"
+    PKG_UPSTREAM_VERSION: "${GIT_TAG}"
+  before_script:
+    # clean up pre-built binaries from the rivos-sdk
+    - rm -rf "${INSTALL_PATH}"
+    - tar -C/ -xzf linux_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
+    - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
+
+# Rebuild the rivos-sdk image if this is the branch the SDK is using.
+# Currently the 'latest' tag from the 'rivos/main' branch.
+update-sdk:
+  stage: deploy
+  only:
+    - rivos/main
+  except:
+    - pipelines
+  inherit:
+    variables: false
+  variables:
+    TRIGGER_ROOTFS: "true"
+  trigger: rv/it/int/rivos-sdk

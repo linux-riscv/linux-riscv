@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# For now, build only a monolithic kernel for our VM
+# and a rudimentary install
+kernel_build() {
+    local config=$1
+    local config_base=$2
+    local config_to_merge=$3
+    local local_version
+
+    # or if config != config_base
+    if [ ! -z "$config_to_merge" ]; then
+        ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- KCONFIG_CONFIG=arch/riscv/configs/$config ./scripts/kconfig/merge_config.sh arch/riscv/configs/$config_base $config_to_merge
+        # FIXME find another way
+        make ARCH=riscv mrproper
+    fi
+
+    local_version="${config//_/-}"
+
+    # Replace _ with - as _ is not valid in Debian versions
+    make LOCALVERSION=$local_version ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build_${config} ${config}
+    make LOCALVERSION=$local_version ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build_${config} -j $(nproc)
+
+    # Prepare installation for packaging
+    mkdir -p "${INSTALL_PATH}/${config}"
+
+    # Compile and install the kernel (for legacy)
+    make LOCALVERSION=${local_version} ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
+
+    # Create the debian package with kernel + modules
+    # INSTALL_MOD_STRIP will fix the module size issue caused by relocations
+    # https://github.com/riscv-collab/riscv-gnu-toolchain/issues/1036
+    make LOCALVERSION=${local_version} ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- INSTALL_MOD_STRIP=1 O=build_${config} bindeb-pkg
+
+    # FIXME dirty
+    rm -f linux-image*dbg*.deb
+    cp linux-image*${local_version}*.deb ${INSTALL_PATH}/${config}
+
+    # For debugging purposes
+    cp build_${config}/vmlinux ${INSTALL_PATH}/${config}
+}
+
+kernel_tar() {
+    tar czf linux_$1.tar.gz "${INSTALL_PATH}"
+}
+
+if [ $# -lt 2 ]; then
+	echo "Please provide at least one config name (\$1) and one base config (\$2)"
+	exit -1
+fi
+
+if [ -z ${INSTALL_PATH} ]; then
+    echo "Please provide INSTALL_PATH"
+    exit -1
+fi
+rm -rf ${INSTALL_PATH}/*
+
+kernel_build "$@"
+kernel_tar $1
