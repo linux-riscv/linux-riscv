@@ -39,6 +39,12 @@ static unsigned long gstage_pgd_levels = 2;
 #define gstage_pte_leaf(__ptep)	\
 	(pte_val(*(__ptep)) & (_PAGE_READ | _PAGE_WRITE | _PAGE_EXEC))
 
+#define is_hugepage_size(sz) \
+	((sz) == PMD_SIZE || \
+	 (sz) == PUD_SIZE || \
+	 (sz) == P4D_SIZE || \
+	 (sz) == PGDIR_SIZE)
+
 static inline unsigned long gstage_pte_index(gpa_t addr, u32 level)
 {
 	unsigned long mask;
@@ -585,7 +591,7 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 	if (!kvm->arch.pgd)
 		return false;
 
-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PGDIR_SIZE);
+	WARN_ON(size != PAGE_SIZE && !is_hugepage_size(size));
 
 	if (!gstage_get_leaf_entry(kvm, range->start << PAGE_SHIFT,
 				   &ptep, &ptep_level))
@@ -603,7 +609,7 @@ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 	if (!kvm->arch.pgd)
 		return false;
 
-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PGDIR_SIZE);
+	WARN_ON(size != PAGE_SIZE && !is_hugepage_size(size));
 
 	if (!gstage_get_leaf_entry(kvm, range->start << PAGE_SHIFT,
 				   &ptep, &ptep_level))
@@ -645,14 +651,12 @@ int kvm_riscv_gstage_map(struct kvm_vcpu *vcpu,
 	if (logging || (vma->vm_flags & VM_PFNMAP))
 		vma_pagesize = PAGE_SIZE;
 
-	if (vma_pagesize == PMD_SIZE || vma_pagesize == PGDIR_SIZE)
+	if (is_hugepage_size(vma_pagesize))
 		gfn = (gpa & huge_page_mask(hstate_vma(vma))) >> PAGE_SHIFT;
 
 	mmap_read_unlock(current->mm);
 
-	if (vma_pagesize != PGDIR_SIZE &&
-	    vma_pagesize != PMD_SIZE &&
-	    vma_pagesize != PAGE_SIZE) {
+	if (vma_pagesize != PAGE_SIZE && !is_hugepage_size(vma_pagesize)) {
 		kvm_err("Invalid VMA page size 0x%lx\n", vma_pagesize);
 		return -EFAULT;
 	}
