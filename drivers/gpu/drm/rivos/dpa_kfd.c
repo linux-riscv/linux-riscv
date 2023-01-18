@@ -415,7 +415,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 	// Bind device and allocate PASID
 	struct device *dpa_dev = dpa_app->dev->dev;
-	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm, NULL);
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
 	if (IS_ERR(dpa_app->sva)) {
 		int ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
@@ -1882,7 +1882,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 
 	// Bind device and allocate PASID
 	struct device *dpa_dev = dpa_app->dev->dev;
-	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm, NULL);
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
 	if (IS_ERR(dpa_app->sva)) {
 		int ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
