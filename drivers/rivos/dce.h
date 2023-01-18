@@ -49,7 +49,6 @@
 #define SRC_IS_LIST                 (1 << 1)
 #define SRC2_IS_LIST                (1 << 2)
 #define DEST_IS_LIST                (1 << 3)
-#define PASID_VALID                 (1 << 4)
 
 
 #define DEVICE_NAME "dce"

@@ -328,7 +328,7 @@ static int parse_descriptor_based_on_opcode(
 		struct DCEDescriptor * desc, struct DCEDescriptor * input, u32 pasid)
 {
 	desc->opcode = input->opcode;
-	desc->ctrl = input->ctrl | 1;
+	desc->ctrl = input->ctrl | 1; /* Always generate interrupt*/
 	desc->operand0 = input->operand0;
 	desc->pasid = 0;
 
@@ -343,7 +343,7 @@ static int parse_descriptor_based_on_opcode(
 
 	// Set the pasid and valid bits
 	desc->pasid = pasid;
-	desc->ctrl |= PASID_VALID;
+	desc->pasid |= TRANSCTL_PASID_V; /* Always use SVA for job mem accesses*/
 	return 0;
 }
 
