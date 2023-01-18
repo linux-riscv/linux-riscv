@@ -119,7 +119,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	ctx->wq_num = -1;
 
 	if (dev->sva_enabled) {
-		ctx->sva = iommu_sva_bind_device(dev->pci_dev, current->mm, NULL);
+		ctx->sva = iommu_sva_bind_device(dev->pci_dev, current->mm);
 		if (IS_ERR(ctx->sva)) {
 			ret = PTR_ERR(ctx->sva);
 			dev_err(dev->pci_dev, "SVA allocation failed: %d.\n", ret);
