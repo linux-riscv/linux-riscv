@@ -2,6 +2,7 @@
 #define _DPA_KFD_H_
 
 #include <linux/kernel.h>
+#include <linux/pci.h>
 #include <linux/iommu.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_device.h>
@@ -108,7 +109,9 @@ struct dpa_kfd_process {
 
 	// aql queues
 	struct list_head queue_list;
-	struct page *fake_doorbell_page;
+
+	// Start of doorbell registers in DUC MMIO
+	phys_addr_t doorbell_base;
 };
 
 // tracks buffers -- especially vram allocations
@@ -149,6 +152,9 @@ struct kfd_ioctl_desc {
 /* For now let userspace allocate anything within a 47-bit address space */
 #define DPA_GPUVM_ADDR_LIMIT ((1ULL << 47) - 1)
 
+/* Size of a doorbell page */
+#define DPA_DOORBELL_PAGE_SIZE (PAGE_SIZE)
+
 /* just one page max for signals right now */
 #define DPA_MAX_EVENT_PAGE_SIZE (PAGE_SIZE)
 
@@ -185,8 +191,8 @@ struct dpa_kfd_event_waiter {
 
 /* offsets to MMAP calls for different things */
 #define KFD_MMAP_TYPE_SHIFT (60)
-#define KFD_MMAP_TYPE_EVENTS (0x2ULL)
 #define KFD_MMAP_TYPE_DOORBELL (0x1ULL)
+#define KFD_MMAP_TYPE_EVENTS (0x2ULL)
 
 // temporary until DRM/GEM
 #define KFD_MMAP_TYPE_VRAM (0x0ULL)
