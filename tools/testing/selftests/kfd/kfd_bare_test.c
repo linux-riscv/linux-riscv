@@ -35,6 +35,12 @@ struct KernelDescriptor {
 	uint8_t reserved2[6];
 };
 
+// Doorbells are 8-bytes, but 16-byte aligned
+struct Doorbell {
+	uint64_t doorbell_write_offset;
+	uint64_t padding;
+};
+
 #define ALIGN_UP_PGSZ(addr, page_size) (((uint64_t)(addr) +	\
 					 (uint64_t)(page_size))		\
 					& ~((uint64_t)(page_size)	\
@@ -534,21 +540,6 @@ static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
 	memcpy(y_ptr, host_y, sizeof(host_y));
 
 	fprintf(stderr, "kernargs buffer:\n");
-	//dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
-}
-
-
-// now convert pointers..
-static void axpy_kern_args_convert_nopasid(uint8_t *kern_args_ptr, uint64_t device_args_ptr, size_t size)
-{
-	uint64_t *kaptr = (uint64_t*)kern_args_ptr;
-	kaptr[0] = device_args_ptr + ARG0_LOC;
-	kaptr[1] = device_args_ptr + ARG1_LOC;
-	kaptr[2] = device_args_ptr + ARG2_LOC;
-	kaptr[4] = device_args_ptr + CACHELINE_SIZE;
-	kaptr[5] = device_args_ptr + 2 * CACHELINE_SIZE;
-
-	fprintf(stderr, "converted kernargs buffer:\n");
 	dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
 }
 
@@ -568,7 +559,7 @@ static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
 
 int main(int argc, char *argv[])
 {
-	void *kern_ptr = NULL, *rw_ptr, *queue_ptr;
+	void *kern_ptr, *rw_ptr, *queue_ptr = NULL;
 	//size_t doorbell_size = getpagesize() * 2; // this AMD gpu expects 2 pages
 	size_t doorbell_size = getpagesize();
 	size_t queue_size = getpagesize();
@@ -587,7 +578,7 @@ int main(int argc, char *argv[])
 	uint64_t doorbell_offset;
 	uint32_t queue_id;
 
-	uint64_t *doorbell_map = NULL;
+	struct Doorbell *doorbell_map = NULL;
 
 	int kern_fd = -1;
 	struct stat kstat;
@@ -660,7 +651,6 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
 	fprintf(stderr, "rwptr_mmap_offset: 0x%lx\n", rwptr_mmap_offset);
 
-
 	// set read and write pointers to memory inside the queue space
 	q_read_ptr = rw_ptr;
 	q_write_ptr = q_read_ptr + (CACHELINE_SIZE/sizeof(uint64_t));
@@ -672,7 +662,8 @@ int main(int argc, char *argv[])
 	create_queue(queue_ptr, aql_queue_size, NULL, 0, 0, q_read_ptr, q_write_ptr,
 			&doorbell_offset, &queue_id);
 
-	doorbell_map = mmap_doorbell(doorbell_offset, doorbell_size);
+	fprintf(stderr, "Mapping doorbell page\n");
+	doorbell_map = (struct Doorbell*) mmap_doorbell(doorbell_offset, doorbell_size);
 
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
@@ -704,9 +695,6 @@ int main(int argc, char *argv[])
 
 		// only designed to support axpy kernel
 		init_axpy_kern_args(kern_args_ptr, kern_args_size);
-		// hack to deal with no pasid
-		// axpy_kern_args_convert_nopasid(kern_args_ptr, kern_args_mmap_offset & 0xFFFFFFFFFFFFULL,
-		// 			       kern_args_size);
 
 		// send an empty barrier packet first to test multiple packets
 		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;
@@ -742,7 +730,7 @@ int main(int argc, char *argv[])
 			*q_read_ptr, *q_write_ptr);
 		*q_write_ptr += 2;
 		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
-		doorbell_map[queue_id] = *q_write_ptr;
+		doorbell_map[queue_id].doorbell_write_offset = *q_write_ptr;
 		fprintf(stderr, "Rang the doorbell\n");
 		while ((wait_count < 10) && (*q_read_ptr == 0)) {
 			fprintf(stderr, "Waiting for read index to increment: %lu\n",
