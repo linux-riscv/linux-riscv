@@ -1778,6 +1778,13 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	}
 	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
 
+	// Setup doorbell register offsets
+	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) + DUC_REGS_DOORBELLS;
+	if (!dpa_app->doorbell_base) {
+		dev_err(dpa_dev, "DPA failed to map doorbell registers\n");
+		return -EIO;
+	}
+
 	filep->private_data = dpa_app;
 	mutex_unlock(&dpa_processes_lock);
 	return 0;
@@ -1815,8 +1822,6 @@ static void dpa_kfd_release_process(struct kref *ref)
 	idr_destroy(&p->event_idr);
 	if (p->event_page)
 		devm_kfree(p->dev->dev, p->event_page);
-	if (p->fake_doorbell_page)
-		__free_pages(p->fake_doorbell_page, 0);
 	dpa_del_all_queues(p);
 	if (p->sva)
 		iommu_sva_unbind_device(p->sva);
@@ -1923,34 +1928,25 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 		}
 		break;
 	case KFD_MMAP_TYPE_DOORBELL:
-		if (size != PAGE_SIZE) {
+		if (size != DPA_DOORBELL_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
 				 __func__);
 			return -EINVAL;
 		}
 
-		// XXX hack for now until real doorbell mmio is implemented
-		// allocate a regular page and put it there, device will be
-		// polling on the queues until real doorbells are implemented
+		// TODO: Right now we only support one MMIO-mapped doorbell page, expand to all 16
+		dev_warn(p->dev->dev, "%s: Mapping doorbell page\n", __func__);
+
 		mutex_lock(&p->lock);
-		if (!p->fake_doorbell_page) {
-			p->fake_doorbell_page = alloc_page(GFP_KERNEL);
-			if (!p->fake_doorbell_page) {
-				dev_warn(p->dev->dev, "%s: failed to alloc fake"
-					 " db page\n", __func__);
-				ret = -ENOMEM;
-				mutex_unlock(&p->lock);
-				goto out;
-			}
-		}
+		pfn = p->doorbell_base;
+		pfn >>= PAGE_SHIFT;
+
+		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
 		mutex_unlock(&p->lock);
 
-		ret = vm_insert_page(vma, vma->vm_start,
-				     p->fake_doorbell_page);
 		if (ret) {
 			dev_warn(p->dev->dev, "%s: failed to map doorbell page"
-				 "ret %d\n",
-				 __func__, ret);
+				 "ret %d\n", __func__, ret);
 		}
 		break;
 	default:
