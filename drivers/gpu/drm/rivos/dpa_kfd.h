@@ -128,6 +128,8 @@ struct dpa_kfd_process {
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
+
+	bool is_kfd;
 };
 
 // tracks buffers -- especially vram allocations
