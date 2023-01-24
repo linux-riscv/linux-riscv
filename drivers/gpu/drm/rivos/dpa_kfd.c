@@ -362,18 +362,92 @@ static const struct file_operations dpa_driver_kms_fops = {
 static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
 	struct dpa_kfd_process *p = file_priv->driver_priv;
-	if (p)
+	if (p && (!p->is_kfd))
 		kref_put(&p->ref, dpa_kfd_release_process);
 	pci_set_drvdata(dpa->pdev, NULL);
 }
 
 static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv) {
 
-	int ret = dpa_kfd_open(NULL, NULL);
+	struct dpa_kfd_process *dpa_app = NULL;
+
+	// big lock for this
 	mutex_lock(&dpa_processes_lock);
-	file_priv->driver_priv = get_current_process();
+	// look for process in a list
+	dpa_app = get_current_process();
+
+	if (dpa_app) {
+		if (!dpa_app->is_kfd)
+			kref_get(&dpa_app->ref);
+		mutex_unlock(&dpa_processes_lock);
+		// using existing dpa_kfd_process
+		dev_warn(dpa_device, "%s: using existing kfd process\n", __func__);
+		return 0;
+	}
+	// new process
+	if (dpa_process_count >= DPA_PROCESS_MAX) {
+		dev_warn(dpa_device, "%s: max number of processes reached\n",
+			 __func__);
+		mutex_unlock(&dpa_processes_lock);
+		return -EBUSY;
+		}
+	dpa_app = devm_kzalloc(dpa_device, sizeof(*dpa_app), GFP_KERNEL);
+	if (!dpa_app) {
+		mutex_unlock(&dpa_processes_lock);
+		return -ENOMEM;
+	}
+	file_priv->driver_priv = dpa_app;
+	dpa_process_count++;
+	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
+	list_add_tail(&dpa_app->dpa_process_list, &dpa_processes);
+
+	dev_warn(dpa_device, "%s: associated with pid %d\n", __func__, current->tgid);
+	dpa_app->mm = current->mm;
+	mutex_init(&dpa_app->lock);
+	INIT_LIST_HEAD(&dpa_app->buffers);
+	idr_init(&dpa_app->event_idr);
+	INIT_LIST_HEAD(&dpa_app->event_list);
+	INIT_LIST_HEAD(&dpa_app->queue_list);
+	kref_init(&dpa_app->ref);
+
+	// only one DPA for now
+	dpa_app->dev = dpa;
+
+	// Bind device and allocate PASID
+	struct device *dpa_dev = dpa_app->dev->dev;
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm, NULL);
+	if (IS_ERR(dpa_app->sva)) {
+		int ret = PTR_ERR(dpa_app->sva);
+		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
+		list_del(&dpa_app->dpa_process_list);
+		dpa_process_count--;
+		kfree(dpa_app);
+		mutex_unlock(&dpa_processes_lock);
+		return -ENODEV;
+	}
+	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
+	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
+		dev_err(dpa_dev, "PASID allocation failed\n");
+		iommu_sva_unbind_device(dpa_app->sva);
+		list_del(&dpa_app->dpa_process_list);
+		dpa_process_count--;
+		kfree(dpa_app);
+		mutex_unlock(&dpa_processes_lock);
+		return -ENODEV;
+	}
+	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
+
+	// Setup doorbell register offsets
+	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) + DUC_REGS_DOORBELLS;
+	if (!dpa_app->doorbell_base) {
+		dev_err(dpa_dev, "DPA failed to map doorbell registers\n");
+		return -EIO;
+	}
+
+	dpa_app->is_kfd = false;
+
 	mutex_unlock(&dpa_processes_lock);
-	return ret;
+	return 0;
 }
 
 
@@ -1775,8 +1849,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 		mutex_unlock(&dpa_processes_lock);
 		// using existing dpa_kfd_process
 		dev_warn(dpa_device, "%s: using existing kfd process\n", __func__);
-		if (filep)
-			filep->private_data = dpa_app;
+		filep->private_data = dpa_app;
 		return 0;
 	}
 	// new process
@@ -1837,8 +1910,9 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 		dev_err(dpa_dev, "DPA failed to map doorbell registers\n");
 		return -EIO;
 	}
-	if (filep)
-		filep->private_data = dpa_app;
+	filep->private_data = dpa_app;
+
+	dpa_app->is_kfd = true;
 	mutex_unlock(&dpa_processes_lock);
 	return 0;
 }
