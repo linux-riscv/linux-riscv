@@ -73,6 +73,25 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 #ifdef CONFIG_ACPI
 static unsigned int cpu_count = 1;
+static unsigned int intc_count;
+static struct acpi_madt_rintc cpu_madt_rintc[NR_CPUS];
+
+struct acpi_madt_rintc *acpi_get_madt_rintc(int cpu)
+{
+	return &cpu_madt_rintc[cpu];
+}
+
+struct acpi_madt_rintc *acpi_cpu_get_madt_rintc(int cpu)
+{
+	int i;
+
+	for (i = 0; i < NR_CPUS; i++) {
+		if (riscv_hartid_to_cpuid(cpu_madt_rintc[i].hart_id) == cpu)
+			return &cpu_madt_rintc[i];
+	}
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(acpi_cpu_get_madt_rintc);
 
 static int __init
 acpi_parse_rintc(union acpi_subtable_headers *header,
@@ -92,6 +111,8 @@ acpi_parse_rintc(union acpi_subtable_headers *header,
 	hart = processor->hart_id;
 	if (hart < 0)
 		return 0;
+
+	cpu_madt_rintc[intc_count++] = *processor;
 	if (hart == cpuid_to_hartid_map(0)) {
 		BUG_ON(found_boot_cpu);
 		found_boot_cpu = 1;
