@@ -21,8 +21,10 @@ docker-build-defconfig:
   dependencies:
     - prepare-version
   script:
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod ccache
+    - *prepare-ccache-conf
     - bash rivos/build.sh "defconfig" "defconfig" &> make_logs_defconfig.txt
+    - ccache --show-stats
   artifacts:
     paths:
       - linux_defconfig.tar.gz
@@ -37,8 +39,10 @@ docker-build-ubuntu-defconfig:
   dependencies:
     - prepare-version
   script:
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod ccache
+    - *prepare-ccache-conf
     - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" &> make_logs_ubuntu_defconfig.txt
+    - ccache --show-stats
   artifacts:
     paths:
       - linux_ubuntu_defconfig.tar.gz
@@ -60,8 +64,10 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - prepare-version
   script:
     - *kasan-conf-generic
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod ccache
+    - *prepare-ccache-conf
     - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_outline_defconfig.txt
+    - ccache --show-stats
   artifacts:
     paths:
       - linux_ubuntu_kasan_outline_defconfig.tar.gz
@@ -107,6 +113,75 @@ package-deb:
     - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
     - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
     - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
+
+sdk-linux-ubuntu-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-defconfig
+  script:
+    - rm -rf "${INSTALL_DIR}"
+    - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
+    - apt update
+    - pip install fabric
+    - cd rivos/linux_ci
+    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_defconfig &> ubuntu_output
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_output
+      - rivos/linux_ci/tests_results/
+    expire_in: 3h
+  rules:
+    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+
+sdk-linux-ubuntu-kasan-inline-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-kasan-inline-defconfig
+  script:
+    - rm -rf "${INSTALL_DIR}"
+    - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
+    - apt update
+    - pip install fabric
+    - cd rivos/linux_ci
+    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_inline_defconfig &> ubuntu_kasan_inline_output
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_kasan_inline_output
+      - rivos/linux_ci/tests_results/
+    expire_in: 3h
+  rules:
+    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+
+sdk-linux-ubuntu-kasan-outline-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-kasan-outline-defconfig
+  script:
+    - rm -rf "${INSTALL_DIR}"
+    - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
+    - apt update
+    - pip install fabric
+    - cd rivos/linux_ci
+    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_outline_defconfig &> ubuntu_kasan_outline_output
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_kasan_outline_output
+      - rivos/linux_ci/tests_results/
+    expire_in: 3h
+  rules:
+    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
 
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
