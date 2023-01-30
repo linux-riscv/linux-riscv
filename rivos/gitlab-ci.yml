@@ -14,9 +14,21 @@ prepare-version:
     # Debugging helper
     - cat gitvars.env
 
+.prepare-ccache-conf: &prepare-ccache-conf
+    - export PATH="/usr/lib/ccache:$PATH"
+    - export CCACHE_DIR="$PWD/rivos/ccache"
+    - export CCACHE_BASEDIR="$PWD"
+    - ccache --max-size=0
+    - ccache --max-files=0
+    - ccache --show-stats
+
 docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
@@ -35,6 +47,10 @@ docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['docker-cpu-xl']
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
@@ -59,6 +75,10 @@ docker-build-ubuntu-kasan-outline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['docker-cpu-xl']
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
@@ -78,14 +98,20 @@ docker-build-ubuntu-kasan-inline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['docker-cpu-xl']
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
   script:
     - *kasan-conf-generic
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod ccache
+    - *prepare-ccache-conf
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
     - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_inline_defconfig.txt
+    - ccache --show-stats
   artifacts:
     paths:
       - linux_ubuntu_kasan_inline_defconfig.tar.gz
