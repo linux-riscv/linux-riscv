@@ -21,7 +21,7 @@
 
 #include "iommu-bits.h"
 
-struct riscv_iommu {
+struct riscv_iommu_device {
 	void __iomem *reg;	/* virtual address of IOMMU hardware register set */
 	u64 reg_phys;		/* physical address of hardware register set */
 	u64 reg_size;		/* register set length */
@@ -73,7 +73,7 @@ struct riscv_iommu_domain {
 /* translation context devid:pasid */
 struct riscv_iommu_endpoint {
 	struct device *dev;
-	struct riscv_iommu *iommu;
+	struct riscv_iommu_device *iommu;
 	struct list_head g_list;
 	struct list_head s_list;
 	struct riscv_iommu_dc *dc;
@@ -86,5 +86,27 @@ struct riscv_iommu_endpoint {
 	ioasid_t pscid;
 	bool sva_enabled;
 };
+
+/* Helper functions and macros */
+
+static inline u32 riscv_iommu_readl(struct riscv_iommu_device *iommu, unsigned offset)
+{
+	return readl_relaxed(iommu->reg + offset);
+}
+
+static inline void riscv_iommu_writel(struct riscv_iommu_device *iommu, unsigned offset, u32 val)
+{
+	writel_relaxed(val, iommu->reg + offset);
+}
+
+static inline u64 riscv_iommu_readq(struct riscv_iommu_device *iommu, unsigned offset)
+{
+	return readq_relaxed(iommu->reg + offset);
+}
+
+static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu, unsigned offset, u64 val)
+{
+	writeq_relaxed(val, iommu->reg + offset);
+}
 
 #endif
