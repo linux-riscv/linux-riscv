@@ -814,40 +814,45 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 static DEFINE_IDA(dce_minor_ida);
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	int err;
-	u16 vendor, device;
+	int err=0;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
 	struct cdev *cdev;
 	bool isPF = true;
 	int minor;
 
-	/*TODO: Feels like the VF should be declared after the PF is up.
-	 * also check error... */
 
-	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
-	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
+	dev_info(dev, "Probing DCE: vendor:%x device:%x\n",
+			(int)pdev->vendor, (int)pdev->device);
 
-	dev_info(dev, "Probing DCE: %x:%x\n", vendor, device);
-	if (device != DEVICE_ID)
-		isPF = false;
-	else
-		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
+	isPF = (pdev->device == DEVICE_ID);
 
-	err = pci_enable_device(pdev);
+	if (!isPF && pdev->device != DEVICE_VF_ID) {
+		dev_err(dev, "Unhandled device type!\n");
+		return -ENOTDIR;
+	}
+
+	err = pci_enable_device_mem(pdev);
 	if (err){
 		dev_err(dev, "pci_enable_device fail\n");
+		return err;
+	}
+
+	err = pci_request_mem_regions(pdev, DEVICE_NAME);
+	if (err){
+		dev_err(dev, "pci_request_mem_regions fail\n");
 		goto disable_device_and_fail;
 	}
 
-	err = pci_request_selected_regions( pdev,
-			pci_select_bars(pdev, IORESOURCE_MEM),
-			DEVICE_NAME );
-	if (err){
-		dev_err(dev, "pci_request_selected_regions fail\n");
-		goto disable_device_and_fail;
+	if (isPF) {
+		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
+		if(err < 0){
+			dev_err(dev, "pci_enable_sriov fail\n");
+			goto disable_device_and_fail;
+		}
 	}
+
+	pci_set_master(pdev);
 
 	drv_priv = kzalloc_node(sizeof(struct dce_driver_priv), GFP_KERNEL,
 			     dev_to_node(dev));
