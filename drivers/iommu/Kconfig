@@ -189,6 +189,7 @@ config MSM_IOMMU
 source "drivers/iommu/amd/Kconfig"
 source "drivers/iommu/intel/Kconfig"
 source "drivers/iommu/iommufd/Kconfig"
+source "drivers/iommu/riscv/Kconfig"
 
 config IRQ_REMAP
 	bool "Support for Interrupt Remapping"
@@ -506,20 +507,5 @@ config SPRD_IOMMU
 	  ISP(image), and CPP(camera pixel processor), etc.
 
 	  Say Y here if you want to use the multimedia devices listed above.
-
-config RISCV_IOMMU
-	tristate "RISC-V IOMMU driver"
-	depends on RISCV
-	select IOMMU_API
-	select IOMMU_DMA
-	select IOMMU_SVA
-	select IOMMU_IOVA
-	select IOASID
-	select PCI_ATS
-	select MMU_NOTIFIER
-	help
-	  Support for devices following RISC-V IOMMU specification.
-
-	  If unsure, say N here.
 
 endif # IOMMU_SUPPORT

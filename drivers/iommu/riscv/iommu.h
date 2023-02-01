@@ -19,7 +19,7 @@
 #include <linux/list.h>
 #include <linux/iommu.h>
 
-#include "riscv-iommu-bits.h"
+#include "iommu-bits.h"
 
 struct riscv_iommu {
 	void __iomem *reg;	/* virtual address of IOMMU hardware register set */

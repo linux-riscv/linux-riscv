@@ -27,9 +27,9 @@
 #include <asm/page.h>
 
 
-#include "dma-iommu.h"
-#include "iommu-sva.h"
-#include "riscv-iommu.h"
+#include "../dma-iommu.h"
+#include "../iommu-sva.h"
+#include "iommu.h"
 
 #include <asm/csr.h>
 #include <asm/delay.h>
