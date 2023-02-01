@@ -48,9 +48,11 @@
 
 /* 1 second */
 #define RISCV_IOMMU_TIMEOUT		riscv_timebase
-#define CQ_ORDER		2
-#define FQ_ORDER		2
-#define PQ_ORDER		2
+
+/* Number of elements in command, fault, page request queues */
+#define CQ_COUNT		(4 << 10)
+#define FQ_COUNT		(8 << 10)
+#define PQ_COUNT		(8 << 10)
 
 #define RIO_MIN_REVISION        0x0002
 #define RIO_REG_MIN_SIZE	0x0300
@@ -186,32 +188,24 @@ static struct riscv_iommu_dc *riscv_iommu_get_dc(struct riscv_iommu_device *iomm
 	return (struct riscv_iommu_dc *)ddt;
 }
 
-/* Caller shall verify there is enough space in the command queue. */
+/* TODO: Convert into lock-less MPSC implementation. */
 static bool riscv_iommu_post(struct riscv_iommu_device *iommu,
 			     struct riscv_iommu_command *cmd)
 {
 	u32 head, tail, next, last;
 	unsigned long flags;
 
-	/*
-	 * FIXME
-	 * MMIO read occasionaly fails during initialization/boot sequence,
-	 * most likely when QEMU physical memory mapping is modified (ie. adding
-	 * BAR spaces), returning ~0U value.  While the issue is still not resolved
-	 * verification code is added below tracking last tail index update and
-	 * check for the most recent read value.
-	 */
 	spin_lock_irqsave(&iommu->cq_lock, flags);
-	head = riscv_iommu_readl(iommu, RIO_REG_CQH) & iommu->cq_mask;
-	tail = riscv_iommu_readl(iommu, RIO_REG_CQT) & iommu->cq_mask;
-	last = iommu->cq_tail;
+	head = riscv_iommu_readl(iommu, RIO_REG_CQH) & (iommu->cmdq.cnt - 1);
+	tail = riscv_iommu_readl(iommu, RIO_REG_CQT) & (iommu->cmdq.cnt - 1);
+	last = iommu->cmdq.lui;
 	if (tail != last) {
 		spin_unlock_irqrestore(&iommu->cq_lock, flags);
 		/* TRY AGAIN */
 		dev_err(iommu->dev, "IOMMU CQT: %x != %x (1st)\n", last, tail);
 		spin_lock_irqsave(&iommu->cq_lock, flags);
-		tail = riscv_iommu_readl(iommu, RIO_REG_CQT) & iommu->cq_mask;
-		last = iommu->cq_tail;
+		tail = riscv_iommu_readl(iommu, RIO_REG_CQT) & (iommu->cmdq.cnt - 1);
+		last = iommu->cmdq.lui;
 		if (tail != last) {
 			spin_unlock_irqrestore(&iommu->cq_lock, flags);
 			dev_err(iommu->dev, "IOMMU CQT: %x != %x (2nd)\n", last, tail);
@@ -219,12 +213,13 @@ static bool riscv_iommu_post(struct riscv_iommu_device *iommu,
 		}
 	}
 
-	next = (iommu->cq_tail + 1) & iommu->cq_mask;
+	next = (iommu->cmdq.lui + 1) & (iommu->cmdq.cnt - 1);
 	if (next != head) {
-		memcpy(iommu->cq + iommu->cq_tail, cmd, sizeof(*cmd));
+		struct riscv_iommu_command *ptr = iommu->cmdq.base;
+		memcpy(&ptr[iommu->cmdq.lui], cmd, sizeof(*cmd));
 		wmb();
 		riscv_iommu_writel(iommu, RIO_REG_CQT, next);
-		iommu->cq_tail = next;
+		iommu->cmdq.lui = next;
 	}
 
 	spin_unlock_irqrestore(&iommu->cq_lock, flags);
@@ -1058,217 +1053,193 @@ static const struct iommu_ops riscv_iommu_ops = {
 	//	int (*def_domain_type)(struct device *dev);
 };
 
-static void riscv_iommu_report_event(struct riscv_iommu_device *iommu, int idx)
+#define Q_HEAD(q) ((q)->qbr + (RIO_REG_CQH - RIO_REG_CQB))
+#define Q_TAIL(q) ((q)->qbr + (RIO_REG_CQT - RIO_REG_CQB))
+
+static unsigned riscv_iommu_queue_consume(struct riscv_iommu_device *iommu,
+	struct riscv_iommu_queue *q, unsigned *ready)
 {
-	struct riscv_iommu_event *event = iommu->fq + idx;
-	unsigned bdf, err;
+	u32 tail = riscv_iommu_readl(iommu, Q_TAIL(q));
+	*ready = q->lui;
 
-	if (printk_ratelimit()) {
-		bdf = FIELD_GET(RIO_EVENT_DID, event->reason);
-		err = FIELD_GET(RIO_EVENT_CAUSE, event->reason);
-
-		dev_warn(iommu->dev, "RIO Event: "
-			 "cause: %d bdf: %04x:%02x.%x iova: %llx gpa: %llx\n",
-			 err, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf),
-			 event->iova, event->phys);
-	}
+	BUG_ON(q->cnt <= tail);
+	if (q->lui <= tail)
+		return tail - q->lui;
+	return q->cnt - q->lui;
 }
 
-static void riscv_iommu_poll_events(struct riscv_iommu_device *iommu)
+static void riscv_iommu_queue_release(struct riscv_iommu_device *iommu,
+	struct riscv_iommu_queue *q, unsigned count)
 {
-	u32 head, tail, ctrl;
-
-	head = riscv_iommu_readl(iommu, RIO_REG_FQH) & iommu->fq_mask;
-	tail = riscv_iommu_readl(iommu, RIO_REG_FQT) & iommu->fq_mask;
-	while (head != tail) {
-		riscv_iommu_report_event(iommu, head);
-		head = (head + 1) & iommu->fq_mask;
-	}
-	riscv_iommu_writel(iommu, RIO_REG_FQH, head);
-
-	/* Error reporting, clear error reports if any. */
-	ctrl = riscv_iommu_readl(iommu, RIO_REG_FQCSR);
-	if (ctrl & (RIO_FQ_FULL | RIO_FQ_FAULT)) {
-		riscv_iommu_writel(iommu, RIO_REG_FQCSR, ctrl);
-		dev_warn(iommu->dev, "RIO Event: fault: %d full: %d\n",
-			 !!(ctrl & RIO_FQ_FAULT), !!(ctrl & RIO_FQ_FULL));
-	}
+	q->lui = (q->lui + count) & (q->cnt - 1);
+	riscv_iommu_writel(iommu, Q_HEAD(q), q->lui);
 }
 
-static irqreturn_t riscv_iommu_cq_thread(int irq, void *data)
+static u32 riscv_iommu_queue_ctrl(struct riscv_iommu_device *iommu,
+	struct riscv_iommu_queue *q, u32 val)
 {
-	struct riscv_iommu_device *iommu = (struct riscv_iommu_device *)data;
+	cycles_t end_cycles = RISCV_IOMMU_TIMEOUT + get_cycles();
+
+	riscv_iommu_writel(iommu, q->qcr, val);
+	do {
+		val = riscv_iommu_readl(iommu, q->qcr);
+		if (!(val & RIO_CQ_BUSY))
+			break;
+		cpu_relax();
+	} while (get_cycles() < end_cycles);
+
+	return val;
+}
+
+static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
+	struct riscv_iommu_queue *q, unsigned count, size_t item_size,
+	unsigned qbr, unsigned qcr, irq_handler_t irq_fn, const char *name)
+{
+	unsigned order = ilog2(count);
+
+	do {
+		size_t size = item_size * (1ULL << order);
+		q->base = dmam_alloc_coherent(iommu->dev, size, &q->base_dma,
+					      GFP_KERNEL);
+		if (q->base || size < PAGE_SIZE)
+			break;
+
+		order--;
+	} while (1);
+
+	if (!q->base) {
+		dev_err(iommu->dev, "failed to allocate %s queue (count: %u)\n", name, count);
+		return -ENOMEM;
+	}
+
+	q->len = item_size;
+	q->cnt = 1ULL << order;
+	q->qbr = qbr;	/* queue base register */
+	q->qcr = qcr;	/* queue control and status register */
+
+	/* TODO: CPU affinity for queue handlers */
+	if (request_threaded_irq(q->irq, NULL, irq_fn, IRQF_ONESHOT, dev_name(iommu->dev), q)) {
+		dev_err(iommu->dev, "failt to request irq %d for %s\n", q->irq, name);
+		return -ENOMEM;
+	}
+
+	riscv_iommu_writeq(iommu, qbr, (order - 1) | phys_to_ppn(q->base_dma));
+	riscv_iommu_queue_ctrl(iommu, q, RIO_CQ_EN | RIO_CQ_IE);
+
+	/* TODO: check queue status */
+
+	return 0;
+}
+
+static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu, struct riscv_iommu_queue *q)
+{
+	size_t size = q->len * q->cnt;
+
+	riscv_iommu_queue_ctrl(iommu, q, 0);
+
+	if (q->base)
+		dmam_free_coherent(iommu->dev, size, q->base, q->base_dma);
+	if (q->irq)
+		free_irq(q->irq, q);
+}
+
+static irqreturn_t riscv_iommu_cmdq_handler(int irq, void *data)
+{
+	struct riscv_iommu_device *iommu = container_of(data, struct riscv_iommu_device, cmdq);
 	/* TODO: merge dev/inval */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_CQIP);
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t riscv_iommu_fq_thread(int irq, void *data)
+static void riscv_iommu_fault_report(struct riscv_iommu_device *iommu,
+		struct riscv_iommu_event *event)
 {
-	struct riscv_iommu_device *iommu = (struct riscv_iommu_device *)data;
-	riscv_iommu_poll_events(iommu);
+	if (printk_ratelimit()) {
+		unsigned bdf, err;
+		bdf = FIELD_GET(RIO_EVENT_DID, event->reason);
+		err = FIELD_GET(RIO_EVENT_CAUSE, event->reason);
+
+		dev_warn(iommu->dev, "RIO Event: "
+			"cause: %d bdf: %04x:%02x.%x iova: %llx gpa: %llx\n",
+			err, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf),
+			event->iova, event->phys);
+	}
+}
+
+static irqreturn_t riscv_iommu_fault_handler(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu;
+	struct riscv_iommu_event *events;
+	unsigned cnt, len, idx, ctrl;
+
+ 	iommu = container_of(q, struct riscv_iommu_device, fltq);
+	events = (struct riscv_iommu_event *) q->base;
+
+	/* Clear fault interrupt pending. */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_FQIP);
+
+	/* Error reporting, clear error reports if any. */
+	ctrl = riscv_iommu_readl(iommu, RIO_REG_FQCSR);
+	if (ctrl & (RIO_FQ_FULL | RIO_FQ_FAULT)) {
+		riscv_iommu_queue_ctrl(iommu, &iommu->fltq, ctrl);
+		dev_warn(iommu->dev, "RIO Event: fault: %d full: %d\n",
+			 !!(ctrl & RIO_FQ_FAULT), !!(ctrl & RIO_FQ_FULL));
+	}
+
+	/* Report fault events. */
+	do {
+		cnt = riscv_iommu_queue_consume(iommu, q, &idx);
+		if (!cnt)
+			break;
+		for (len = 0; len < cnt; idx++, len++)
+			riscv_iommu_fault_report(iommu, &events[idx]);
+		riscv_iommu_queue_release(iommu, q, cnt);
+		cpu_relax();
+	} while (1);
+
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t riscv_iommu_pq_thread(int irq, void *data)
+static void riscv_iommu_page_request(struct riscv_iommu_device *iommu,
+		struct riscv_iommu_page_request *req)
 {
-	struct riscv_iommu_device *iommu = (struct riscv_iommu_device *)data;
-	/* TODO: merge dev/iopf */
+    /* TODO: merge IOPF */
+}
+
+static irqreturn_t riscv_iommu_page_request_handler(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu;
+	struct riscv_iommu_page_request *requests;
+	unsigned cnt, len, idx, ctrl;
+
+ 	iommu = container_of(q, struct riscv_iommu_device, priq);
+	requests = (struct riscv_iommu_page_request *) q->base;
+
+	/* Clear page request interrupt pending. */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_PQIP);
+
+	/* Error reporting, clear error reports if any. */
+	ctrl = riscv_iommu_readl(iommu, RIO_REG_PQCSR);
+	if (ctrl & (RIO_PQ_FULL | RIO_PQ_FAULT)) {
+		riscv_iommu_queue_ctrl(iommu, &iommu->priq, ctrl);
+		dev_warn(iommu->dev, "RIO Page Request Queue: fault: %d full: %d\n",
+			 !!(ctrl & RIO_PQ_FAULT), !!(ctrl & RIO_PQ_FULL));
+	}
+
+	/* Process page requests. */
+	do {
+		cnt = riscv_iommu_queue_consume(iommu, q, &idx);
+		if (!cnt)
+			break;
+		for (len = 0; len < cnt; idx++, len++)
+			riscv_iommu_page_request(iommu, &requests[idx]);
+		riscv_iommu_queue_release(iommu, q, cnt);
+		cpu_relax();
+	} while (1);
+
 	return IRQ_HANDLED;
-}
-
-static int riscv_iommu_enable_cq(struct riscv_iommu_device *iommu)
-{
-	const size_t logsz = PAGE_SHIFT + CQ_ORDER -
-	    ilog2(sizeof(struct riscv_iommu_command));
-	unsigned long ptr;
-	int ret;
-
-	ptr = __get_free_pages(GFP_KERNEL | __GFP_ZERO, CQ_ORDER);
-	if (!ptr)
-		return -ENOMEM;
-
-	if (iommu->cq_irq < 0)
-		return -EINVAL;
-
-	ret = devm_request_threaded_irq(iommu->dev,
-					iommu->cq_irq, NULL,
-					riscv_iommu_cq_thread, IRQF_ONESHOT,
-					NULL, iommu);
-	if (ret) {
-		free_pages(ptr, CQ_ORDER);
-		return ret;
-	}
-
-	iommu->cq_mask = (1ULL << logsz) - 1;
-	iommu->cq = (struct riscv_iommu_command *)ptr;
-
-	riscv_iommu_writeq(iommu, RIO_REG_CQB, (logsz - 1) | phys_to_ppn(__pa(ptr)));
-	riscv_iommu_writel(iommu, RIO_REG_CQCSR, RIO_CQ_EN | RIO_CQ_IE);
-
-	return 0;
-}
-
-static void riscv_iommu_disable_cq(struct riscv_iommu_device *iommu)
-{
-	if (iommu->cq_irq >= 0) {
-		devm_free_irq(iommu->dev, iommu->cq_irq, iommu);
-	}
-	riscv_iommu_writel(iommu, RIO_REG_CQCSR, 0);
-	riscv_iommu_writeq(iommu, RIO_REG_CQB, 0ULL);
-	/* TODO: merge dev/inval */
-	free_pages((unsigned long)iommu->cq, CQ_ORDER);
-	iommu->cq_mask = 0;
-	iommu->cq = 0;
-}
-
-static int riscv_iommu_enable_fq(struct riscv_iommu_device *iommu)
-{
-	const size_t logsz = PAGE_SHIFT + FQ_ORDER -
-	    ilog2(sizeof(struct riscv_iommu_event));
-	unsigned long ptr;
-	int ret;
-
-	if (iommu->fq_irq < 0)
-		return -EINVAL;
-
-	ptr = __get_free_pages(GFP_KERNEL | __GFP_ZERO, FQ_ORDER);
-	if (!ptr)
-		return -ENOMEM;
-
-	ret = devm_request_threaded_irq(iommu->dev,
-					iommu->fq_irq, NULL,
-					riscv_iommu_fq_thread, IRQF_ONESHOT,
-					NULL, iommu);
-	if (ret) {
-		free_pages(ptr, FQ_ORDER);
-		return ret;
-	}
-
-	iommu->fq_mask = (1ULL << logsz) - 1;
-	iommu->fq = (struct riscv_iommu_event *)ptr;
-
-	riscv_iommu_writeq(iommu, RIO_REG_FQB, (logsz - 1) | phys_to_ppn(__pa(ptr)));
-	riscv_iommu_writel(iommu, RIO_REG_FQCSR, RIO_FQ_EN | RIO_FQ_IE);
-
-	return 0;
-}
-
-static void riscv_iommu_disable_fq(struct riscv_iommu_device *iommu)
-{
-	if (iommu->fq_irq >= 0) {
-		devm_free_irq(iommu->dev, iommu->fq_irq, iommu);
-	}
-	riscv_iommu_writel(iommu, RIO_REG_FQCSR, 0);
-	riscv_iommu_writeq(iommu, RIO_REG_FQB, 0ULL);
-
-	free_pages((unsigned long)iommu->fq, FQ_ORDER);
-
-	iommu->fq_mask = 0;
-	iommu->fq = 0;
-}
-
-static int riscv_iommu_enable_pq(struct riscv_iommu_device *iommu)
-{
-	const size_t logsz = PAGE_SHIFT + PQ_ORDER -
-	    ilog2(sizeof(struct riscv_iommu_page_request));
-	unsigned long ptr;
-	struct iopf_queue *iopf;
-	int ret;
-
-	if (iommu->pq_irq < 0)
-		return -EINVAL;
-
-	ptr = __get_free_pages(GFP_KERNEL | __GFP_ZERO, PQ_ORDER);
-	if (!ptr)
-		return -ENOMEM;
-
-	iopf = iopf_queue_alloc(dev_name(iommu->dev));
-	if (!iopf) {
-		free_pages(ptr, PQ_ORDER);
-		return -ENOMEM;
-	}
-
-	ret = devm_request_threaded_irq(iommu->dev,
-					iommu->pq_irq, NULL,
-					riscv_iommu_pq_thread, IRQF_ONESHOT,
-					NULL, iommu);
-	if (ret) {
-		iopf_queue_free(iopf);
-		free_pages(ptr, PQ_ORDER);
-		return ret;
-	}
-
-	iommu->pq_work = iopf;
-	iommu->pq_mask = (1ULL << logsz) - 1;
-	iommu->pq = (struct riscv_iommu_page_request *)ptr;
-
-	riscv_iommu_writeq(iommu, RIO_REG_PQB, (logsz - 1) | phys_to_ppn(__pa(ptr)));
-	riscv_iommu_writel(iommu, RIO_REG_PQCSR, RIO_PQ_EN | RIO_PQ_IE);
-
-	return 0;
-}
-
-static void riscv_iommu_disable_pq(struct riscv_iommu_device *iommu)
-{
-	riscv_iommu_writel(iommu, RIO_REG_FQCSR, 0);
-	riscv_iommu_writeq(iommu, RIO_REG_FQB, 0ULL);
-
-	if (iommu->fq_irq >= 0) {
-		devm_free_irq(iommu->dev, iommu->fq_irq, iommu);
-	}
-
-	if (iommu->pq_work) {
-		iopf_queue_free(iommu->pq_work);
-		iommu->pq_work = NULL;
-	}
-
-	free_pages((unsigned long)iommu->fq, PQ_ORDER);
-
-	iommu->fq_mask = 0;
-	iommu->fq = 0;
 }
 
 static int riscv_iommu_wait_ddtp_ready(struct riscv_iommu_device *iommu)
@@ -1492,9 +1463,9 @@ const struct attribute_group *riscv_iommu_groups[] = {
 static void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 {
 	riscv_iommu_disable_dd(iommu);
-	riscv_iommu_disable_pq(iommu);
-	riscv_iommu_disable_cq(iommu);
-	riscv_iommu_disable_fq(iommu);
+	riscv_iommu_queue_free(iommu, &iommu->priq);
+	riscv_iommu_queue_free(iommu, &iommu->fltq);
+	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	iommu_device_unregister(&iommu->iommu);
 	iommu_device_sysfs_remove(&iommu->iommu);
 	free_pages(iommu->sync, 0);
@@ -1551,38 +1522,37 @@ static int riscv_iommu_probe(struct device *dev,
 
 	if (dev_is_pci(dev)) {
 		struct pci_dev *pdev = to_pci_dev(dev);
-		iommu->cq_irq = pci_irq_vector(pdev, RIO_INT_CQ);
-		iommu->fq_irq = pci_irq_vector(pdev, RIO_INT_FQ);
-		iommu->pq_irq = pci_irq_vector(pdev, RIO_INT_PQ);
+		riscv_iommu_writel(iommu, RIO_REG_IVEC, 0x3210);
+		iommu->cmdq.irq = pci_irq_vector(pdev, RIO_INT_CQ);
+		iommu->fltq.irq = pci_irq_vector(pdev, RIO_INT_FQ);
+		iommu->priq.irq = pci_irq_vector(pdev, RIO_INT_PQ);
 	} else {
-		/* TODO: enable wired interrupt mapping or MSI if supported */
-		iommu->cq_irq = -1;
-		iommu->fq_irq = -1;
-		iommu->pq_irq = -1;
+		dev_err(dev, "wire signalled interrupt not supported\n");
+		goto fail;
 	}
 
-	ret = riscv_iommu_enable_fq(iommu);
-	if (ret < 0) {
-		dev_err(dev, "cannot enable fault queue (%d)\n", ret);
-		goto err_fq;
-	}
+	ret = riscv_iommu_queue_init(iommu, &iommu->cmdq, CQ_COUNT,
+			sizeof(struct riscv_iommu_command), RIO_REG_CQB, RIO_REG_CQCSR,
+			riscv_iommu_cmdq_handler, "cmdq");
+	if (ret)
+		goto fail;
 
-	ret = riscv_iommu_enable_cq(iommu);
-	if (ret < 0) {
-		dev_err(dev, "cannot enable command queue (%d)\n", ret);
-		goto err_cq;
-	}
+	ret = riscv_iommu_queue_init(iommu, &iommu->fltq, FQ_COUNT,
+			sizeof(struct riscv_iommu_event), RIO_REG_FQB, RIO_REG_FQCSR,
+			riscv_iommu_fault_handler, "fltq");
+	if (ret)
+		goto fail;
 
-	ret = riscv_iommu_enable_pq(iommu);
-	if (ret < 0) {
-		dev_err(dev, "cannot enable page request queue (%d)\n", ret);
-		goto err_pq;
-	}
+	ret = riscv_iommu_queue_init(iommu, &iommu->priq, PQ_COUNT,
+			sizeof(struct riscv_iommu_page_request), RIO_REG_PQB, RIO_REG_PQCSR,
+			riscv_iommu_page_request_handler, "priq");
+	if (ret)
+		goto fail;
 
 	ret = riscv_iommu_enable_dd(iommu);
 	if (ret < 0) {
 		dev_err(dev, "cannot enable iommu device (%d)\n", ret);
-		goto err_dd;
+		goto fail;
 	}
 
 	// FIXME: use IOMMU capabilities to enable PASID
@@ -1592,30 +1562,26 @@ static int riscv_iommu_probe(struct device *dev,
 				     "riscv-iommu@%llx", iommu->reg_phys);
 	if (ret < 0) {
 		dev_err(dev, "cannot register sysfs interface (%d)\n", ret);
-		goto err_sysfs;
+		goto fail;
 	}
 
 	ret = iommu_device_register(&iommu->iommu, &riscv_iommu_ops, dev);
 	if (ret < 0) {
 		dev_err(dev, "cannot register iommu interface (%d)\n", ret);
-		goto err_ops;
+		goto fail_sysfs;
 	}
 
 	dev_set_drvdata(dev, iommu);
 
 	return 0;
 
- err_ops:
+fail_sysfs:
 	iommu_device_sysfs_remove(&iommu->iommu);
- err_sysfs:
+fail:
 	riscv_iommu_disable_dd(iommu);
- err_dd:
-	riscv_iommu_disable_pq(iommu);
- err_pq:
-	riscv_iommu_disable_cq(iommu);
- err_cq:
-	riscv_iommu_disable_fq(iommu);
- err_fq:
+	riscv_iommu_queue_free(iommu, &iommu->priq);
+	riscv_iommu_queue_free(iommu, &iommu->fltq);
+	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	iounmap(iommu->reg);
 	free_pages(iommu->sync, 0);
 	free_pages(iommu->zero, 0);
