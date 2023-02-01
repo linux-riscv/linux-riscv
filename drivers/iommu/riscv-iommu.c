@@ -23,13 +23,13 @@
 #include <linux/uaccess.h>
 #include <linux/iommu.h>
 #include <linux/platform_device.h>
-#include <linux/riscv-iommu.h>
 #include <linux/dma-map-ops.h>
 #include <asm/page.h>
 
 
 #include "dma-iommu.h"
 #include "iommu-sva.h"
+#include "riscv-iommu.h"
 
 #include <asm/csr.h>
 #include <asm/delay.h>
@@ -112,63 +112,63 @@ static inline void __reg_set32(struct riscv_iommu *iommu, unsigned r, u32 v)
 
 static void __cmd_iodir_all(struct riscv_iommu_command *cmd)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IODIR);
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IODIR_DDT);
 	cmd->address = 0;
 }
 
 static void __cmd_iodir_devid(struct riscv_iommu_command *cmd, unsigned devid)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IODIR) |
-	    FIELD_PREP(RIO_IODIR_MASK_DID, devid) | RIO_IODIR_DID_VALID;
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IODIR_DDT) |
+	    FIELD_PREP(RIO_IODIR_DID, devid) | RIO_IODIR_DV;
 	cmd->address = 0;
 }
 
 static void __cmd_iodir_pasid(struct riscv_iommu_command *cmd, unsigned devid,
 			      unsigned pasid)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IODIR) |
-	    FIELD_PREP(RIO_IODIR_MASK_DID, devid) | RIO_IODIR_DID_VALID |
-	    FIELD_PREP(RIO_IODIR_MASK_PID, pasid) | RIO_IODIR_PID_VALID;
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IODIR_PDT) |
+	    FIELD_PREP(RIO_IODIR_DID, devid) | RIO_IODIR_DV |
+	    FIELD_PREP(RIO_IODIR_PID, pasid);
 	cmd->address = 0;
 }
 
 static void __cmd_inval_vma(struct riscv_iommu_command *cmd)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IOTINVAL_VMA);
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IOTINVAL_VMA);
 	cmd->address = 0;
 }
 
 static void __cmd_inval_set_addr(struct riscv_iommu_command *cmd, u64 addr)
 {
-	cmd->request |= RIO_IOTINVAL_ADDR_VALID;
+	cmd->request |= RIO_IOTINVAL_AV;
 	cmd->address = addr;
 }
 
 static void __cmd_inval_set_pscid(struct riscv_iommu_command *cmd,
 				  unsigned pscid)
 {
-	cmd->request |= FIELD_PREP(RIO_IOTINVAL_MASK_PSCID, pscid) |
-	    RIO_IOTINVAL_PSCID_VALID;
+	cmd->request |= FIELD_PREP(RIO_IOTINVAL_PSCID, pscid) |
+	    RIO_IOTINVAL_PSCV;
 }
 
 static void __cmd_inval_set_gscid(struct riscv_iommu_command *cmd,
 				  unsigned gscid)
 {
-	cmd->request |= FIELD_PREP(RIO_IOTINVAL_MASK_GSCID, gscid) |
-	    RIO_IOTINVAL_GSCID_VALID;
+	cmd->request |= FIELD_PREP(RIO_IOTINVAL_GSCID, gscid) |
+	    RIO_IOTINVAL_GV;
 }
 
 static void __cmd_iofence(struct riscv_iommu_command *cmd)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IOFENCE_C);
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IOFENCE_C);
 	cmd->address = 0;
 }
 
 static void __cmd_iofence_set_av(struct riscv_iommu_command *cmd, u64 addr,
 				 u32 data)
 {
-	cmd->request = FIELD_PREP(RIO_CMD_MASK_FUN_OP, RIO_CMD_IOFENCE_C) |
-	    FIELD_PREP(RIO_IOFENCE_MASK_DATA, data) | RIO_IOFENCE_AV;
+	cmd->request = FIELD_PREP(RIO_CMD_OP, RIO_CMD_IOFENCE_C) |
+	    FIELD_PREP(RIO_IOFENCE_DATA, data) | RIO_IOFENCE_AV;
 	cmd->address = addr;
 }
 
@@ -428,7 +428,7 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
 	}
 
 	val = virt_to_pfn(domain->msi_root) |
-			FIELD_PREP(RIO_DCMSI_MASK_MODE, RIO_DCMSI_MODE_FLAT);
+			FIELD_PREP(RIO_DCMSI_MODE, RIO_DCMSI_MODE_FLAT);
 	ep->dc->msiptp = cpu_to_le64(val);
 
 	/* Single page of MSIPTP, 256 IMSIC files */
@@ -438,7 +438,7 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
  skip_msiptp:
 
 	/* FIXME: verify spec if TA.V is required. */
-	val = FIELD_PREP(RIO_PCTA_MASK_PSCID, ep->pscid) | RIO_PCTA_V;
+	val = FIELD_PREP(RIO_PCTA_PSCID, ep->pscid) | RIO_PCTA_V;
 	ep->dc->ta = cpu_to_le64(val);
 
 	/* Mark device context as valid */
@@ -527,7 +527,7 @@ static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct devic
 		return -ENOMEM;
 
 	/* Use PASID for PSCID tag */
-	pc[pasid].ta = cpu_to_le64(FIELD_PREP(RIO_PCTA_MASK_PSCID, pasid) |
+	pc[pasid].ta = cpu_to_le64(FIELD_PREP(RIO_PCTA_PSCID, pasid) |
 				   RIO_PCTA_V);
 	pc[pasid].fsc = cpu_to_le64(virt_to_pfn(mm->pgd) | SATP_MODE);
 
@@ -538,7 +538,7 @@ static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct devic
 		pc[0].fsc = dc->fsc;
 
 		dc->fsc = cpu_to_le64(virt_to_pfn(pc) |
-				FIELD_PREP(RIO_ATP_MASK_MODE, RIO_PDTP_MODE_PD8));
+				FIELD_PREP(RIO_ATP_MODE, RIO_PDTP_MODE_PD8));
 		dc->tc = cpu_to_le64(RIO_DCTC_PDTV | RIO_DCTC_EN_ATS | RIO_DCTC_VALID);
 		ep->pc = pc;
 		wmb();
@@ -1085,8 +1085,8 @@ static void riscv_iommu_report_event(struct riscv_iommu *iommu, int idx)
 	unsigned bdf, err;
 
 	if (printk_ratelimit()) {
-		bdf = FIELD_GET(RIO_EVENT_MASK_DID, event->reason);
-		err = FIELD_GET(RIO_EVENT_MASK_CAUSE, event->reason);
+		bdf = FIELD_GET(RIO_EVENT_DID, event->reason);
+		err = FIELD_GET(RIO_EVENT_CAUSE, event->reason);
 
 		dev_warn(iommu->dev, "RIO Event: "
 			 "cause: %d bdf: %04x:%02x.%x iova: %llx gpa: %llx\n",
@@ -1322,7 +1322,7 @@ static int riscv_iommu_enable_dd(struct riscv_iommu *iommu)
 
 	/* IOMMU must be either disabled or in pass-through mode. */
 	ddtp = __reg_get64(iommu, RIO_REG_DDTP);
-	switch (FIELD_GET(RIO_DDTP_MASK_MODE, ddtp)) {
+	switch (FIELD_GET(RIO_DDTP_MODE, ddtp)) {
 	case RIO_DDTP_MODE_BARE:
 	case RIO_DDTP_MODE_OFF:
 		break;
@@ -1333,7 +1333,7 @@ static int riscv_iommu_enable_dd(struct riscv_iommu *iommu)
 	if (iommu_default_passthrough() && ddt_mode == RIO_DDTP_MODE_BARE) {
 		/* Disable IOMMU translation, enable pass-through mode. */
 		iommu->ddt_mode = RIO_DDTP_MODE_BARE;
-		ddtp = FIELD_PREP(RIO_DDTP_MASK_MODE, RIO_DDTP_MODE_BARE);
+		ddtp = FIELD_PREP(RIO_DDTP_MODE, RIO_DDTP_MODE_BARE);
 	} else {
 		switch (ddt_mode) {
 		case RIO_DDTP_MODE_1LVL:
