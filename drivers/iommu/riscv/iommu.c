@@ -26,7 +26,6 @@
 #include <linux/dma-map-ops.h>
 #include <asm/page.h>
 
-
 #include "../dma-iommu.h"
 #include "../iommu-sva.h"
 #include "iommu.h"
@@ -135,8 +134,7 @@ static void __cmd_inval_set_pscid(struct riscv_iommu_command *cmd,
 static void __cmd_inval_set_gscid(struct riscv_iommu_command *cmd,
 				  unsigned gscid)
 {
-	cmd->request |= FIELD_PREP(RIO_IOTINVAL_GSCID, gscid) |
-	    RIO_IOTINVAL_GV;
+	cmd->request |= FIELD_PREP(RIO_IOTINVAL_GSCID, gscid) | RIO_IOTINVAL_GV;
 }
 
 static void __cmd_iofence(struct riscv_iommu_command *cmd)
@@ -154,8 +152,8 @@ static void __cmd_iofence_set_av(struct riscv_iommu_command *cmd, u64 addr,
 }
 
 /* Lookup or initialize device directory info structure. */
-static struct riscv_iommu_dc *riscv_iommu_get_dc(struct riscv_iommu_device *iommu,
-						 unsigned device_id)
+static struct riscv_iommu_dc *riscv_iommu_get_dc(struct riscv_iommu_device
+						 *iommu, unsigned device_id)
 {
 	const bool dc32 = iommu->dc_format32;
 	unsigned depth = iommu->ddt_mode - RIO_DDTP_MODE_1LVL;
@@ -204,11 +202,14 @@ static bool riscv_iommu_post(struct riscv_iommu_device *iommu,
 		/* TRY AGAIN */
 		dev_err(iommu->dev, "IOMMU CQT: %x != %x (1st)\n", last, tail);
 		spin_lock_irqsave(&iommu->cq_lock, flags);
-		tail = riscv_iommu_readl(iommu, RIO_REG_CQT) & (iommu->cmdq.cnt - 1);
+		tail =
+		    riscv_iommu_readl(iommu,
+				      RIO_REG_CQT) & (iommu->cmdq.cnt - 1);
 		last = iommu->cmdq.lui;
 		if (tail != last) {
 			spin_unlock_irqrestore(&iommu->cq_lock, flags);
-			dev_err(iommu->dev, "IOMMU CQT: %x != %x (2nd)\n", last, tail);
+			dev_err(iommu->dev, "IOMMU CQT: %x != %x (2nd)\n", last,
+				tail);
 			spin_lock_irqsave(&iommu->cq_lock, flags);
 		}
 	}
@@ -402,7 +403,7 @@ static int riscv_iommu_attach_dev(struct iommu_domain *dom, struct device *dev)
 	}
 
 	val = virt_to_pfn(domain->msi_root) |
-			FIELD_PREP(RIO_DCMSI_MODE, RIO_DCMSI_MODE_FLAT);
+	    FIELD_PREP(RIO_DCMSI_MODE, RIO_DCMSI_MODE_FLAT);
 	ep->dc->msiptp = cpu_to_le64(val);
 
 	/* Single page of MSIPTP, 256 IMSIC files */
@@ -432,7 +433,9 @@ struct riscv_iommu_sva {
 	refcount_t refs;
 };
 
-static void ___riscv_iommu_sva_remove_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+static void ___riscv_iommu_sva_remove_dev_pasid(struct iommu_domain *domain,
+						struct device *dev,
+						ioasid_t pasid)
 {
 	struct mm_struct *mm = domain->mm;
 	struct riscv_iommu_sva *sva = NULL, *i;
@@ -468,7 +471,8 @@ static void ___riscv_iommu_sva_remove_dev_pasid(struct iommu_domain *domain, str
 	}
 }
 
-static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain,
+				       struct device *dev, ioasid_t pasid)
 {
 	struct mm_struct *mm = domain->mm;
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
@@ -512,8 +516,11 @@ static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct devic
 		pc[0].fsc = dc->fsc;
 
 		dc->fsc = cpu_to_le64(virt_to_pfn(pc) |
-				FIELD_PREP(RIO_ATP_MODE, RIO_PDTP_MODE_PD8));
-		dc->tc = cpu_to_le64(RIO_DCTC_PDTV | RIO_DCTC_EN_ATS | RIO_DCTC_VALID);
+				      FIELD_PREP(RIO_ATP_MODE,
+						 RIO_PDTP_MODE_PD8));
+		dc->tc =
+		    cpu_to_le64(RIO_DCTC_PDTV | RIO_DCTC_EN_ATS |
+				RIO_DCTC_VALID);
 		ep->pc = pc;
 		wmb();
 
@@ -529,14 +536,15 @@ static int __riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct devic
 	return 0;
 }
 
-static int riscv_iommu_set_dev_pasid(struct iommu_domain *domain, struct device *dev, ioasid_t pasid)
+static int riscv_iommu_set_dev_pasid(struct iommu_domain *domain,
+				     struct device *dev, ioasid_t pasid)
 {
 	int ret;
-//	struct mm_struct *mm = domain->mm;
+//      struct mm_struct *mm = domain->mm;
 
-//	mutex_lock(&sva_lock);
+//      mutex_lock(&sva_lock);
 	ret = __riscv_iommu_set_dev_pasid(domain, dev, pasid);
-//	mutex_unlock(&sva_lock);
+//      mutex_unlock(&sva_lock);
 
 	return ret;
 }
@@ -574,8 +582,7 @@ static struct iommu_domain *riscv_iommu_domain_alloc(unsigned type)
 	if (type != IOMMU_DOMAIN_DMA &&
 	    type != IOMMU_DOMAIN_DMA_FQ &&
 	    type != IOMMU_DOMAIN_UNMANAGED &&
-	    type != IOMMU_DOMAIN_IDENTITY &&
-		type != IOMMU_DOMAIN_BLOCKED)
+	    type != IOMMU_DOMAIN_IDENTITY && type != IOMMU_DOMAIN_BLOCKED)
 		return NULL;
 
 	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
@@ -1000,8 +1007,8 @@ static int riscv_iommu_dev_disable_feat(struct device *dev,
 }
 
 static int riscv_iommu_page_response(struct device *dev,
-			      struct iommu_fault_event *evt,
-			      struct iommu_page_response *msg)
+				     struct iommu_fault_event *evt,
+				     struct iommu_page_response *msg)
 {
 	/* TODO: merge dev/iopf */
 	return -ENODEV;
@@ -1049,15 +1056,16 @@ static const struct iommu_ops riscv_iommu_ops = {
 	.page_response = riscv_iommu_page_response,
 	.default_domain_ops = &riscv_iommu_domain_ops,
 	// N/A
-	//	bool (*is_attach_deferred)(struct device *dev);
-	//	int (*def_domain_type)(struct device *dev);
+	//      bool (*is_attach_deferred)(struct device *dev);
+	//      int (*def_domain_type)(struct device *dev);
 };
 
 #define Q_HEAD(q) ((q)->qbr + (RIO_REG_CQH - RIO_REG_CQB))
 #define Q_TAIL(q) ((q)->qbr + (RIO_REG_CQT - RIO_REG_CQB))
 
 static unsigned riscv_iommu_queue_consume(struct riscv_iommu_device *iommu,
-	struct riscv_iommu_queue *q, unsigned *ready)
+					  struct riscv_iommu_queue *q,
+					  unsigned *ready)
 {
 	u32 tail = riscv_iommu_readl(iommu, Q_TAIL(q));
 	*ready = q->lui;
@@ -1069,14 +1077,15 @@ static unsigned riscv_iommu_queue_consume(struct riscv_iommu_device *iommu,
 }
 
 static void riscv_iommu_queue_release(struct riscv_iommu_device *iommu,
-	struct riscv_iommu_queue *q, unsigned count)
+				      struct riscv_iommu_queue *q,
+				      unsigned count)
 {
 	q->lui = (q->lui + count) & (q->cnt - 1);
 	riscv_iommu_writel(iommu, Q_HEAD(q), q->lui);
 }
 
 static u32 riscv_iommu_queue_ctrl(struct riscv_iommu_device *iommu,
-	struct riscv_iommu_queue *q, u32 val)
+				  struct riscv_iommu_queue *q, u32 val)
 {
 	cycles_t end_cycles = RISCV_IOMMU_TIMEOUT + get_cycles();
 
@@ -1092,8 +1101,9 @@ static u32 riscv_iommu_queue_ctrl(struct riscv_iommu_device *iommu,
 }
 
 static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
-	struct riscv_iommu_queue *q, unsigned count, size_t item_size,
-	unsigned qbr, unsigned qcr, irq_handler_t irq_fn, const char *name)
+				  struct riscv_iommu_queue *q, unsigned count,
+				  size_t item_size, unsigned qbr, unsigned qcr,
+				  irq_handler_t irq_fn, const char *name)
 {
 	unsigned order = ilog2(count);
 
@@ -1108,18 +1118,21 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 	} while (1);
 
 	if (!q->base) {
-		dev_err(iommu->dev, "failed to allocate %s queue (count: %u)\n", name, count);
+		dev_err(iommu->dev, "failed to allocate %s queue (count: %u)\n",
+			name, count);
 		return -ENOMEM;
 	}
 
 	q->len = item_size;
 	q->cnt = 1ULL << order;
-	q->qbr = qbr;	/* queue base register */
-	q->qcr = qcr;	/* queue control and status register */
+	q->qbr = qbr;		/* queue base register */
+	q->qcr = qcr;		/* queue control and status register */
 
 	/* TODO: CPU affinity for queue handlers */
-	if (request_threaded_irq(q->irq, NULL, irq_fn, IRQF_ONESHOT, dev_name(iommu->dev), q)) {
-		dev_err(iommu->dev, "failt to request irq %d for %s\n", q->irq, name);
+	if (request_threaded_irq
+	    (q->irq, NULL, irq_fn, IRQF_ONESHOT, dev_name(iommu->dev), q)) {
+		dev_err(iommu->dev, "failt to request irq %d for %s\n", q->irq,
+			name);
 		return -ENOMEM;
 	}
 
@@ -1131,7 +1144,8 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 	return 0;
 }
 
-static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu, struct riscv_iommu_queue *q)
+static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu,
+				   struct riscv_iommu_queue *q)
 {
 	size_t size = q->len * q->cnt;
 
@@ -1145,14 +1159,15 @@ static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu, struct risc
 
 static irqreturn_t riscv_iommu_cmdq_handler(int irq, void *data)
 {
-	struct riscv_iommu_device *iommu = container_of(data, struct riscv_iommu_device, cmdq);
+	struct riscv_iommu_device *iommu =
+	    container_of(data, struct riscv_iommu_device, cmdq);
 	/* TODO: merge dev/inval */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_CQIP);
 	return IRQ_HANDLED;
 }
 
 static void riscv_iommu_fault_report(struct riscv_iommu_device *iommu,
-		struct riscv_iommu_event *event)
+				     struct riscv_iommu_event *event)
 {
 	if (printk_ratelimit()) {
 		unsigned bdf, err;
@@ -1160,9 +1175,9 @@ static void riscv_iommu_fault_report(struct riscv_iommu_device *iommu,
 		err = FIELD_GET(RIO_EVENT_CAUSE, event->reason);
 
 		dev_warn(iommu->dev, "RIO Event: "
-			"cause: %d bdf: %04x:%02x.%x iova: %llx gpa: %llx\n",
-			err, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf),
-			event->iova, event->phys);
+			 "cause: %d bdf: %04x:%02x.%x iova: %llx gpa: %llx\n",
+			 err, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf),
+			 event->iova, event->phys);
 	}
 }
 
@@ -1173,8 +1188,8 @@ static irqreturn_t riscv_iommu_fault_handler(int irq, void *data)
 	struct riscv_iommu_event *events;
 	unsigned cnt, len, idx, ctrl;
 
- 	iommu = container_of(q, struct riscv_iommu_device, fltq);
-	events = (struct riscv_iommu_event *) q->base;
+	iommu = container_of(q, struct riscv_iommu_device, fltq);
+	events = (struct riscv_iommu_event *)q->base;
 
 	/* Clear fault interrupt pending. */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_FQIP);
@@ -1202,9 +1217,9 @@ static irqreturn_t riscv_iommu_fault_handler(int irq, void *data)
 }
 
 static void riscv_iommu_page_request(struct riscv_iommu_device *iommu,
-		struct riscv_iommu_page_request *req)
+				     struct riscv_iommu_page_request *req)
 {
-    /* TODO: merge IOPF */
+	/* TODO: merge IOPF */
 }
 
 static irqreturn_t riscv_iommu_page_request_handler(int irq, void *data)
@@ -1214,8 +1229,8 @@ static irqreturn_t riscv_iommu_page_request_handler(int irq, void *data)
 	struct riscv_iommu_page_request *requests;
 	unsigned cnt, len, idx, ctrl;
 
- 	iommu = container_of(q, struct riscv_iommu_device, priq);
-	requests = (struct riscv_iommu_page_request *) q->base;
+	iommu = container_of(q, struct riscv_iommu_device, priq);
+	requests = (struct riscv_iommu_page_request *)q->base;
 
 	/* Clear page request interrupt pending. */
 	riscv_iommu_writel(iommu, RIO_REG_IPSR, RIO_IPSR_PQIP);
@@ -1224,7 +1239,8 @@ static irqreturn_t riscv_iommu_page_request_handler(int irq, void *data)
 	ctrl = riscv_iommu_readl(iommu, RIO_REG_PQCSR);
 	if (ctrl & (RIO_PQ_FULL | RIO_PQ_FAULT)) {
 		riscv_iommu_queue_ctrl(iommu, &iommu->priq, ctrl);
-		dev_warn(iommu->dev, "RIO Page Request Queue: fault: %d full: %d\n",
+		dev_warn(iommu->dev,
+			 "RIO Page Request Queue: fault: %d full: %d\n",
 			 !!(ctrl & RIO_PQ_FAULT), !!(ctrl & RIO_PQ_FULL));
 	}
 
@@ -1294,7 +1310,7 @@ static int riscv_iommu_enable_dd(struct riscv_iommu_device *iommu)
 		default:
 			return -EINVAL;
 		}
-		ddtp = (u64)iommu->ddt_mode | phys_to_ppn(__pa(iommu->ddtp));
+		ddtp = (u64) iommu->ddt_mode | phys_to_ppn(__pa(iommu->ddtp));
 	}
 
 	if (riscv_iommu_wait_ddtp_ready(iommu))
@@ -1367,52 +1383,52 @@ static DEVICE_ATTR_RO(address);
 
 #define ATTR_RO_REG32(name, offset)					\
 static ATTR_RD_REG32(name, offset)					\
-static DEVICE_ATTR_RO(reg_ ## name);
+static DEVICE_ATTR_RO(reg_ ## name)
 
 #define ATTR_RW_REG32(name, offset)					\
 static ATTR_RD_REG32(name, offset)					\
 static ATTR_WR_REG32(name, offset)					\
-static DEVICE_ATTR_RW(reg_ ## name);
+static DEVICE_ATTR_RW(reg_ ## name)
 
 #define ATTR_RO_REG64(name, offset)					\
 static ATTR_RD_REG64(name, offset)					\
-static DEVICE_ATTR_RO(reg_ ## name);
+static DEVICE_ATTR_RO(reg_ ## name)
 
 #define ATTR_RW_REG64(name, offset)					\
 static ATTR_RD_REG64(name, offset)					\
 static ATTR_WR_REG64(name, offset)					\
-static DEVICE_ATTR_RW(reg_ ## name);
+static DEVICE_ATTR_RW(reg_ ## name)
 
-ATTR_RO_REG64(cap, RIO_REG_CAP)
-ATTR_RO_REG64(fctl, RIO_REG_FCTL)
-ATTR_RO_REG32(cqh, RIO_REG_CQH)
-ATTR_RO_REG32(cqt, RIO_REG_CQT)
-ATTR_RO_REG32(cqcsr, RIO_REG_CQCSR)
-ATTR_RO_REG32(fqh, RIO_REG_FQH)
-ATTR_RO_REG32(fqt, RIO_REG_FQT)
-ATTR_RO_REG32(fqcsr, RIO_REG_FQCSR)
-ATTR_RO_REG32(pqh, RIO_REG_PQH)
-ATTR_RO_REG32(pqt, RIO_REG_PQT)
-ATTR_RO_REG32(pqcsr, RIO_REG_PQCSR)
-ATTR_RO_REG32(ipsr, RIO_REG_IPSR)
-ATTR_RO_REG32(ivec, RIO_REG_IVEC)
-ATTR_RW_REG32(iocntovf, RIO_REG_IOCNTOVF)
-ATTR_RW_REG32(iocntinh, RIO_REG_IOCNTINH)
-ATTR_RW_REG64(iohpmcycles, RIO_REG_IOHPMCYCLES)
-ATTR_RW_REG64(iohpmevt_1, RIO_REG_IOHPMEVT_BASE + 0x00)
-ATTR_RW_REG64(iohpmevt_2, RIO_REG_IOHPMEVT_BASE + 0x08)
-ATTR_RW_REG64(iohpmevt_3, RIO_REG_IOHPMEVT_BASE + 0x10)
-ATTR_RW_REG64(iohpmevt_4, RIO_REG_IOHPMEVT_BASE + 0x18)
-ATTR_RW_REG64(iohpmevt_5, RIO_REG_IOHPMEVT_BASE + 0x20)
-ATTR_RW_REG64(iohpmevt_6, RIO_REG_IOHPMEVT_BASE + 0x28)
-ATTR_RW_REG64(iohpmevt_7, RIO_REG_IOHPMEVT_BASE + 0x30)
-ATTR_RW_REG64(iohpmctr_1, RIO_REG_IOHPMCTR_BASE + 0x00)
-ATTR_RW_REG64(iohpmctr_2, RIO_REG_IOHPMCTR_BASE + 0x08)
-ATTR_RW_REG64(iohpmctr_3, RIO_REG_IOHPMCTR_BASE + 0x10)
-ATTR_RW_REG64(iohpmctr_4, RIO_REG_IOHPMCTR_BASE + 0x18)
-ATTR_RW_REG64(iohpmctr_5, RIO_REG_IOHPMCTR_BASE + 0x20)
-ATTR_RW_REG64(iohpmctr_6, RIO_REG_IOHPMCTR_BASE + 0x28)
-ATTR_RW_REG64(iohpmctr_7, RIO_REG_IOHPMCTR_BASE + 0x30)
+ATTR_RO_REG64(cap, RIO_REG_CAP);
+ATTR_RO_REG64(fctl, RIO_REG_FCTL);
+ATTR_RO_REG32(cqh, RIO_REG_CQH);
+ATTR_RO_REG32(cqt, RIO_REG_CQT);
+ATTR_RO_REG32(cqcsr, RIO_REG_CQCSR);
+ATTR_RO_REG32(fqh, RIO_REG_FQH);
+ATTR_RO_REG32(fqt, RIO_REG_FQT);
+ATTR_RO_REG32(fqcsr, RIO_REG_FQCSR);
+ATTR_RO_REG32(pqh, RIO_REG_PQH);
+ATTR_RO_REG32(pqt, RIO_REG_PQT);
+ATTR_RO_REG32(pqcsr, RIO_REG_PQCSR);
+ATTR_RO_REG32(ipsr, RIO_REG_IPSR);
+ATTR_RO_REG32(ivec, RIO_REG_IVEC);
+ATTR_RW_REG32(iocntovf, RIO_REG_IOCNTOVF);
+ATTR_RW_REG32(iocntinh, RIO_REG_IOCNTINH);
+ATTR_RW_REG64(iohpmcycles, RIO_REG_IOHPMCYCLES);
+ATTR_RW_REG64(iohpmevt_1, RIO_REG_IOHPMEVT_BASE + 0x00);
+ATTR_RW_REG64(iohpmevt_2, RIO_REG_IOHPMEVT_BASE + 0x08);
+ATTR_RW_REG64(iohpmevt_3, RIO_REG_IOHPMEVT_BASE + 0x10);
+ATTR_RW_REG64(iohpmevt_4, RIO_REG_IOHPMEVT_BASE + 0x18);
+ATTR_RW_REG64(iohpmevt_5, RIO_REG_IOHPMEVT_BASE + 0x20);
+ATTR_RW_REG64(iohpmevt_6, RIO_REG_IOHPMEVT_BASE + 0x28);
+ATTR_RW_REG64(iohpmevt_7, RIO_REG_IOHPMEVT_BASE + 0x30);
+ATTR_RW_REG64(iohpmctr_1, RIO_REG_IOHPMCTR_BASE + 0x00);
+ATTR_RW_REG64(iohpmctr_2, RIO_REG_IOHPMCTR_BASE + 0x08);
+ATTR_RW_REG64(iohpmctr_3, RIO_REG_IOHPMCTR_BASE + 0x10);
+ATTR_RW_REG64(iohpmctr_4, RIO_REG_IOHPMCTR_BASE + 0x18);
+ATTR_RW_REG64(iohpmctr_5, RIO_REG_IOHPMCTR_BASE + 0x20);
+ATTR_RW_REG64(iohpmctr_6, RIO_REG_IOHPMCTR_BASE + 0x28);
+ATTR_RW_REG64(iohpmctr_7, RIO_REG_IOHPMCTR_BASE + 0x30);
 
 static struct attribute *riscv_iommu_attrs[] = {
 	&dev_attr_address.attr,
@@ -1532,20 +1548,23 @@ static int riscv_iommu_probe(struct device *dev,
 	}
 
 	ret = riscv_iommu_queue_init(iommu, &iommu->cmdq, CQ_COUNT,
-			sizeof(struct riscv_iommu_command), RIO_REG_CQB, RIO_REG_CQCSR,
-			riscv_iommu_cmdq_handler, "cmdq");
+				     sizeof(struct riscv_iommu_command),
+				     RIO_REG_CQB, RIO_REG_CQCSR,
+				     riscv_iommu_cmdq_handler, "cmdq");
 	if (ret)
 		goto fail;
 
 	ret = riscv_iommu_queue_init(iommu, &iommu->fltq, FQ_COUNT,
-			sizeof(struct riscv_iommu_event), RIO_REG_FQB, RIO_REG_FQCSR,
-			riscv_iommu_fault_handler, "fltq");
+				     sizeof(struct riscv_iommu_event),
+				     RIO_REG_FQB, RIO_REG_FQCSR,
+				     riscv_iommu_fault_handler, "fltq");
 	if (ret)
 		goto fail;
 
 	ret = riscv_iommu_queue_init(iommu, &iommu->priq, PQ_COUNT,
-			sizeof(struct riscv_iommu_page_request), RIO_REG_PQB, RIO_REG_PQCSR,
-			riscv_iommu_page_request_handler, "priq");
+				     sizeof(struct riscv_iommu_page_request),
+				     RIO_REG_PQB, RIO_REG_PQCSR,
+				     riscv_iommu_page_request_handler, "priq");
 	if (ret)
 		goto fail;
 
@@ -1554,7 +1573,6 @@ static int riscv_iommu_probe(struct device *dev,
 		dev_err(dev, "cannot enable iommu device (%d)\n", ret);
 		goto fail;
 	}
-
 	// FIXME: use IOMMU capabilities to enable PASID
 	iommu->iommu.max_pasids = 1u << 20;
 
@@ -1575,9 +1593,9 @@ static int riscv_iommu_probe(struct device *dev,
 
 	return 0;
 
-fail_sysfs:
+ fail_sysfs:
 	iommu_device_sysfs_remove(&iommu->iommu);
-fail:
+ fail:
 	riscv_iommu_disable_dd(iommu);
 	riscv_iommu_queue_free(iommu, &iommu->priq);
 	riscv_iommu_queue_free(iommu, &iommu->fltq);

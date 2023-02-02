@@ -21,8 +21,7 @@
 
 #include "iommu-bits.h"
 
-struct riscv_iommu_queue
-{
+struct riscv_iommu_queue {
 	dma_addr_t base_dma;
 	void *base;
 	u32 len;		/* single item length */
@@ -79,9 +78,9 @@ struct riscv_iommu_endpoint {
 	struct list_head s_list;
 	struct riscv_iommu_dc *dc;
 	struct riscv_iommu_pc *pc;
-	struct list_head regions;	// msi list
-	struct list_head bindings;	// sva list
-	unsigned device_id;		// shall
+	struct list_head regions;
+	struct list_head bindings;
+	unsigned device_id;
 	unsigned pasid_bits;	/* 0: pasid disabled */
 	unsigned pasid_feat;
 	ioasid_t pscid;
@@ -90,22 +89,26 @@ struct riscv_iommu_endpoint {
 
 /* Helper functions and macros */
 
-static inline u32 riscv_iommu_readl(struct riscv_iommu_device *iommu, unsigned offset)
+static inline u32 riscv_iommu_readl(struct riscv_iommu_device *iommu,
+				    unsigned offset)
 {
 	return readl_relaxed(iommu->reg + offset);
 }
 
-static inline void riscv_iommu_writel(struct riscv_iommu_device *iommu, unsigned offset, u32 val)
+static inline void riscv_iommu_writel(struct riscv_iommu_device *iommu,
+				      unsigned offset, u32 val)
 {
 	writel_relaxed(val, iommu->reg + offset);
 }
 
-static inline u64 riscv_iommu_readq(struct riscv_iommu_device *iommu, unsigned offset)
+static inline u64 riscv_iommu_readq(struct riscv_iommu_device *iommu,
+				    unsigned offset)
 {
 	return readq_relaxed(iommu->reg + offset);
 }
 
-static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu, unsigned offset, u64 val)
+static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu,
+				      unsigned offset, u64 val)
 {
 	writeq_relaxed(val, iommu->reg + offset);
 }

@@ -276,7 +276,6 @@
 #define RIO_CMD_ATS_INVAL       0x004
 #define RIO_CMD_ATS_PRGR        0x084
 
-
 #if RIO_SPEC_DOT_VER < 9
 /* Spec version 0.3 */
 
@@ -357,73 +356,73 @@
  * IOMMU Specification, Chapter 5.23. Performance-monitoring event selector.
  */
 enum {
-    RIO_HPMEVENT_INVALID,    /* Invalid event, do not count */
-    RIO_HPMEVENT_URQ,        /* Untranslated requests */
-    RIO_HPMEVENT_TRQ,        /* Translated requests */
-    RIO_HPMEVENT_ATS_RQ,     /* ATS translation requests */
-    RIO_HPMEVENT_TLB_MISS,   /* TLB misses */
-    RIO_HPMEVENT_DD_WALK,    /* Device directory walks */
-    RIO_HPMEVENT_PD_WALK,    /* Process directory walks */
-    RIO_HPMEVENT_S_VS_WALKS, /* S/VS-Stage page table walks */
-    RIO_HPMEVENT_G_WALKS,    /* G-Stage page table walks */
-    RIO_HPMEVENT_MAX,        /* Value to denote maximum Event IDs */
+	RIO_HPMEVENT_INVALID,	/* Invalid event, do not count */
+	RIO_HPMEVENT_URQ,	/* Untranslated requests */
+	RIO_HPMEVENT_TRQ,	/* Translated requests */
+	RIO_HPMEVENT_ATS_RQ,	/* ATS translation requests */
+	RIO_HPMEVENT_TLB_MISS,	/* TLB misses */
+	RIO_HPMEVENT_DD_WALK,	/* Device directory walks */
+	RIO_HPMEVENT_PD_WALK,	/* Process directory walks */
+	RIO_HPMEVENT_S_VS_WALKS,	/* S/VS-Stage page table walks */
+	RIO_HPMEVENT_G_WALKS,	/* G-Stage page table walks */
+	RIO_HPMEVENT_MAX,	/* Value to denote maximum Event IDs */
 };
 
 /*
  * RISC-V IOMMU Fault Transaction Type / Exception Codes
  * IOMMU Specification, Chapter 3.2. Fault/Event-Queue
  */
-#define RIO_TTYP_NONE               0    /* Fault not caused by trx */
-#define RIO_TTYP_URX                1    /* Untranslated read for execute trx */
-#define RIO_TTYP_URD                2    /* Untranslated read transaction */
-#define RIO_TTYP_UWR                3    /* Untranslated write/AMO trx */
-#define RIO_TTYP_TRX                5    /* Translated read for execute trx */
-#define RIO_TTYP_TRD                6    /* Translated read transaction */
-#define RIO_TTYP_TWR                7    /* Translated write/AMO transaction */
-#define RIO_TTYP_ATS                8    /* PCIe ATS Translation Request */
-#define RIO_TTYP_MRQ                9    /* Message Request */
+#define RIO_TTYP_NONE               0	/* Fault not caused by trx */
+#define RIO_TTYP_URX                1	/* Untranslated read for execute trx */
+#define RIO_TTYP_URD                2	/* Untranslated read transaction */
+#define RIO_TTYP_UWR                3	/* Untranslated write/AMO trx */
+#define RIO_TTYP_TRX                5	/* Translated read for execute trx */
+#define RIO_TTYP_TRD                6	/* Translated read transaction */
+#define RIO_TTYP_TWR                7	/* Translated write/AMO transaction */
+#define RIO_TTYP_ATS                8	/* PCIe ATS Translation Request */
+#define RIO_TTYP_MRQ                9	/* Message Request */
 
-#define RIO_CAUSE_EX_FAULT          1    /* Instruction access fault */
-#define RIO_CAUSE_RD_ALIGN          4    /* Read address misaligned */
-#define RIO_CAUSE_RD_FAULT          5    /* Read access fault */
-#define RIO_CAUSE_WR_ALIGN          6    /* Write/AMO address misaligned */
-#define RIO_CAUSE_WR_FAULT          7    /* Write/AMO access fault */
-#define RIO_CAUSE_EX_FAULT_S       12    /* Instruction page fault */
-#define RIO_CAUSE_RD_FAULT_S       13    /* Read page fault */
-#define RIO_CAUSE_WR_FAULT_S       15    /* Write/AMO page fault */
-#define RIO_CAUSE_EX_FAULT_G       20    /* Instruction guest page fault */
-#define RIO_CAUSE_RD_FAULT_G       21    /* Read guest-page fault */
-#define RIO_CAUSE_WR_FAULT_G       23    /* Write/AMO guest-page fault */
-#define RIO_CAUSE_DMA_DISABLED    256    /* Inbound transactions disallowed */
-#define RIO_CAUSE_DDT_FAULT       257    /* DDT entry load access fault */
-#define RIO_CAUSE_DDT_INVALID     258    /* DDT entry not valid */
-#define RIO_CAUSE_DDT_UNSUPPORTED 259    /* DDT entry misconfigured */
-#define RIO_CAUSE_REQ_INVALID     260    /* Transaction type disallowed */
-#define RIO_CAUSE_MSI_PTE_FAULT   261    /* MSI PTE load access fault */
-#define RIO_CAUSE_MSI_INVALID     262    /* MSI PTE not valid */
-#define RIO_CAUSE_MSI_UNSUPPORTED 263    /* MSI PTE entry misconfigured */
-#define RIO_CAUSE_MRIF_FAULT      264    /* MRIF access fault */
-#define RIO_CAUSE_PDT_FAULT       265    /* PDT load access fault */
-#define RIO_CAUSE_PDT_INVALID     266    /* PDT not valid */
-#define RIO_CAUSE_PDT_UNSUPPORTED 267    /* PDT entry misconfigured */
-#define RIO_CAUSE_DDT_CORRUPTED   268    /* DDT entry corrupted */
-#define RIO_CAUSE_PDT_CORRUPTED   269    /* PDT entry corrupted */
-#define RIO_CAUSE_MSI_CORRUPTED   270    /* MSI entry corrupted */
-#define RIO_CAUSE_MRIF_CORRUPTED  271    /* DDT entry corrupted */
-#define RIO_CAUSE_ERROR           272    /* Internal data error */
-#define RIO_CAUSE_MSI_FAULT       273    /* MSI write access fault */
-#define RIO_CAUSE_PT_CORRUPTED    274    /* Page Table Corrupted */
+#define RIO_CAUSE_EX_FAULT          1	/* Instruction access fault */
+#define RIO_CAUSE_RD_ALIGN          4	/* Read address misaligned */
+#define RIO_CAUSE_RD_FAULT          5	/* Read access fault */
+#define RIO_CAUSE_WR_ALIGN          6	/* Write/AMO address misaligned */
+#define RIO_CAUSE_WR_FAULT          7	/* Write/AMO access fault */
+#define RIO_CAUSE_EX_FAULT_S       12	/* Instruction page fault */
+#define RIO_CAUSE_RD_FAULT_S       13	/* Read page fault */
+#define RIO_CAUSE_WR_FAULT_S       15	/* Write/AMO page fault */
+#define RIO_CAUSE_EX_FAULT_G       20	/* Instruction guest page fault */
+#define RIO_CAUSE_RD_FAULT_G       21	/* Read guest-page fault */
+#define RIO_CAUSE_WR_FAULT_G       23	/* Write/AMO guest-page fault */
+#define RIO_CAUSE_DMA_DISABLED    256	/* Inbound transactions disallowed */
+#define RIO_CAUSE_DDT_FAULT       257	/* DDT entry load access fault */
+#define RIO_CAUSE_DDT_INVALID     258	/* DDT entry not valid */
+#define RIO_CAUSE_DDT_UNSUPPORTED 259	/* DDT entry misconfigured */
+#define RIO_CAUSE_REQ_INVALID     260	/* Transaction type disallowed */
+#define RIO_CAUSE_MSI_PTE_FAULT   261	/* MSI PTE load access fault */
+#define RIO_CAUSE_MSI_INVALID     262	/* MSI PTE not valid */
+#define RIO_CAUSE_MSI_UNSUPPORTED 263	/* MSI PTE entry misconfigured */
+#define RIO_CAUSE_MRIF_FAULT      264	/* MRIF access fault */
+#define RIO_CAUSE_PDT_FAULT       265	/* PDT load access fault */
+#define RIO_CAUSE_PDT_INVALID     266	/* PDT not valid */
+#define RIO_CAUSE_PDT_UNSUPPORTED 267	/* PDT entry misconfigured */
+#define RIO_CAUSE_DDT_CORRUPTED   268	/* DDT entry corrupted */
+#define RIO_CAUSE_PDT_CORRUPTED   269	/* PDT entry corrupted */
+#define RIO_CAUSE_MSI_CORRUPTED   270	/* MSI entry corrupted */
+#define RIO_CAUSE_MRIF_CORRUPTED  271	/* DDT entry corrupted */
+#define RIO_CAUSE_ERROR           272	/* Internal data error */
+#define RIO_CAUSE_MSI_FAULT       273	/* MSI write access fault */
+#define RIO_CAUSE_PT_CORRUPTED    274	/* Page Table Corrupted */
 
 /*
  * Device Context.
  * IOMMU Specification, Chapter 2.1. Device-Directory-Table.
  */
 struct riscv_iommu_dc {
-	uint64_t tc;         /* Translation Control */
-	uint64_t gatp;		 /* second-stage address translation and protection */
-	uint64_t ta;         /* Translation attributes */
-	uint64_t fsc;        /* first-stage address translation and protection */
-	uint64_t msiptp;     /* MSI Page Table Pointer (extended context) */
+	uint64_t tc;		/* Translation Control */
+	uint64_t gatp;		/* second-stage address translation and protection */
+	uint64_t ta;		/* Translation attributes */
+	uint64_t fsc;		/* first-stage address translation and protection */
+	uint64_t msiptp;	/* MSI Page Table Pointer (extended context) */
 	uint64_t msi_addr_mask;
 	uint64_t msi_addr_pattern;
 	uint64_t _reserved;
