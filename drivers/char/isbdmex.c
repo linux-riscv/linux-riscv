@@ -78,6 +78,7 @@ static int isbdmex_request_irq(struct pci_dev *pdev)
 	return ret;
 }
 
+
 /******************************************************************************/
 /* fops/user handling */
 
@@ -143,16 +144,14 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* FIXME: Ensure quiescent before setting BME! */
 	pci_set_master(pdev);
 
-	dev_info(dev, "MMIO at %px, irq %d\n", ii->base, ii->irq);
-
 	/* IRQs */
-#ifdef NOT_IMPLEMENTED_YET
-	res = isbdmex_request_irq(pdev);
+	ret = isbdmex_request_irq(pdev);
 	if (ret) {
 		dev_err_probe(dev, ret, "IRQ setup failed\n");
 		return ret;
 	}
-#endif
+
+	dev_info(dev, "ISBDM at %px, irq %d\n", ii->base, ii->irq);
 
 	/* Register a misc device */
 	ii->misc.minor = MISC_DYNAMIC_MINOR;
