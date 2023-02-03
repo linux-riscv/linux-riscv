@@ -139,7 +139,6 @@ static int __init riscv_timer_init_common(void)
 	struct fwnode_handle *intc_fwnode = riscv_get_intc_hwnode();
 	struct irq_domain *domain = NULL;
 
-
 	domain = irq_find_matching_fwnode(intc_fwnode, DOMAIN_BUS_ANY);
 	if (!domain) {
 		pr_err("Failed to find INTC node [%pfwP]\n", intc_fwnode);
@@ -191,6 +190,13 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 {
 	int cpuid, error;
 	unsigned long hartid;
+	struct device_node *node;
+
+	node = of_find_compatible_node(NULL, NULL, "riscv,timer");
+	if (node) {
+		of_node_put(node);
+		return -ENODEV;
+	}
 
 	error = riscv_of_processor_hartid(n, &hartid);
 	if (error < 0) {
@@ -212,6 +218,15 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 }
 
 TIMER_OF_DECLARE(riscv_timer, "riscv", riscv_timer_init_dt);
+
+static int __init riscv_timer_init_dt2(struct device_node *n)
+{
+	riscv_timer_cannot_wake_cpu = of_property_read_bool(n,
+					"riscv,timer-cannot-wake-cpu");
+
+	return riscv_timer_init_common();
+}
+TIMER_OF_DECLARE(riscv_timer2, "riscv,timer", riscv_timer_init_dt2);
 
 #ifdef CONFIG_ACPI
 static int __init riscv_timer_acpi_init(struct acpi_table_header *table)
