@@ -10,6 +10,7 @@
  */
 
 
+#include <linux/bitmap.h>
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/miscdevice.h>
@@ -23,8 +24,40 @@ struct isbdm {
 	struct pci_dev 		*pdev;
 	void __iomem		*base;
 	int			irq;
+	int			instance;
 	struct miscdevice	misc;
 };
+
+
+/******************************************************************************/
+/* Multiple device/instance management */
+
+/* Driver'll be instantiated several times, probed in order of discovery in PCI.
+ * This bitmap holds which indices have been probed/are live:
+ */
+#define ISBDM_MAX_INSTANCES	64			/* In reality, 32! */
+
+static DEFINE_MUTEX(isbdm_instance_bmap_mutex);
+static unsigned long		isbdm_instance_bmap = 0;
+
+/* Finds an available instance index, or returns -1 if full: */
+static int isbdmex_get_instance(void)
+{
+	int r;
+
+	mutex_lock(&isbdm_instance_bmap_mutex);
+	r = bitmap_find_free_region(&isbdm_instance_bmap, ISBDM_MAX_INSTANCES, 0);
+	mutex_unlock(&isbdm_instance_bmap_mutex);
+
+	return r;
+}
+
+static void isbdmex_put_instance(int i)
+{
+	mutex_lock(&isbdm_instance_bmap_mutex);
+	bitmap_release_region(&isbdm_instance_bmap, i, 0);
+	mutex_unlock(&isbdm_instance_bmap_mutex);
+}
 
 
 /******************************************************************************/
@@ -151,12 +184,22 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	dev_info(dev, "ISBDM at %px, irq %d\n", ii->base, ii->irq);
+	ii->instance = isbdmex_get_instance();
+	if (ii->instance < 0) {
+		dev_err_probe(dev, ret, "Too many ISBDMs!\n");
+		return ret;
+	}
+
+	dev_info(dev, "isbdm%d at %px, irq %d\n", ii->instance, ii->base, ii->irq);
 
 	/* Register a misc device */
 	ii->misc.minor = MISC_DYNAMIC_MINOR;
 	ii->misc.fops = &isbdmex_fops;
-	ii->misc.name = "isbdmex";		/* FIXME: %d for instance? */
+	ii->misc.name = kasprintf(GFP_KERNEL, "isbdmex%d", ii->instance);
+	if (!ii->misc.name) {
+		dev_err_probe(dev, ret, "Can't alloc misc->name\n");
+		return ret;
+	}
 
 	ret = misc_register(&ii->misc);
 	if (ret < 0) {
@@ -164,7 +207,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware index */
+	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware location */
 
 	return 0;
 }
@@ -174,8 +217,8 @@ static void isbdmex_remove(struct pci_dev *pdev)
 	struct isbdm *ii = (struct isbdm *)pci_get_drvdata(pdev);
 
 	/* Some resources are freed by devres */
-
 	misc_deregister(&ii->misc);
+	isbdmex_put_instance(ii->instance);
 }
 
 static const struct pci_device_id isbdmex_ids[] = {
