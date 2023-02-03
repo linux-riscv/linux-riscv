@@ -192,7 +192,13 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 {
 	int cpuid, error;
 	unsigned long hartid;
-	struct device_node *child;
+	struct device_node *node;
+
+	node = of_find_compatible_node(NULL, NULL, "riscv,timer");
+	if (node) {
+		of_node_put(node);
+		return -ENODEV;
+	}
 
 	error = riscv_of_processor_hartid(n, &hartid);
 	if (error < 0) {
@@ -210,17 +216,19 @@ static int __init riscv_timer_init_dt(struct device_node *n)
 	if (cpuid != smp_processor_id())
 		return 0;
 
-	child = of_find_compatible_node(NULL, NULL, "riscv,timer");
-	if (child) {
-		riscv_timer_cannot_wake_cpu = of_property_read_bool(child,
-					"riscv,timer-cannot-wake-cpu");
-		of_node_put(child);
-	}
-
 	return riscv_timer_init_common();
 }
 
 TIMER_OF_DECLARE(riscv_timer, "riscv", riscv_timer_init_dt);
+
+static int __init riscv_timer_init_dt2(struct device_node *n)
+{
+	riscv_timer_cannot_wake_cpu = of_property_read_bool(n,
+					"riscv,timer-cannot-wake-cpu");
+
+	return riscv_timer_init_common();
+}
+TIMER_OF_DECLARE(riscv_timer2, "riscv,timer", riscv_timer_init_dt2);
 
 #ifdef CONFIG_ACPI
 static int __init riscv_timer_acpi_init(struct acpi_table_header *table)
