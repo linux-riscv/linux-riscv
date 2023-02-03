@@ -19,14 +19,7 @@
 #include <linux/pci-epf.h>
 #include <linux/pci_ids.h>
 
-
-struct isbdm {
-	struct pci_dev 		*pdev;
-	void __iomem		*base;
-	int			irq;
-	int			instance;
-	struct miscdevice	misc;
-};
+#include "isbdmex.h"
 
 
 /******************************************************************************/
@@ -173,6 +166,8 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ii->base = pcim_iomap_table(pdev)[BAR_0];
+
+	isbdmex_hw_reset(ii);
 
 	/* FIXME: Ensure quiescent before setting BME! */
 	pci_set_master(pdev);
