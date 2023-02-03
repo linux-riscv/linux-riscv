@@ -45,4 +45,4 @@ obj-$(CONFIG_XILLYBUS_CLASS)	+= xillybus/
 obj-$(CONFIG_POWERNV_OP_PANEL)	+= powernv-op-panel.o
 obj-$(CONFIG_ADI)		+= adi.o
 
-obj-$(CONFIG_RIVOS_ISBDM_EX)	+= isbdmex.o
+obj-$(CONFIG_RIVOS_ISBDM_EX)	+= isbdmex.o isbdmex-hw.o
