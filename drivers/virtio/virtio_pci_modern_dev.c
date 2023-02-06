@@ -111,7 +111,7 @@ vp_modern_map_capability(struct virtio_pci_modern_device *mdev, int off,
  *
  * Returns offset of the capability, or 0.
  */
-static inline int virtio_pci_find_capability(struct pci_dev *dev, u8 cfg_type,
+inline int virtio_pci_find_capability(struct pci_dev *dev, u8 cfg_type,
 					     u32 ioresource_types, int *bars)
 {
 	int pos;
