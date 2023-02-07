@@ -322,7 +322,7 @@ static inline struct ublk_queue *ublk_get_queue(struct ublk_device *dev,
 
 static inline bool ublk_rq_has_data(const struct request *rq)
 {
-	return rq->bio && bio_has_data(rq->bio);
+	return bio_has_data(rq->bio);
 }
 
 static inline struct ublksrv_io_desc *ublk_get_iod(struct ublk_queue *ubq,
@@ -665,7 +665,7 @@ static void ublk_complete_rq(struct request *req)
 	}
 
 	/*
-	 * FLUSH or DISCARD usually won't return bytes returned, so end them
+	 * FLUSH, DISCARD or WRITE_ZEROES usually won't return bytes returned, so end them
 	 * directly.
 	 *
 	 * Both the two needn't unmap.
@@ -1578,7 +1578,7 @@ static int ublk_ctrl_start_dev(struct ublk_device *ub, struct io_uring_cmd *cmd)
 		goto out_unlock;
 	}
 
-	disk = blk_mq_alloc_disk(&ub->tag_set, ub);
+	disk = blk_mq_alloc_disk(&ub->tag_set, NULL);
 	if (IS_ERR(disk)) {
 		ret = PTR_ERR(disk);
 		goto out_unlock;
