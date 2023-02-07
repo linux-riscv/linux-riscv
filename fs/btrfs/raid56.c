@@ -998,7 +998,7 @@ static int alloc_rbio_parity_pages(struct btrfs_raid_bio *rbio)
 }
 
 /*
- * Return the total numer of errors found in the vertical stripe of @sector_nr.
+ * Return the total number of errors found in the vertical stripe of @sector_nr.
  *
  * @faila and @failb will also be updated to the first and second stripe
  * number of the errors.
@@ -1183,7 +1183,7 @@ not_found:
 	trace_info->stripe_nr = -1;
 }
 
-/* Generate PQ for one veritical stripe. */
+/* Generate PQ for one vertical stripe. */
 static void generate_pq_vertical(struct btrfs_raid_bio *rbio, int sectornr)
 {
 	void **pointers = rbio->finish_pointers;
@@ -1357,7 +1357,7 @@ static void set_rbio_range_error(struct btrfs_raid_bio *rbio, struct bio *bio)
 }
 
 /*
- * For subpage case, we can no longer set page Uptodate directly for
+ * For subpage case, we can no longer set page Up-to-date directly for
  * stripe_pages[], thus we need to locate the sector.
  */
 static struct sector_ptr *find_stripe_sector(struct btrfs_raid_bio *rbio,
@@ -1425,13 +1425,20 @@ static void rbio_update_error_bitmap(struct btrfs_raid_bio *rbio, struct bio *bi
 	int total_sector_nr = get_bio_sector_nr(rbio, bio);
 	u32 bio_size = 0;
 	struct bio_vec *bvec;
-	struct bvec_iter_all iter_all;
+	int i;
 
-	bio_for_each_segment_all(bvec, bio, iter_all)
+	bio_for_each_bvec_all(bvec, bio, i)
 		bio_size += bvec->bv_len;
 
-	bitmap_set(rbio->error_bitmap, total_sector_nr,
-		   bio_size >> rbio->bioc->fs_info->sectorsize_bits);
+	/*
+	 * Since we can have multiple bios touching the error_bitmap, we cannot
+	 * call bitmap_set() without protection.
+	 *
+	 * Instead use set_bit() for each bit, as set_bit() itself is atomic.
+	 */
+	for (i = total_sector_nr; i < total_sector_nr +
+	     (bio_size >> rbio->bioc->fs_info->sectorsize_bits); i++)
+		set_bit(i, rbio->error_bitmap);
 }
 
 /* Verify the data sectors at read time. */
@@ -1521,7 +1528,7 @@ static int rmw_assemble_read_bios(struct btrfs_raid_bio *rbio,
 	/*
 	 * Build a list of bios to read all sectors (including data and P/Q).
 	 *
-	 * This behaviro is to compensate the later csum verification and
+	 * This behavior is to compensate the later csum verification and
 	 * recovery.
 	 */
 	for (total_sector_nr = 0; total_sector_nr < rbio->nr_sectors;
@@ -1765,7 +1772,7 @@ static int recover_vertical(struct btrfs_raid_bio *rbio, int sector_nr,
 	found_errors = get_rbio_veritical_errors(rbio, sector_nr, &faila,
 						 &failb);
 	/*
-	 * No errors in the veritical stripe, skip it.  Can happen for recovery
+	 * No errors in the vertical stripe, skip it.  Can happen for recovery
 	 * which only part of a stripe failed csum check.
 	 */
 	if (!found_errors)
@@ -1886,7 +1893,7 @@ pstripe:
 		sector->uptodate = 1;
 	}
 	if (failb >= 0) {
-		ret = verify_one_sector(rbio, faila, sector_nr);
+		ret = verify_one_sector(rbio, failb, sector_nr);
 		if (ret < 0)
 			goto cleanup;
 
