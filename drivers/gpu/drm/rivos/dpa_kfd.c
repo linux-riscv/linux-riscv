@@ -20,6 +20,8 @@
 #include <drm/drm_file.h>
 #include <drm/drm_ioctl.h>
 #include <linux/pm_runtime.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/of_address.h>
 #include "dpa_kfd.h"
 #include "dpa_daffy.h"
 
@@ -285,7 +287,11 @@ static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struc
 
 	struct dpa_kfd_buffer *buf = gem_to_dpa_buf(gobj);
 	unsigned long size = vma->vm_end - vma->vm_start;
+	unsigned long start = vma->vm_start;
+	unsigned long chunk_size;
 	unsigned long vma_page_count = size >> PAGE_SHIFT;
+	struct drm_buddy_block *block, *on;
+	u64 paddr;
 	int ret = -EFAULT;
 	if (buf) {
 		unsigned long num_pages = buf->page_count;
@@ -299,8 +305,20 @@ static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struc
 					__func__, buf->page_count, vma_page_count);
 			return -EINVAL;
 		}
-		ret = vm_insert_pages(vma, vma->vm_start, buf->pages,
-						&num_pages);
+
+		list_for_each_entry_safe(block, on, &buf->blocks, link) {
+			paddr = dpa->hbm_base + drm_buddy_block_offset(block);
+			chunk_size = min(size, drm_buddy_block_size(&dpa->mm, block));
+			ret = remap_pfn_range(vma, start, phys_to_pfn(paddr), chunk_size,
+				vma->vm_page_prot);
+			if (chunk_size == size)
+				break;
+			else {
+				size -= chunk_size;
+				start += chunk_size;
+			}
+		}
+
 		if (ret || num_pages) {
 			dev_warn(dpa_device, "%s: vm_insert_pages ret = %d num = %lu\n",
 					__func__, ret, num_pages);
@@ -458,9 +476,14 @@ int dpa_gem_object_create(unsigned long size,
 {
 	struct dpa_kfd_buffer * buf;
 	struct device * dev = dpa->dev;
+	struct drm_buddy * mm = &dpa->mm;
+	struct drm_buddy_block *block, *on;
+	u64 va;
 	unsigned i, count;
-
+	size = ALIGN(size, PAGE_SIZE);
 	*obj = NULL;
+	int err;
+	struct drm_printer p = drm_info_printer(dev);
 
 	/* Memory should be aligned at least to a page size. */
 	size = ALIGN(size, PAGE_SIZE);
@@ -473,30 +496,26 @@ int dpa_gem_object_create(unsigned long size,
 	buf->type = flags;
 	buf->size = size;
 	buf->page_count = buf->size >> PAGE_SHIFT;
-	buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
-	if (!buf->pages) {
-		dev_warn(dev, "%s: cannot alloc pages\n", __func__);
-		devm_kfree(dev, buf);
-		return -1;
+
+	INIT_LIST_HEAD(&buf->blocks);
+	mutex_lock(&dpa->mm_lock);
+	err = drm_buddy_alloc_blocks(mm,
+				     0,
+				     dpa->hbm_size,
+				     size,
+				     mm->chunk_size,
+				     &buf->blocks,
+				     0);
+
+	/* Zero the blocks allocated */
+	list_for_each_entry_safe(block, on, &buf->blocks, link) {
+		va = dpa->hbm_va + drm_buddy_block_offset(block);
+		size = drm_buddy_block_size(&dpa->mm, block);
+		memset(va, 0, size);
 	}
-#ifndef CONFIG_PAGE_OWNER
-	if ((count = alloc_pages_bulk_array(GFP_KERNEL, buf->page_count, buf->pages)) <
-	    buf->page_count) {
-		dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
-			 __func__, buf->page_count, count);
-		goto out_free;
-	}
-#else
-	for (i = 0; i < buf->page_count; i++) {
-		buf->pages[i] = alloc_page(GFP_KERNEL);
-		if (!buf->pages[i]) {
-			dev_warn(dev, "%s: tried to alloc %u pages, only alloced %u\n",
-				 __func__, buf->page_count, count);
-			goto out_free;
-		}
-		count++;
-	}
-#endif
+
+	mutex_unlock(&dpa->mm_lock);
+
 	/* create the node in vma manager */
 	drm_gem_create_mmap_offset_size(&buf->gobj, size);
 
@@ -518,7 +537,6 @@ out_free:
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	int ret = 0;
 	struct drm_device *ddev;
 	struct device *dev = &pdev->dev;
 	int err;
@@ -542,10 +560,10 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
 
 
-	if ((ret = pci_enable_device_mem(pdev)))
+	if ((err = pci_enable_device_mem(pdev)))
 		goto disable_device;
 
-	if ((ret = pci_request_mem_regions(pdev, kfd_dev_name)))
+	if ((err = pci_request_mem_regions(pdev, kfd_dev_name)))
 		goto disable_device;
 
 	// Enable PASID support
@@ -559,7 +577,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dpa->regs = ioremap(pci_resource_start(pdev, 0), DUC_MMIO_SIZE);
 	if (!dpa->regs) {
 		dev_warn(dpa_device, "%s: unable to remap registers\n", __func__);
-		ret = -EIO;
+		err = -EIO;
 		goto disable_device;
 	}
 
@@ -574,26 +592,43 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dpa->drm_minor = ddev->render->index;
 	// LIST_HEAD_INIT(&dpa->buffers);
 
-	if ((ret = dpa_kfd_chardev_init()))
+	if ((err = dpa_kfd_chardev_init()))
 		goto free_queue;
 
-	if ((ret = dpa_kfd_sysfs_init())) {
+	if ((err = dpa_kfd_sysfs_init())) {
 		dev_err(dpa_device, "%s: Error creating sysfs nodes: %d\n",
-			__func__, ret);
+			__func__, err);
 	}
 
-	if ((ret = daffy_get_version_cmd(dpa, &version))) {
+	if ((err = daffy_get_version_cmd(dpa, &version))) {
 		dev_err(dpa_device, "%s: get version failed %d\n",
-			__func__, ret);
+			__func__, err);
 	} else {
 		dev_warn(dpa_device, "%s: got version %u\n", __func__,
 			 version);
 	}
 
 	// init drm
-	ret = drm_dev_register(ddev, id->driver_data);
-	if (ret)
+	err = drm_dev_register(ddev, id->driver_data);
+	if (err)
 		goto disable_device;
+
+	struct device_node *np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
+	struct resource r;
+	dev_warn(dev, "np is 0x%llx\n", np);
+	err = of_address_to_resource(np, 0, &r);
+	if (err)
+		dev_err(dev, "No memory address assigned to the region\n");
+
+
+	dpa->hbm_base = r.start;
+	dpa->hbm_size = resource_size(&r);
+	dpa->hbm_va = devm_memremap(dpa_device, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
+	dev_info(dev, "HBM base: 0x%llx, HBM size: 0x%llx\n",
+		dpa->hbm_base, dpa->hbm_size);
+
+	err = drm_buddy_init(&dpa->mm, dpa->hbm_size, PAGE_SIZE);
+	mutex_init(&dpa->mm_lock);
 
 	return 0;
 
@@ -608,7 +643,7 @@ disable_device:
 	pci_disable_device(pdev);
 	devm_kfree(dev, dpa);
 
-	return ret;
+	return err;
 }
 
 int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size, u32 alloc_flag)
@@ -1521,10 +1556,9 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 
 	if (buf->type & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
 		if (buf->page_count) {
-			int i;
-			for (i = 0; i < buf->page_count; i++) {
-				__free_pages(buf->pages[i], 0);
-			}
+			mutex_lock(&dpa->mm_lock);
+			drm_buddy_free_list(&dpa->mm, &buf->blocks);
+			mutex_unlock(&dpa->mm_lock);
 		}
 		drm_gem_object_release(&buf->gobj);
 	}
