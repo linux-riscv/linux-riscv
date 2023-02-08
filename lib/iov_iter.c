@@ -2140,7 +2140,7 @@ static ssize_t iov_iter_extract_user_pages(struct iov_iter *i,
 					   size_t *offset0)
 {
 	unsigned long addr;
-	unsigned int gup_flags = FOLL_PIN;
+	unsigned int gup_flags = 0;
 	size_t offset;
 	int res;
 
