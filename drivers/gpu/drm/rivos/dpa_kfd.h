@@ -7,6 +7,7 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
+#include <drm/drm_buddy.h>
 
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
@@ -68,11 +69,17 @@ struct dpa_device {
 	/* big lock for device data structures */
 	struct mutex lock;
 
+	u64 hbm_size;
+	u64 hbm_base;
+	u64 hbm_va;
 	/* list of processes using device */
 	//struct list *plist;
 	struct device *dev;
 	struct pci_dev			*pdev;
 	struct drm_device		ddev;
+
+	struct drm_buddy mm;
+	struct mutex mm_lock;
 
 	int drm_minor;
 
@@ -144,6 +151,8 @@ struct dpa_kfd_buffer {
 	u64 size;
 	unsigned page_count;
 	struct page **pages;
+
+	struct list_head blocks;
 
 	struct dpa_kfd_process *p;
 };

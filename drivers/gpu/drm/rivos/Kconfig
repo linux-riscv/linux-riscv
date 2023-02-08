@@ -12,6 +12,7 @@ config RIVOS_DPA
 	default y
 	depends on DRM=y
 	depends on PCI && MMU && RISCV
+	select DRM_BUDDY
 	select DRM_TTM_HELPER
 	select DRM_TTM
 	help
