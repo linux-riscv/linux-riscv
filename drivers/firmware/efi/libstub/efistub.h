@@ -1107,4 +1107,6 @@ efi_status_t efi_kaslr_relocate_kernel(unsigned long *image_addr,
 				       u32 phys_seed);
 u32 efi_kaslr_get_phys_seed(efi_handle_t image_handle);
 
+void efi_icache_sync(unsigned long start, unsigned long end);
+
 #endif

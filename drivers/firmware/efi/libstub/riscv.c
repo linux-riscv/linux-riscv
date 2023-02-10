@@ -96,3 +96,8 @@ void __noreturn efi_enter_kernel(unsigned long entrypoint, unsigned long fdt,
 	csr_write(CSR_SATP, 0);
 	jump_kernel(hartid, fdt);
 }
+
+void efi_icache_sync(unsigned long start, unsigned long end)
+{
+	asm volatile ("fence.i" ::: "memory");
+}
