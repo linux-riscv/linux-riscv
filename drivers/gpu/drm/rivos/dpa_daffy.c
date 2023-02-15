@@ -45,7 +45,9 @@ int daffy_alloc_fw_queue(struct dpa_device *dpa_dev)
 {
 	int i;
 	struct dpa_fwq_info *q = &dpa_dev->qinfo;
-	q->fw_queue = kzalloc(DPA_FW_QUEUE_PAGE_SIZE, GFP_KERNEL);
+	const size_t fw_queue_size = DPA_FWQ_PKT_SIZE +
+			(DPA_FW_QUEUE_SIZE * DPA_FWQ_PKT_SIZE * 2);
+	q->fw_queue = kzalloc(fw_queue_size, GFP_KERNEL);
 	if (!q->fw_queue)
 		return -ENOMEM;
 
@@ -77,7 +79,7 @@ int daffy_alloc_fw_queue(struct dpa_device *dpa_dev)
 		(q->fw_queue->h_qsize * DPA_FWQ_PKT_SIZE);
 
 	q->h_ring = (void *)q->fw_queue + DPA_FWQ_PKT_SIZE;
-	q->d_ring = q->h_ring + (DPA_FW_QUEUE_SIZE * DPA_FWQ_PKT_SIZE);
+	q->d_ring = (void *)q->h_ring + (DPA_FW_QUEUE_SIZE * DPA_FWQ_PKT_SIZE);
 	dev_warn(dpa_dev->dev, "%s: fw_queue at %llx ring at %llx\n",
 		 __func__, (u64)q->fw_queue, (u64)q->h_ring);
 	dev_warn(dpa_dev->dev, "%s: pkt size is %lu\n",
