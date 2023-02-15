@@ -9,7 +9,6 @@
  * 3 Feb 2023 mev
  */
 
-
 #include <linux/bitmap.h>
 #include <linux/device.h>
 #include <linux/io.h>
@@ -21,7 +20,6 @@
 
 #include "isbdmex.h"
 
-
 /******************************************************************************/
 /* Multiple device/instance management */
 
@@ -30,43 +28,91 @@
  */
 #define ISBDM_MAX_INSTANCES	64			/* In reality, 32! */
 
-static DEFINE_MUTEX(isbdm_instance_bmap_mutex);
+static DEFINE_MUTEX(isbdmex_mutex);
 static unsigned long		isbdm_instance_bmap = 0;
 
+/*
+ * Keep a global list of devices so at open time they can be looked up by minor
+ * number, also protected by the mutex.
+ */
+static LIST_HEAD(isbdmex_list);
+
 /* Finds an available instance index, or returns -1 if full: */
-static int isbdmex_get_instance(void)
+static int isbdmex_new_instance(struct isbdm *ii)
 {
-	int r;
+	mutex_lock(&isbdmex_mutex);
+	ii->instance = bitmap_find_free_region(&isbdm_instance_bmap,
+					       ISBDM_MAX_INSTANCES, 0);
 
-	mutex_lock(&isbdm_instance_bmap_mutex);
-	r = bitmap_find_free_region(&isbdm_instance_bmap, ISBDM_MAX_INSTANCES, 0);
-	mutex_unlock(&isbdm_instance_bmap_mutex);
+	if (ii->instance >= 0)
+		list_add_tail(&ii->node, &isbdmex_list);
 
-	return r;
+	mutex_unlock(&isbdmex_mutex);
+	return ii->instance;
 }
 
-static void isbdmex_put_instance(int i)
+static void isbdmex_del_instance(struct isbdm *ii)
 {
-	mutex_lock(&isbdm_instance_bmap_mutex);
-	bitmap_release_region(&isbdm_instance_bmap, i, 0);
-	mutex_unlock(&isbdm_instance_bmap_mutex);
-}
+	mutex_lock(&isbdmex_mutex);
+	if (ii->instance >= 0)
+		bitmap_release_region(&isbdm_instance_bmap, ii->instance, 0);
 
+	list_del(&ii->node);
+	mutex_unlock(&isbdmex_mutex);
+}
+static struct isbdm *isbdmex_locate(int minor)
+{
+	struct isbdm *found = NULL;
+	struct isbdm *ii;
+
+	mutex_lock(&isbdmex_mutex);
+	list_for_each_entry(ii, &isbdmex_list, node) {
+		if (ii->misc.minor == minor) {
+			found = ii;
+			break;
+		}
+	}
+
+	mutex_unlock(&isbdmex_mutex);
+	return found;
+}
 
 /******************************************************************************/
 /* IRQ handling */
 
 static irqreturn_t isbdmex_irq_handler(int irq, void *data)
 {
-	int r = IRQ_NONE;
-	/* If status blah, r = IRQ_WAKE_THREAD */
-	/* Ack IRQ (no internal ISBDM state change :P ) */
-	return r;
+	struct isbdm *ii = data;
+	u64 ipsr = ISBDM_READQ(ii, ISBDM_IPSR);
+
+	if (ipsr & ~ii->irq_mask) {
+		/* TODO: I don't need an exchange, just a write. How to do? */
+		atomic_xchg(&ii->pending_irqs, ipsr);
+		return IRQ_WAKE_THREAD;
+	}
+
+	return IRQ_NONE;
 }
 
 static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 {
-	/* */
+	struct isbdm *ii = data;
+	u32 handled = 0;
+	u32 pending = atomic_xchg(&ii->pending_irqs, 0);
+
+	if (pending & ISBDM_TXMF_IRQ) {
+		dev_err(&ii->pdev->dev, "TX memory fault");
+		handled |= ISBDM_TXMF_IRQ;
+		/* TODO: Actually do something about TXMF (flush ring?) */
+	}
+
+	if (pending & ISBDM_TXDONE_IRQ) {
+		isbdm_reap_tx(ii);
+		handled |= ISBDM_TXDONE_IRQ;
+	}
+
+	/* Write 1 to clear the handled interrupts. */
+	ISBDM_WRITEQ(ii, ISBDM_IPSR, handled);
 	return IRQ_HANDLED;
 }
 
@@ -110,28 +156,52 @@ static int isbdmex_request_irq(struct pci_dev *pdev)
 
 static int isbdmex_open(struct inode *inode, struct file *file)
 {
+
+	struct isbdm *ii;
+
+	ii = isbdmex_locate(iminor(inode));
+	if (!ii)
+		return -ENODEV;
+
+	/*
+	 * TODO: Refcounting on the device to make sure it doesn't disappear out
+	 * from under us.
+	 */
+
+	file->private_data = ii;
 	return 0;
 }
 
 static int isbdmex_release(struct inode *inode, struct file *file)
 {
-	/* Which node? */
+	/* TODO: Refcounting on the device! See serio_raw_release() for ex. */
 	return 0;
 }
 
 static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	return 0;
+	return -ENOENT;
+}
+
+ssize_t isbdmex_write(struct file *file, const char __user *va, size_t size,
+	loff_t *file_offset)
+{
+	struct isbdm *ii = file->private_data;
+	ssize_t rc;
+
+	printk("EVAN: Write va %p size %zu\n", va, size);
+	rc = isbdmex_send(ii, va, size);
+	return rc;
 }
 
 static const struct file_operations isbdmex_fops = {
 	.owner 		= THIS_MODULE,
+	.write		= isbdmex_write,
 	.open 		= isbdmex_open,
 	.release 	= isbdmex_release,
 	/* .mmap ? */
 	.unlocked_ioctl = isbdmex_ioctl,
 };
-
 
 /******************************************************************************/
 /* Probe, and PCI plumbing */
@@ -167,25 +237,33 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ii->base = pcim_iomap_table(pdev)[BAR_0];
 
-	isbdmex_hw_reset(ii);
+	isbdm_hw_reset(ii);
+	ii->irq_mask = -1ULL;
+	ret = isbdm_init_hw(ii);
+	if (ret) {
+		dev_err_probe(dev, ret, "Init HW failed\n");
+		return ret;
+	}
 
-	/* FIXME: Ensure quiescent before setting BME! */
 	pci_set_master(pdev);
 
 	/* IRQs */
 	ret = isbdmex_request_irq(pdev);
 	if (ret) {
 		dev_err_probe(dev, ret, "IRQ setup failed\n");
-		return ret;
+		goto deinit;
 	}
 
-	ii->instance = isbdmex_get_instance();
-	if (ii->instance < 0) {
+	ret = isbdmex_new_instance(ii);
+	if (ret < 0) {
 		dev_err_probe(dev, ret, "Too many ISBDMs!\n");
-		return ret;
+		goto release_irq;
 	}
 
 	dev_info(dev, "isbdm%d at %px, irq %d\n", ii->instance, ii->base, ii->irq);
+
+	/* Get the hardware running! */
+	isbdm_enable(ii);
 
 	/* Register a misc device */
 	ii->misc.minor = MISC_DYNAMIC_MINOR;
@@ -193,27 +271,45 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ii->misc.name = kasprintf(GFP_KERNEL, "isbdmex%d", ii->instance);
 	if (!ii->misc.name) {
 		dev_err_probe(dev, ret, "Can't alloc misc->name\n");
-		return ret;
+		goto unget_instance;
 	}
 
 	ret = misc_register(&ii->misc);
 	if (ret < 0) {
 		dev_err_probe(dev, ret, "Can't register miscdev\n");
-		return ret;
+		goto free_misc_name;
 	}
 
 	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware location */
 
 	return 0;
+
+free_misc_name:
+	kfree(ii->misc.name);
+	isbdm_disable(ii);
+
+unget_instance:
+	isbdmex_del_instance(ii);
+
+release_irq:
+	/* TODO: Undo isbdmex_request_irq(). */
+deinit:
+	isbdm_deinit_hw(ii);
+	return ret;
 }
 
 static void isbdmex_remove(struct pci_dev *pdev)
 {
 	struct isbdm *ii = (struct isbdm *)pci_get_drvdata(pdev);
 
+	/* TODO: Are we allowed to touch hardware in this routine? */
+	isbdm_disable(ii);
+
 	/* Some resources are freed by devres */
 	misc_deregister(&ii->misc);
-	isbdmex_put_instance(ii->instance);
+	isbdmex_del_instance(ii);
+	isbdm_deinit_hw(ii);
+	return;
 }
 
 static const struct pci_device_id isbdmex_ids[] = {
