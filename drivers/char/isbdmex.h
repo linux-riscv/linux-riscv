@@ -10,9 +10,16 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/types.h>
+#include <linux/wait.h>
 
 /* The current arbitrarily hardcoded ring size. */
 #define ISBDMEX_RING_SIZE 1024
+/*
+ * The art of picking a RX refill threshold. Ideally it would be as close to
+ * empty as you can wait without underflowing, to minimize "trips to the gas
+ * station".
+ */
+#define ISBDMEX_RX_THRESHOLD (ISBDMEX_RING_SIZE / 4)
 
 /* The hardcoded buffer size */
 #define ISBDMEX_BUF_SIZE 4096
@@ -56,6 +63,25 @@
 /* The ENABLE bit is common to all rings (TX, RX, CMD) */
 #define ISBDM_RING_CTRL_ENABLE 0x1
 
+/* RX ring control buffer size: 2^(BUFSIZ+9). */
+#define ISBDM_RX_RING_CTRL_BUFSIZ_SHIFT 1
+#define ISBDM_RX_RING_CTRL_BUFSIZ_MASK \
+	(0x7 << ISBDM_RX_RING_CTRL_BUFSIZ_SHIFT)
+
+/*
+ * If the number of free descriptors drops below this specified threshold, an
+ * RXRTHR interrupt fires.
+ */
+#define ISBDM_RX_RING_CTRL_RXRTHR_MAX 0xFFFFFFFF
+#define ISBDM_RX_RING_CTRL_RXRTHR_SHIFT 16
+#define ISBDM_RX_RING_CTRL_RXRTHR_MASK \
+	(ISBDM_RX_RING_CTRL_RXRTHR_MAX << \
+	 ISBDM_RX_RING_CTRL_RXRTHR_SHIFT)
+
+/* Convert from a buffer size into the BUFSIZ register field value. */
+#define ISBDM_RX_BUFFER_SIZE_TO_REG(size) \
+	(__builtin_ctzll(size) - 9)
+
 /* Interrupt bits (both mask and status) */
 #define ISBDM_LNKSTS_IRQ (1 << 0)
 /* Transmit descriptor with ND=1 transmitted */
@@ -78,6 +104,8 @@
 #define ISBDM_ATS_UR_IRQ (1 << 9)
 /* RF response caused PRI to be disabled */
 #define ISBDM_PRI_RF_IRQ (1 << 10)
+/* Interrupt summary bit, clear to ask HW to re-evaluate interrupts. */
+#define ISBDM_IPSR_IIP (1ULL << 63)
 
 /* The mask of all known interrupts. */
 #define ISBDM_ALL_IRQ_MASK \
@@ -86,8 +114,6 @@
 	 ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ | \
 	 ISBDM_ATS_UR_IRQ | ISBDM_PRI_RF_IRQ)
 
-/* Error flag, in RX descriptor */
-#define ISBDM_DESC_RX_ERR 0x20000000
 /* Generate an interrupt on completion, in TX descriptor */
 #define ISBDM_DESC_TX_ND 0x20000000
 
@@ -95,6 +121,19 @@
 #define ISBDM_DESC_LS 0x40000000
 /* First Segment */
 #define ISBDM_DESC_FS 0x80000000
+
+/*
+ * Use this bit in software to poison a descriptor of a partially cut off
+ * packet. Hardware should never "see" a descriptor with this bit set, as it's
+ * only set when software own the descriptor.
+ */
+#define ISBDM_DESC_SW_POISON 0x10000000
+
+/* ioctls for the isbdmex device */
+#define IOCTL_SET_IPMR		_IO('3', 1)	/* ORs in IPMR bits. */
+#define IOCTL_CLEAR_IPMR	_IO('3', 2)	/* ANDs out IPMR bits. */
+#define IOCTL_GET_IPSR		_IO('3', 3)	/* Get the IPSR register. */
+#define IOCTL_RX_REFILL		_IO('3', 4)	/* Refill RX descriptors. */
 
 /* Info about a hardware ring (tx, rx, or cmd). */
 struct isbdm_ring {
@@ -132,6 +171,8 @@ struct isbdm_buf {
 	size_t capacity;
 	/* Contains info on the first/last segment bits. */
 	uint32_t flags;
+	/* The descriptor index, to detect driver descriptor handling bugs. */
+	uint32_t desc_idx;
 };
 
 /* Per-instance hardware info */
@@ -140,7 +181,7 @@ struct isbdm {
 	void __iomem		*base;
 
 	/* Pending interrupt bits to be serviced by the bottom half. */
-	atomic_t pending_irqs;
+	atomic64_t pending_irqs;
 
 	/*
 	 * Shadow copy of the interrupt mask register, to avoid reaching out to
@@ -151,6 +192,9 @@ struct isbdm {
 	struct isbdm_ring rx_ring;
 	struct isbdm_ring tx_ring;
 	struct isbdm_ring cmd_ring;
+
+	/* Wait queue head blocking reads. */
+	struct wait_queue_head read_wait_queue;
 
 	int			irq;
 	int			instance;
@@ -175,5 +219,14 @@ void isbdm_enable(struct isbdm *ii);
 void isbdm_disable(struct isbdm *ii);
 void isbdm_hw_reset(struct isbdm *ii);
 ssize_t isbdmex_send(struct isbdm *ii, const char __user *va, size_t size);
+void isbdm_process_rx_done(struct isbdm *ii);
+void isbdm_rx_overflow(struct isbdm *ii);
+ssize_t isbdmex_read_one(struct isbdm *ii, char __user *va, size_t size);
+void isbdm_rx_threshold(struct isbdm *ii);
+
+/* Hardware routines for test. */
+u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
+u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
+u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
 
 #endif
