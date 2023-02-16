@@ -17,6 +17,7 @@
 #include <linux/pci.h>
 #include <linux/pci-epf.h>
 #include <linux/pci_ids.h>
+#include <linux/uaccess.h>
 
 #include "isbdmex.h"
 
@@ -60,6 +61,7 @@ static void isbdmex_del_instance(struct isbdm *ii)
 	list_del(&ii->node);
 	mutex_unlock(&isbdmex_mutex);
 }
+
 static struct isbdm *isbdmex_locate(int minor)
 {
 	struct isbdm *found = NULL;
@@ -87,7 +89,7 @@ static irqreturn_t isbdmex_irq_handler(int irq, void *data)
 
 	if (ipsr & ~ii->irq_mask) {
 		/* TODO: I don't need an exchange, just a write. How to do? */
-		atomic_xchg(&ii->pending_irqs, ipsr);
+		atomic64_xchg(&ii->pending_irqs, ipsr);
 		return IRQ_WAKE_THREAD;
 	}
 
@@ -97,22 +99,39 @@ static irqreturn_t isbdmex_irq_handler(int irq, void *data)
 static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 {
 	struct isbdm *ii = data;
-	u32 handled = 0;
-	u32 pending = atomic_xchg(&ii->pending_irqs, 0);
+	u64 pending = atomic64_xchg(&ii->pending_irqs, 0);
+	u64 handled = ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ | ISBDM_TXDONE_IRQ |
+		      ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXDONE_IRQ |
+		      ISBDM_IPSR_IIP;
 
-	if (pending & ISBDM_TXMF_IRQ) {
-		dev_err(&ii->pdev->dev, "TX memory fault");
-		handled |= ISBDM_TXMF_IRQ;
+	if (pending & (ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ)) {
+		dev_err(&ii->pdev->dev, "memory fault %llx\n", pending);
 		/* TODO: Actually do something about TXMF (flush ring?) */
 	}
 
-	if (pending & ISBDM_TXDONE_IRQ) {
-		isbdm_reap_tx(ii);
-		handled |= ISBDM_TXDONE_IRQ;
-	}
+	if (pending & ISBDM_RXOVF_IRQ)
+		isbdm_rx_overflow(ii);
+
+	/* The summary bit should indicate a pending interrupt. */
+	WARN_ON_ONCE(!(pending & ISBDM_IPSR_IIP));
 
 	/* Write 1 to clear the handled interrupts. */
-	ISBDM_WRITEQ(ii, ISBDM_IPSR, handled);
+	ISBDM_WRITEQ(ii, ISBDM_IPSR, handled & pending);
+
+	/*
+	 * Only process completed entries after clearing the interrupt.
+	 * Otherwise another packet could complete after we've read HEAD but
+	 * before completing the interrupt, and we'd never get notified again.
+	 */
+	if (pending & ISBDM_RXDONE_IRQ)
+		isbdm_process_rx_done(ii);
+
+	if (pending & ISBDM_RXRTHR_IRQ)
+		isbdm_rx_threshold(ii);
+
+	if (pending & ISBDM_TXDONE_IRQ)
+		isbdm_reap_tx(ii);
+
 	return IRQ_HANDLED;
 }
 
@@ -180,26 +199,100 @@ static int isbdmex_release(struct inode *inode, struct file *file)
 
 static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	return -ENOENT;
+	char __user *argp;
+	struct isbdm *ii = file->private_data;
+	u64 value;
+	int rc;
+
+	if (is_compat_task())
+		argp = compat_ptr(arg);
+	else
+		argp = (char __user *)arg;
+	rc = 0;
+
+	switch (cmd) {
+	case IOCTL_SET_IPMR:
+		if (get_user(value, argp) != 0)
+			return -EFAULT;
+
+		rc = put_user(isbdmex_ioctl_set_ipmr(ii, value), argp);
+		break;
+
+	case IOCTL_CLEAR_IPMR:
+		if (get_user(value, argp) != 0)
+			return -EFAULT;
+
+		rc = put_user(isbdmex_ioctl_clear_ipmr(ii, value), argp);
+		break;
+
+	case IOCTL_GET_IPSR:
+		rc = put_user(isbdmex_ioctl_get_ipsr(ii), argp);
+		break;
+
+	case IOCTL_RX_REFILL:
+		isbdm_rx_threshold(ii);
+		break;
+
+	default:
+		rc = -ENOENT;
+		break;
+	}
+
+	return rc;
 }
 
-ssize_t isbdmex_write(struct file *file, const char __user *va, size_t size,
-	loff_t *file_offset)
+static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
+			    loff_t *file_offset)
+{
+	struct isbdm *ii = file->private_data;
+	ssize_t done;
+
+	do {
+		done = wait_event_interruptible_timeout(ii->read_wait_queue,
+					!list_empty(&ii->rx_ring.wait_list), 5 * HZ);
+
+		// if (done)
+		// 	break;
+		if (done <= 0) {
+			printk("Read timeout. RX prod %x cons %x HEAD %x TAIL %x IPSR %llx IPMR %llx pending_irqs %llx\n",
+				ii->rx_ring.prod_idx,
+				ii->rx_ring.cons_idx,
+				ISBDM_READL(ii, ISBDM_RX_RING_HEAD),
+				ISBDM_READL(ii, ISBDM_RX_RING_TAIL),
+				ISBDM_READQ(ii, ISBDM_IPSR),
+				ISBDM_READQ(ii, ISBDM_IPMR),
+				ii->pending_irqs.counter);
+
+			if (done < 0)
+				break;
+		}
+
+		done = isbdmex_read_one(ii, va, size);
+		if (!done && (file->f_flags & O_NONBLOCK)) {
+			return -EAGAIN;
+		}
+
+	} while (!done);
+
+	return done;
+}
+
+static ssize_t isbdmex_write(struct file *file, const char __user *va,
+			     size_t size, loff_t *file_offset)
 {
 	struct isbdm *ii = file->private_data;
 	ssize_t rc;
 
-	printk("EVAN: Write va %p size %zu\n", va, size);
 	rc = isbdmex_send(ii, va, size);
 	return rc;
 }
 
 static const struct file_operations isbdmex_fops = {
 	.owner 		= THIS_MODULE,
+	.read		= isbdmex_read,
 	.write		= isbdmex_write,
 	.open 		= isbdmex_open,
 	.release 	= isbdmex_release,
-	/* .mmap ? */
 	.unlocked_ioctl = isbdmex_ioctl,
 };
 
@@ -239,6 +332,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	isbdm_hw_reset(ii);
 	ii->irq_mask = -1ULL;
+	init_waitqueue_head(&ii->read_wait_queue);
 	ret = isbdm_init_hw(ii);
 	if (ret) {
 		dev_err_probe(dev, ret, "Init HW failed\n");
