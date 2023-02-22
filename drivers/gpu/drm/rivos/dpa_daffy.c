@@ -1,6 +1,7 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/io.h>
 #include <uapi/linux/kfd_ioctl.h>
 
 #include "dpa_daffy.h"
@@ -33,10 +34,10 @@ static unsigned add_to_queue(struct dpa_device *dev,
 	}
 	pkt->hdr.id = qinfo->fw_queue->h_write_index;
 	memcpy(head, pkt, sizeof(*pkt));
-	smp_wmb();
+	dma_wmb();
 	qinfo->fw_queue->h_write_index++; // XXX atomic or locking?
 
-	// XXX hit doorbell maybe higher level?
+	writeq(1, dev->regs + DUC_REGS_FW_DOORBELL);
 
 	return index;
 }
