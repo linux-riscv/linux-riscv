@@ -1,0 +1,64 @@
+include:
+  - project: 'rv/it/int/rivos-sdk'
+    ref: rivos/main
+    file: '/packager/gitlab-ci-packaging-helper.yml'
+
+variables:
+  INSTALL_PATH: "/rivos/sysroot/riscv/boot"
+
+# Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
+prepare-version:
+  after_script:
+    - upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
+    - sed -i -e "s@GIT_TAG=.\+@GIT_TAG=${upstream_version:1}@" gitvars.env
+    # Debugging helper
+    - cat gitvars.env
+
+docker-build:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
+  stage: build
+  script:
+    # For now, build only a monolithic kernel for our VM
+    # and a rudimentary install
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build defconfig
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build Image -j $(nproc)
+    # Prepare installation for packaging
+    - rm -rf "${INSTALL_PATH}"
+    - mkdir -p "${INSTALL_PATH}"
+    - make ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- O=build INSTALL_PATH="${INSTALL_PATH}" install
+    - tar czf linux.tar.gz "${INSTALL_PATH}"
+  artifacts:
+    paths:
+      - linux.tar.gz
+    expire_in: 3 hours
+
+package-deb:
+  extends: .deploy-deb
+  dependencies:
+    - prepare-version
+    - docker-build
+  variables:
+    PKG_ARCH: "all"
+    PKG_DESCRIPTION: "Linux kernel image for RISCV64."
+    PKG_DIRECTORIES: "${INSTALL_PATH}"
+    PKG_LICENSE: "GPL-2.0"
+    PKG_UPSTREAM_VERSION: "${GIT_TAG}"
+  before_script:
+    # clean up pre-built binaries from the rivos-sdk
+    - rm -rf "${INSTALL_PATH}"
+    - tar -C/ -xzf linux.tar.gz
+
+# Rebuild the rivos-sdk image if this is the branch the SDK is using.
+# Currently the 'latest' tag from the 'rivos/main' branch.
+update-sdk:
+  stage: deploy
+  only:
+    - rivos/main
+  except:
+    - pipelines
+  inherit:
+    variables: false
+  variables:
+    TRIGGER_ROOTFS: "true"
+  trigger: rv/it/int/rivos-sdk
