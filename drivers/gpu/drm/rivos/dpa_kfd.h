@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/iommu.h>
+#include <linux/wait.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
@@ -27,6 +28,14 @@
 #define DUC_REGS_FW_DESC			0x1378
 #define DUC_REGS_FW_DOORBELL		0x1380
 #define DUC_REGS_FW_TIMESTAMP		0x1388
+
+#define DUC_PAGE_SIZE           (1 << 12)
+#define DUC_NUM_MSIX_INTERRUPTS	8
+
+#define DUC_REGS_MSIX_CAUSE_START       (17 * DUC_PAGE_SIZE)
+#define DUC_REGS_MSIX_CAUSE_END			\
+	(DUC_REGS_MSIX_CAUSE_START + DUC_NUM_MSIX_INTERRUPTS)
+#define DUC_REGS_MSIX                   (18 * DUC_PAGE_SIZE)
 
 #define DUC_MMIO_SIZE				0x80000
 
@@ -84,6 +93,9 @@ struct dpa_device {
 	int drm_minor;
 
 	volatile char *regs;
+
+	int base_irq;
+	wait_queue_head_t wq;
 
 	struct dpa_fwq_info qinfo;
 };
@@ -220,6 +232,8 @@ struct dpa_kfd_event_waiter {
 	struct dpa_kfd_event *event; /* Event to wait for */
 	bool activated;		 /* Becomes true when event is signaled */
 };
+
+irqreturn_t handle_daffy(int irq, void *dpa_dev);
 
 /* offsets to MMAP calls for different things */
 #define KFD_MMAP_TYPE_SHIFT (60)

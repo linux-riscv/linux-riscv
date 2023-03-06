@@ -540,7 +540,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct drm_device *ddev;
 	struct device *dev = &pdev->dev;
-	int err;
+	int err, vec;
 	u16 vendor, device;
 	u32 version;
 
@@ -601,13 +601,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			__func__, err);
 	}
 
-	if ((err = daffy_get_version_cmd(dpa, &version))) {
-		dev_err(dpa_device, "%s: get version failed %d\n",
-			__func__, err);
-	} else {
-		dev_warn(dpa_device, "%s: got version %u\n", __func__,
-			 version);
-	}
+	version = ioread64(dpa->regs + DUC_REGS_FW_VER);
+	dev_warn(dpa_device, "%s: got version %u\n", __func__, version);
 
 	// init drm
 	err = drm_dev_register(ddev, id->driver_data);
@@ -630,6 +625,27 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	err = drm_buddy_init(&dpa->mm, dpa->hbm_size, PAGE_SIZE);
 	mutex_init(&dpa->mm_lock);
+
+	err = pci_alloc_irq_vectors(pdev, 1, DUC_NUM_MSIX_INTERRUPTS, PCI_IRQ_MSIX);
+	if (err < 0)
+		dev_err(dev, "Failed setting up IRQ\n");
+
+	dev_info(dev,
+		"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
+		pdev->msi_enabled,
+		pdev->msix_enabled);
+
+	dpa->base_irq = pci_irq_vector(pdev, 0);
+	for (int i = 0; i < DUC_NUM_MSIX_INTERRUPTS; i++) {
+		vec = pci_irq_vector(pdev, i);
+		/* auto frees on device detach, nice */
+		err = devm_request_threaded_irq(dev, vec, handle_daffy, NULL,
+			IRQF_ONESHOT, "dpa-drm", dpa);
+		if (err < 0)
+			dev_err(dev, "Failed setting up IRQ\n");
+	}
+
+	init_waitqueue_head(&dpa->wq);
 
 	return 0;
 
