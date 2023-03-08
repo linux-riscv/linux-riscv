@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import time
+import shutil
 from fabric import Connection
 from paramiko import ssh_exception
 from pathlib import Path
@@ -13,7 +14,7 @@ import argparse
 SSH_MAX_TRIALS = 100
 SSH_SLEEP_INTERVAL_SEC = 5
 vm_path = "ubuntu-22.10-preinstalled-server-riscv64+unmatched.img"
-qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,h=true,len-satp-mode=2,satp-mode[0]=mbare,satp-mode[1]={} -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -s"
+qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,h=true,len-satp-mode=2,satp-mode[0]=mbare,satp-mode[1]={} -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -virtfs local,path={},mount_tag=host0,security_model=passthrough,id=host0 -s"
 host_vm = "ubuntu@localhost:10022"
 host_pwd = "ubuntu"
 satp_mode_list = [ "sv39", "sv48", "sv57" ]
@@ -91,6 +92,10 @@ def userspace_launch_tests(c, kernel_version, long_valid, subset):
 def userspace_validate_kernel(c, kernel_version):
     print("* Validating {}...".format(kernel_version), end = "")
 
+    # Mount the shared directory that contains the linux sources
+    c.sudo("mkdir -p /opt/sources/linux/")
+    c.sudo("mount -t 9p -o trans=virtio host0 /opt/sources/linux/ -oversion=9p2000.L")
+
     userspace_launch_tests(c, kernel_version, args.long_valid, "all")
 
 def userspace_validate_kasan_kernel(c, kernel_version):
@@ -119,7 +124,8 @@ def launch_vm_and_execute_userspace_fn(fn, kernel_version, satp_mode = "sv48"):
     print("* Launching the VM in {}...".format(satp_mode), end = "")
 
     with open("vm_output", "a") as f:
-        with subprocess.Popen(qemu_cmd.format(satp_mode, vm_path).split(" "), text = True, stdout = f, stderr = subprocess.STDOUT) as vm_proc:
+        complete_qemu_cmd = qemu_cmd.format(satp_mode, vm_path, os.path.join(os.getcwd(), "../.."))
+        with subprocess.Popen(complete_qemu_cmd.split(" "), text = True, stdout = f, stderr = subprocess.STDOUT) as vm_proc:
             print("OK")
 
             print("* Connecting via ssh...", end = "")
