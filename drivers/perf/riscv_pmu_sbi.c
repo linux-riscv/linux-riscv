@@ -24,6 +24,10 @@
 #include <asm/sbi.h>
 #include <asm/hwcap.h>
 
+#define SYSCTL_NO_USER_ACCESS	0
+#define SYSCTL_USER_ACCESS	1
+#define SYSCTL_LEGACY		2
+
 PMU_FORMAT_ATTR(event, "config:0-47");
 PMU_FORMAT_ATTR(firmware, "config:63");
 
@@ -42,6 +46,9 @@ static const struct attribute_group *riscv_pmu_attr_groups[] = {
 	&riscv_pmu_format_group,
 	NULL,
 };
+
+/* Allow user access by default */
+static int sysctl_perf_user_access __read_mostly = SYSCTL_USER_ACCESS;
 
 /*
  * RISC-V doesn't have heterogeneous harts yet. This need to be part of
@@ -301,6 +308,11 @@ int riscv_pmu_get_hpm_info(u32 *hw_ctr_width, u32 *num_hw_ctr)
 }
 EXPORT_SYMBOL_GPL(riscv_pmu_get_hpm_info);
 
+static uint8_t pmu_sbi_csr_index(struct perf_event *event)
+{
+	return pmu_ctr_list[event->hw.idx].csr - CSR_CYCLE;
+}
+
 static unsigned long pmu_sbi_get_filter_flags(struct perf_event *event)
 {
 	unsigned long cflags = 0;
@@ -333,6 +345,18 @@ static int pmu_sbi_ctr_get_idx(struct perf_event *event)
 	unsigned long cflags = 0;
 
 	cflags = pmu_sbi_get_filter_flags(event);
+
+	/* In legacy mode, we have to force the fixed counters for those events */
+	if (hwc->flags & PERF_EVENT_FLAG_LEGACY) {
+		if (event->attr.config == PERF_COUNT_HW_CPU_CYCLES) {
+			cflags |= SBI_PMU_CFG_FLAG_SKIP_MATCH;
+			cbase = 0;
+		} else if (event->attr.config == PERF_COUNT_HW_INSTRUCTIONS) {
+			cflags |= SBI_PMU_CFG_FLAG_SKIP_MATCH;
+			cbase = CSR_INSTRET - CSR_CYCLE;
+		}
+	}
+
 	/* retrieve the available counter index */
 #if defined(CONFIG_32BIT)
 	ret = sbi_ecall(SBI_EXT_PMU, SBI_EXT_PMU_COUNTER_CFG_MATCH, cbase,
@@ -490,12 +514,22 @@ static void pmu_sbi_ctr_start(struct perf_event *event, u64 ival)
 	if (ret.error && (ret.error != SBI_ERR_ALREADY_STARTED))
 		pr_err("Starting counter idx %d failed with error %d\n",
 			hwc->idx, sbi_err_map_linux_errno(ret.error));
+
+	if (!(event->hw.flags & PERF_EVENT_FLAG_LEGACY) &&
+	    event->hw.flags & PERF_EVENT_FLAG_USER_READ_CNT)
+		csr_write(CSR_SCOUNTEREN,
+			  csr_read(CSR_SCOUNTEREN) | (1 << pmu_sbi_csr_index(event)));
 }
 
 static void pmu_sbi_ctr_stop(struct perf_event *event, unsigned long flag)
 {
 	struct sbiret ret;
 	struct hw_perf_event *hwc = &event->hw;
+
+	if (!(event->hw.flags & PERF_EVENT_FLAG_LEGACY) &&
+	    event->hw.flags & PERF_EVENT_FLAG_USER_READ_CNT)
+		csr_write(CSR_SCOUNTEREN,
+			  csr_read(CSR_SCOUNTEREN) & ~(1 << pmu_sbi_csr_index(event)));
 
 	ret = sbi_ecall(SBI_EXT_PMU, SBI_EXT_PMU_COUNTER_STOP, hwc->idx, 1, flag, 0, 0, 0);
 	if (ret.error && (ret.error != SBI_ERR_ALREADY_STOPPED) &&
@@ -704,10 +738,13 @@ static int pmu_sbi_starting_cpu(unsigned int cpu, struct hlist_node *node)
 	struct cpu_hw_events *cpu_hw_evt = this_cpu_ptr(pmu->hw_events);
 
 	/*
-	 * Enable the access for CYCLE, TIME, and INSTRET CSRs from userspace,
-	 * as is necessary to maintain uABI compatibility.
+	 * We keep enabling userspace access to CYCLE, TIME and INSRET via the
+	 * legacy option but that will be removed in the future.
 	 */
-	csr_write(CSR_SCOUNTEREN, 0x7);
+	if (sysctl_perf_user_access == SYSCTL_LEGACY)
+		csr_write(CSR_SCOUNTEREN, 0x7);
+	else
+		csr_write(CSR_SCOUNTEREN, 0x2);
 
 	/* Stop all the counters so that they can be enabled from perf */
 	pmu_sbi_stop_all(pmu);
@@ -851,6 +888,66 @@ static void riscv_pmu_destroy(struct riscv_pmu *pmu)
 	cpuhp_state_remove_instance(CPUHP_AP_PERF_RISCV_STARTING, &pmu->node);
 }
 
+static int pmu_sbi_event_flags(struct perf_event *event)
+{
+	if (sysctl_perf_user_access == SYSCTL_NO_USER_ACCESS)
+		return 0;
+
+	/* In legacy mode, the first 3 CSRs are available. */
+	if (sysctl_perf_user_access == SYSCTL_LEGACY) {
+		int flags = PERF_EVENT_FLAG_LEGACY;
+
+		if (event->attr.config == PERF_COUNT_HW_CPU_CYCLES ||
+		    event->attr.config == PERF_COUNT_HW_INSTRUCTIONS)
+			flags |= PERF_EVENT_FLAG_USER_READ_CNT;
+
+		return flags;
+	}
+
+	return PERF_EVENT_FLAG_USER_READ_CNT;
+}
+
+static void riscv_pmu_update_counter_access(void *info)
+{
+        if (sysctl_perf_user_access == SYSCTL_LEGACY)
+                csr_write(CSR_SCOUNTEREN, 0x7);
+        else
+                csr_write(CSR_SCOUNTEREN, 0x2);
+}
+
+static int riscv_pmu_proc_user_access_handler(struct ctl_table *table,
+                                              int write, void *buffer,
+                                              size_t *lenp, loff_t *ppos)
+{
+        int prev = sysctl_perf_user_access;
+        int ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+
+        /*
+         * Test against the previous value since we clear SCOUNTEREN when
+         * sysctl_perf_user_access is set to SYSCTL_USER_ACCESS, but we should
+         * not do that if that was already the case.
+         */
+        if (ret || !write || prev == sysctl_perf_user_access)
+                return ret;
+
+        on_each_cpu(riscv_pmu_update_counter_access, (void *)&prev, 1);
+
+        return 0;
+}
+
+static struct ctl_table sbi_pmu_sysctl_table[] = {
+	{
+		.procname       = "perf_user_access",
+		.data		= &sysctl_perf_user_access,
+		.maxlen		= sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler	= riscv_pmu_proc_user_access_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_TWO,
+	},
+	{ }
+};
+
 static int pmu_sbi_device_probe(struct platform_device *pdev)
 {
 	struct riscv_pmu *pmu = NULL;
@@ -888,6 +985,8 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
 	pmu->ctr_get_width = pmu_sbi_ctr_get_width;
 	pmu->ctr_clear_idx = pmu_sbi_ctr_clear_idx;
 	pmu->ctr_read = pmu_sbi_ctr_read;
+	pmu->event_flags = pmu_sbi_event_flags;
+	pmu->csr_index = pmu_sbi_csr_index;
 
 	ret = cpuhp_state_add_instance(CPUHP_AP_PERF_RISCV_STARTING, &pmu->node);
 	if (ret)
@@ -900,6 +999,8 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
 	ret = perf_pmu_register(&pmu->pmu, "cpu", PERF_TYPE_RAW);
 	if (ret)
 		goto out_unregister;
+
+	register_sysctl("kernel", sbi_pmu_sysctl_table);
 
 	return 0;
 

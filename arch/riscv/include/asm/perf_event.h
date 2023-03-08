@@ -9,5 +9,8 @@
 #define _ASM_RISCV_PERF_EVENT_H
 
 #include <linux/perf_event.h>
+
+#define PERF_EVENT_FLAG_LEGACY	1
+
 #define perf_arch_bpf_user_pt_regs(regs) (struct user_regs_struct *)regs
 #endif /* _ASM_RISCV_PERF_EVENT_H */
