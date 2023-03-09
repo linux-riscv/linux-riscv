@@ -43,6 +43,8 @@ void clean_up_work(struct work_struct *work) {
 
 	/* getting per queue interrupt status */
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
+	/* clear irq status */
+	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
 	dev_dbg(dce_priv->pci_dev, "Cleanup start\n");
 
@@ -92,7 +94,11 @@ void clean_up_work(struct work_struct *work) {
 
 	/* TODO: What if more events happened since the read
 	 * They are currently lost*/
-	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
+	irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
+	if (irq_sts) {
+		dev_dbg(dce_priv->pci_dev, "Rescheduling worker!");
+		schedule_work(&dce_priv->clean_up_worker);
+	}
 }
 
 struct submitter_dce_ctx {
