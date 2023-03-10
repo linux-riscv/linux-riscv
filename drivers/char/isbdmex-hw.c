@@ -11,9 +11,12 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
+#include <linux/ioasid.h>
+#include <linux/iopoll.h>
 #include <linux/list.h>
 #include <linux/miscdevice.h>
 #include <linux/pci.h>
+#include <linux/sched.h>
 
 #include "isbdmex.h"
 
@@ -52,6 +55,33 @@ static void free_buf_list(struct isbdm *ii, struct list_head *head) {
 	return;
 }
 
+static struct isbdm_command *alloc_cmd(struct isbdm *ii)
+{
+	struct isbdm_command *cmd = kzalloc(sizeof(struct isbdm_command),
+					    GFP_KERNEL);
+
+	if (!cmd)
+		return NULL;
+
+	return cmd;
+}
+
+static void free_cmd(struct isbdm *ii, struct isbdm_command *cmd)
+{
+	kfree(cmd);
+}
+
+static void free_cmd_list(struct isbdm *ii, struct list_head *head)
+{
+	struct isbdm_command *cur, *tmp;
+
+	list_for_each_entry_safe(cur, tmp, head, node) {
+		free_cmd(ii, cur);
+	}
+
+	return;
+}
+
 /*
  * Grab a buffer and remove it from the free list, or allocate a new one.
  * Assumes the ring's lock is already held.
@@ -83,6 +113,33 @@ static void put_buf(struct isbdm *ii, struct isbdm_ring *ring,
 	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
 
 	list_add(&buf->node, &ring->free_list);
+}
+
+static struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring)
+{
+	struct isbdm_command *command;
+
+	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
+
+	if (!list_empty(&ring->free_list)) {
+		command = list_first_entry(&ring->free_list,
+					   struct isbdm_command, node);
+
+		list_del(&command->node);
+		return command;
+	}
+
+	return alloc_cmd(ii);
+}
+
+/* Put a command onto the free list. Assumes the ring's lock is held. */
+static void put_cmd(struct isbdm *ii, struct isbdm_ring *ring,
+		    struct isbdm_command *cmd)
+{
+
+	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
+
+	list_add(&cmd->node, &ring->free_list);
 }
 
 /* Returns non-zero if the ring is completely stuffed. */
@@ -117,7 +174,7 @@ static void isbdm_tx_enqueue(struct isbdm *ii)
 		list_del(&buf->node);
 		list_add_tail(&buf->node, &ring->inflight_list);
 		buf->desc_idx = ring->prod_idx;
-		desc = &ring->entries[ring->prod_idx];
+		desc = &ring->descs[ring->prod_idx];
 		desc->iova = cpu_to_le64(buf->physical);
 		desc->reserved = cpu_to_le16(0);
 		flags = buf->flags;
@@ -136,6 +193,42 @@ static void isbdm_tx_enqueue(struct isbdm *ii)
 	return;
 }
 
+/* Start as many commands as fit in the hardware table. */
+static void isbdm_cmd_enqueue(struct isbdm *ii)
+{
+	struct isbdm_command *cmd;
+	struct isbdm_rdma_command *cmd_desc;
+	struct isbdm_ring *ring = &ii->cmd_ring;
+	u32 mask = ring->size - 1;
+
+	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
+
+	if (list_empty(&ring->wait_list))
+		return;
+
+	/* Add as many to the cmd ring as possible. */
+	while (!list_empty(&ring->wait_list) &&
+	       !ring_is_full(ring)) {
+
+		cmd = list_first_entry(&ring->wait_list,
+				       struct isbdm_command, node);
+
+		list_del(&cmd->node);
+		list_add_tail(&cmd->node, &ring->inflight_list);
+		cmd->cmd.notify_iova = ii->notify_area_physical +
+				       (ring->prod_idx * sizeof(u32));
+
+		cmd->desc_idx = ring->prod_idx;
+		cmd_desc = &ring->cmds[ring->prod_idx];
+		/* Assumed to already be valid since it made it in the queue */
+		memcpy(cmd_desc, &cmd->cmd, sizeof(*cmd_desc));
+		ring->prod_idx = (ring->prod_idx + 1) & mask;
+	}
+
+	ISBDM_WRITEL(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
+	return;
+}
+
 /* Fill the receive ring with fresh descriptors for it to scribble on. */
 static void isbdm_rx_refill(struct isbdm *ii)
 {
@@ -148,7 +241,7 @@ static void isbdm_rx_refill(struct isbdm *ii)
 	/* Fill the whole table. */
 	while (((ring->prod_idx + 1) & mask) != ring->cons_idx) {
 		struct isbdm_buf *buf = get_buf(ii, ring);
-		struct isbdm_descriptor *desc = &ring->entries[ring->prod_idx];
+		struct isbdm_descriptor *desc = &ring->descs[ring->prod_idx];
 
 		if (!buf) {
 			dev_err(&ii->pdev->dev, "Alloc failure refilling RX");
@@ -170,7 +263,8 @@ static void isbdm_rx_refill(struct isbdm *ii)
 }
 
 /* Allocate resources associated with a ring, and initialize the struct. */
-static int alloc_ring(struct isbdm *ii, struct isbdm_ring *ring, u64 *base_reg)
+static int alloc_ring(struct isbdm *ii, struct isbdm_ring *ring,
+		      size_t element_size, u64 *base_reg)
 {
 	size_t table_size;
 
@@ -179,15 +273,16 @@ static int alloc_ring(struct isbdm *ii, struct isbdm_ring *ring, u64 *base_reg)
 	INIT_LIST_HEAD(&ring->free_list);
 	mutex_init(&ring->lock);
 	ring->size = ISBDMEX_RING_SIZE;
-	table_size = ring->size * sizeof(struct isbdm_descriptor);
-	ring->entries = dma_alloc_coherent(&ii->pdev->dev, table_size,
-					   &ring->physical, GFP_KERNEL);
-	if (!ring->entries)
+	ring->element_size = element_size;
+	table_size = ring->size * element_size;
+	ring->descs = dma_alloc_coherent(&ii->pdev->dev, table_size,
+					 &ring->physical, GFP_KERNEL);
+	if (!ring->descs)
 		return -ENOMEM;
 
 	WARN_ON(ring->physical & ~ISBDM_RING_BASE_ADDR_MASK);
 
-	memset(ring->entries, 0, table_size);
+	memset(ring->descs, 0, table_size);
 	*base_reg = ring->physical | ISBDM_SIZE_TO_LOG2SZM1(ring->size);
 	return 0;
 }
@@ -195,19 +290,27 @@ static int alloc_ring(struct isbdm *ii, struct isbdm_ring *ring, u64 *base_reg)
 /* Free resources associated with a ring. */
 static void free_ring(struct isbdm *ii, struct isbdm_ring *ring)
 {
-	if (ring->entries) {
+	if (ring->descs) {
 		size_t table_size;
 
-		table_size = ring->size * sizeof(struct isbdm_descriptor);
-		dma_free_coherent(&ii->pdev->dev, table_size, ring->entries,
+		table_size = ring->size * ring->element_size;
+		dma_free_coherent(&ii->pdev->dev, table_size, ring->descs,
 				  ring->physical);
 
-		ring->entries = NULL;
+		ring->descs = NULL;
 	}
 
-	free_buf_list(ii, &ring->wait_list);
-	free_buf_list(ii, &ring->inflight_list);
-	free_buf_list(ii, &ring->free_list);
+	if (ring->element_size == sizeof(struct isbdm_rdma_command)) {
+		free_cmd_list(ii, &ring->wait_list);
+		free_cmd_list(ii, &ring->inflight_list);
+		free_cmd_list(ii, &ring->free_list);
+
+	} else {
+		free_buf_list(ii, &ring->wait_list);
+		free_buf_list(ii, &ring->inflight_list);
+		free_buf_list(ii, &ring->free_list);
+	}
+
 	return;
 }
 
@@ -216,11 +319,64 @@ static int init_tx_ring(struct isbdm *ii)
 	u64 base;
 	int rc;
 
-	rc = alloc_ring(ii, &ii->tx_ring, &base);
+	rc = alloc_ring(ii, &ii->tx_ring, sizeof(struct isbdm_descriptor),
+			&base);
 	if (rc)
 		return rc;
 
 	ISBDM_WRITEQ(ii, ISBDM_TX_RING_BASE, base);
+	return 0;
+}
+
+static int init_cmd_ring(struct isbdm *ii)
+{
+	u64 base;
+	int rc;
+
+	rc = alloc_ring(ii, &ii->cmd_ring, sizeof(struct isbdm_rdma_command),
+			&base);
+	if (rc)
+		return rc;
+
+	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_BASE, base);
+	return 0;
+}
+
+static int init_rmb_table(struct isbdm *ii)
+{
+	size_t alloc_size;
+	size_t table_size;
+	u64 base;
+
+	/*
+	 * In addition to allocating the remote memory buffer array here, also
+	 * allocate an array running parallel to the command ring that contains
+	 * space for the notify result from the hardware for each command
+	 * descriptor. This result is written untranslated, but not using the
+	 * PASID of the command itself. So it's a physical address. We can
+	 * either dedicate some space in the kernel for the notify write, or
+	 * enforce that some region of memory handed to us by usermode will not
+	 * go away until the command is complete. For now we've opted for the
+	 * simpler option of just dedicating space here and forwarding the write
+	 * onto usermode when the command descriptor is reaped.
+	 */
+	table_size = sizeof(struct isbdm_remote_buffer) *
+		     ISBDMEX_RMB_TABLE_SIZE;
+
+	alloc_size = table_size + (sizeof(u32) * ISBDMEX_RING_SIZE);
+	ii->rmb_table = dma_alloc_coherent(&ii->pdev->dev, alloc_size,
+					   &ii->rmb_table_physical, GFP_KERNEL);
+
+	if (!ii->rmb_table)
+		return -ENOMEM;
+
+	base = ii->rmb_table_physical |
+	       ISBDM_SIZE_TO_LOG2SZM1(ISBDMEX_RMB_TABLE_SIZE);
+
+	ISBDM_WRITEQ(ii, ISBDM_RMBA_BASE, base);
+	mutex_init(&ii->rmb_table_lock);
+	ii->notify_area = (u32 *)(ii->rmb_table + ISBDMEX_RMB_TABLE_SIZE);
+	ii->notify_area_physical = ii->rmb_table_physical + table_size;
 	return 0;
 }
 
@@ -231,7 +387,8 @@ static int init_rx_ring(struct isbdm *ii)
 	int rc;
 	int threshold;
 
-	rc = alloc_ring(ii, &ii->rx_ring, &base);
+	rc = alloc_ring(ii, &ii->rx_ring, sizeof(struct isbdm_descriptor),
+			&base);
 	if (rc)
 		return rc;
 
@@ -263,6 +420,32 @@ static void deinit_tx_ring(struct isbdm *ii)
 	return;
 }
 
+static void deinit_cmd_ring(struct isbdm *ii)
+{
+	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_BASE, 0);
+	free_ring(ii, &ii->cmd_ring);
+	return;
+}
+
+static void deinit_rmb_table(struct isbdm *ii)
+{
+	ISBDM_WRITEQ(ii, ISBDM_RMBA_BASE, 0);
+	if (ii->rmb_table) {
+		size_t table_size;
+
+		table_size = sizeof(struct isbdm_remote_buffer) *
+			     ISBDMEX_RMB_TABLE_SIZE;
+
+		dma_free_coherent(&ii->pdev->dev, table_size, ii->rmb_table,
+				  ii->rmb_table_physical);
+
+		ii->rmb_table = NULL;
+		ii->notify_area = NULL;
+	}
+
+	return;
+}
+
 static void deinit_rx_ring(struct isbdm *ii)
 {
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_BASE, 0);
@@ -288,22 +471,52 @@ static void enable_rx_ring(struct isbdm *ii)
 	return;
 }
 
-static void disable_tx_ring(struct isbdm *ii)
+static void enable_cmd_ring(struct isbdm *ii)
 {
-	u64 ctrl = ISBDM_READQ(ii, ISBDM_TX_RING_CTRL);
+	u64 ctrl = ISBDM_READQ(ii, ISBDM_CMD_RING_CTRL);
+
+	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_CTRL, ctrl);
+	ctrl = ISBDM_READQ(ii, ISBDM_RMBA_CTRL);
+	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ISBDM_WRITEQ(ii, ISBDM_RMBA_CTRL, ctrl);
+	return;
+}
+
+static void disable_ring(struct isbdm *ii, size_t ctrl_reg)
+{
+	u64 ctrl = ISBDM_READQ(ii, ctrl_reg);
+	int rc;
+
+	if (!(ctrl & ISBDM_RING_CTRL_ENABLE))
+		return;
 
 	ctrl &= ~ISBDM_RING_CTRL_ENABLE;
-	ISBDM_WRITEQ(ii, ISBDM_TX_RING_CTRL, ctrl);
+	ISBDM_WRITEQ(ii, ctrl_reg, ctrl);
+	rc = readq_poll_timeout(ii->base + ctrl_reg, ctrl,
+				!(le64_to_cpu(ctrl) & ISBDM_RING_CTRL_BUSY),
+				100, 50000);
+
+	if (rc)
+		dev_err(&ii->pdev->dev, "Failed to gracefully stop ring");
+}
+
+static void disable_tx_ring(struct isbdm *ii)
+{
+	disable_ring(ii, ISBDM_TX_RING_CTRL);
 	return;
 }
 
 static void disable_rx_ring(struct isbdm *ii)
 {
-	u64 ctrl = ISBDM_READQ(ii, ISBDM_RX_RING_CTRL);
-
-	ctrl &= ~ISBDM_RING_CTRL_ENABLE;
-	ISBDM_WRITEQ(ii, ISBDM_RX_RING_CTRL, ctrl);
+	disable_ring(ii, ISBDM_RX_RING_CTRL);
 	return;
+}
+
+static void disable_cmd_ring(struct isbdm *ii)
+{
+	disable_ring(ii, ISBDM_CMD_RING_CTRL);
+	disable_ring(ii, ISBDM_RMBA_CTRL);
 }
 
 static void enable_interrupt(struct isbdm *ii, u64 mask)
@@ -426,11 +639,96 @@ void isbdm_reap_tx(struct isbdm *ii)
 	return;
 }
 
+/* Process and release commands that the hardware has completed. */
+void isbdm_reap_cmds(struct isbdm *ii)
+{
+	struct isbdm_ring *ring = &ii->cmd_ring;
+	u32 mask = ring->size - 1;
+	u32 hw_next = ISBDM_READL(ii, ISBDM_CMD_RING_HEAD) & mask;
+
+	mutex_lock(&ring->lock);
+
+	WARN_ON_ONCE((ring->cons_idx | ring->prod_idx) & ~mask);
+
+	if ((hw_next > ring->prod_idx) && (ring->cons_idx <= ring->prod_idx)) {
+		dev_err(&ii->pdev->dev,
+			"command consumer zoomed %x->%x, through producer %x",
+			ring->cons_idx,
+			hw_next,
+			ring->prod_idx);
+	}
+
+	while (ring->cons_idx != hw_next) {
+		struct isbdm_command *command;
+
+		if (list_empty(&ring->inflight_list)) {
+			dev_err(&ii->pdev->dev, "command inflight underflow");
+			break;
+		}
+
+		command = list_first_entry(&ring->inflight_list,
+					   struct isbdm_command, node);
+
+		if (command->desc_idx != ring->cons_idx) {
+			dev_err(&ii->pdev->dev,
+				"Reaping wrong cmd descriptor: %u != list %u\n",
+				ring->cons_idx,
+				command->desc_idx);
+
+			/* TODO: Do something about this, reset command ring? */
+		}
+
+		list_del(&command->node);
+		/* Shuttle the notify result back to the file context. */
+		if (le64_to_cpu(command->cmd.size_pasid_flags) &
+		    ISBDM_RDMA_NV) {
+
+			uint32_t status = ii->notify_area[command->desc_idx];
+
+			/* Write the error back if it was the first. */
+			if ((status != ISBDM_STATUS_SUCCESS) &&
+			    (command->user_ctx->last_error.error ==
+			     ISBDM_STATUS_SUCCESS)) {
+
+				command->user_ctx->last_error.error =
+					le32_to_cpu(status);
+
+				/*
+				 * Ensure the error gets out before decrementing
+				 * inflight command count.
+				 */
+				smp_wmb();
+			}
+		}
+
+		WARN_ON_ONCE(!command->user_ctx->last_error.inflight_commands);
+
+		command->user_ctx->last_error.inflight_commands--;
+		kref_put(&command->user_ctx->ref, isbdmex_user_ctx_release);
+		command->user_ctx = NULL;
+		list_add(&command->node, &ring->free_list);
+		ring->cons_idx = (ring->cons_idx + 1) & mask;
+	}
+
+	/* Hopefully more space was made, so jam more in now. */
+	isbdm_cmd_enqueue(ii);
+	mutex_unlock(&ring->lock);
+	return;
+}
+
 int isbdm_init_hw(struct isbdm *ii)
 {
 	int rc;
 
 	rc = init_tx_ring(ii);
+	if (rc)
+		return rc;
+
+	rc = init_cmd_ring(ii);
+	if (rc)
+		return rc;
+
+	rc = init_rmb_table(ii);
 	if (rc)
 		return rc;
 
@@ -444,6 +742,8 @@ int isbdm_init_hw(struct isbdm *ii)
 void isbdm_deinit_hw(struct isbdm *ii)
 {
 	deinit_tx_ring(ii);
+	deinit_cmd_ring(ii);
+	deinit_rmb_table(ii);
 	deinit_rx_ring(ii);
 	return;
 }
@@ -451,10 +751,12 @@ void isbdm_deinit_hw(struct isbdm *ii)
 void isbdm_enable(struct isbdm *ii)
 {
 	u64 mask = ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
-		   ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXMF_IRQ;
+		   ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXMF_IRQ |
+		   ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
 
 	enable_interrupt(ii, ISBDM_LNKSTS_IRQ);
 	enable_tx_ring(ii);
+	enable_cmd_ring(ii);
 	enable_rx_ring(ii);
 	enable_interrupt(ii, mask);
 	return;
@@ -462,11 +764,9 @@ void isbdm_enable(struct isbdm *ii)
 
 void isbdm_disable(struct isbdm *ii)
 {
-	u64 mask = ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
-		   ISBDM_RXMF_IRQ | ISBDM_RXOVF_IRQ;
-
-	disable_interrupt(ii, mask);
+	disable_interrupt(ii, ISBDM_ALL_IRQ_MASK);
 	disable_rx_ring(ii);
+	disable_cmd_ring(ii);
 	disable_tx_ring(ii);
 	return;
 }
@@ -494,6 +794,7 @@ ssize_t isbdmex_send(struct isbdm *ii, const char __user *va, size_t size)
 	int not_done;
 	ssize_t rc;
 	size_t remaining = size;
+
 	mutex_lock(&ii->tx_ring.lock);
 	/* Loop creating packets and queueing them on to our local list. */
 	while (remaining != 0) {
@@ -546,6 +847,187 @@ out:
 	return rc;
 }
 
+/* Submit an RDMA command from userspace */
+int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
+			 const char __user *user_cmd)
+{
+	struct isbdm_command *command;
+	struct task_struct *task = get_current();
+	int not_done;
+	uint64_t pasid = task->mm->pasid;
+	int rc;
+	uint64_t value;
+
+	if (pasid == INVALID_IOASID) {
+		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
+		return -EAGAIN;
+	}
+
+	mutex_lock(&ii->cmd_ring.lock);
+	command = get_cmd(ii, &ii->cmd_ring);
+	if (!command) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	not_done = copy_from_user(&command->cmd, user_cmd,
+				  sizeof(command->cmd));
+
+	if (not_done != 0) {
+		rc = -EFAULT;
+		goto out;
+	}
+
+	value = le64_to_cpu(command->cmd.size_pasid_flags);
+	/* Take the size and notify flag from usermode, leave everything else */
+	value &= ISBDM_RDMA_SIZE_MASK | ISBDM_RDMA_NV;
+	value |= ISBDM_RDMA_PV;
+	if (pasid > ISBDM_RDMA_PASID_MASK) {
+		dev_err(&ii->pdev->dev, "PASID out of range\n");
+		rc = -ERANGE;
+		goto out;
+	}
+
+	value |= pasid << ISBDM_RDMA_PASID_SHIFT;
+	command->cmd.size_pasid_flags = cpu_to_le64(value);
+
+	/* Make sure sure usermode isn't trying to set reserved bits. */
+	value = le64_to_cpu(command->cmd.rmb_offset);
+	if (value > ISBDM_RDMA_RMB_OFFSET_MASK) {
+		dev_err(&ii->pdev->dev, "RMB offset out of range\n");
+		rc = -ERANGE;
+		goto out;
+	}
+
+	value = le64_to_cpu(command->cmd.rmbi_command);
+	if (value & ISBDM_RDMA_RMBI_RESERVED_MASK) {
+		dev_err(&ii->pdev->dev, "RMBI/command reserved bits set\n");
+		rc = -ERANGE;
+		goto out;
+	}
+
+	/*
+	 * Save the file context along with the command so the status can be
+	 * returned.
+	 */
+	user_ctx->last_error.inflight_commands++;
+	command->user_ctx = user_ctx;
+	kref_get(&user_ctx->ref);
+	command->cmd.notify_iova = 0;
+	list_add_tail(&command->node, &ii->cmd_ring.wait_list);
+	isbdm_cmd_enqueue(ii);
+	rc = 0;
+
+out:
+	if (rc && command)
+		put_cmd(ii, &ii->cmd_ring, command);
+
+	mutex_unlock(&ii->cmd_ring.lock);
+	return rc;
+}
+
+/*
+ * Create a new remote memory buffer for potential use by ISBDM. Returns the RMB
+ * index on success.
+ */
+int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
+		      const char __user *user_rmb)
+{
+	struct task_struct *task = get_current();
+	int idx;
+	int not_done;
+	uint64_t pasid = task->mm->pasid;
+	struct isbdm_remote_buffer rbcopy;
+	uint64_t value;
+
+	if (pasid == INVALID_IOASID) {
+		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
+		return -EAGAIN;
+	}
+
+	if (pasid > ISBDM_REMOTE_BUF_PASID_MASK) {
+		dev_err(&ii->pdev->dev, "PASID out of range\n");
+		return -ERANGE;
+	}
+
+	not_done = copy_from_user(&rbcopy, user_rmb, sizeof(rbcopy));
+	if (not_done != 0)
+		return -EFAULT;
+
+	/* Let usermode control only the W bit in pasid_flags. */
+	value = le64_to_cpu(rbcopy.pasid_flags);
+	value &= ISBDM_REMOTE_BUF_W;
+	value |= ISBDM_REMOTE_BUF_PV | pasid;
+	rbcopy.pasid_flags = cpu_to_le64(value);
+	/* Stick the file in to know which entries to clean up on close. */
+	rbcopy.sw_avail = cpu_to_le64((unsigned long)file);
+
+	/* Hunt for a free entry in the hardware. */
+	mutex_lock(&ii->rmb_table_lock);
+	for (idx = 0; idx < ISBDMEX_RMB_TABLE_SIZE; idx++) {
+		if (ii->rmb_table[idx].sw_avail == 0) {
+			memcpy(&ii->rmb_table[idx], &rbcopy, sizeof(rbcopy));
+			break;
+		}
+	}
+
+	mutex_unlock(&ii->rmb_table_lock);
+	if (idx == ISBDMEX_RMB_TABLE_SIZE)
+		return -ENOSPC;
+
+	return idx;
+}
+
+/* Free a previously allocated remote memory buffer */
+int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi)
+{
+	int rc = -ENOENT;
+	__le64 token = cpu_to_le64((unsigned long)file);
+
+	if (rmbi > ISBDMEX_RMB_TABLE_SIZE) {
+		dev_err(&ii->pdev->dev, "RMB index %u out of range\n", rmbi);
+		return -ERANGE;
+	}
+
+	mutex_lock(&ii->rmb_table_lock);
+	if (ii->rmb_table[rmbi].sw_avail == token) {
+		/* Invert the security key first to prevent torn reads */
+		ii->rmb_table[rmbi].security_key =
+			~ii->rmb_table[rmbi].security_key;
+
+		wmb();
+		memset(&ii->rmb_table[rmbi], 0, sizeof(ii->rmb_table[rmbi]));
+		rc = 0;
+	}
+
+	mutex_unlock(&ii->rmb_table_lock);
+	return rc;
+}
+
+/* Free all remote memory buffers associated with this file. */
+void isbdm_free_all_rmbs(struct isbdm *ii, struct file *file)
+{
+	int idx;
+
+	__le64 token = cpu_to_le64((unsigned long)file);
+	mutex_lock(&ii->rmb_table_lock);
+	for (idx = 0; idx < ISBDMEX_RMB_TABLE_SIZE; idx++) {
+		if (ii->rmb_table[idx].sw_avail == token) {
+			/*
+			 * Invert the security key first to prevent torn reads
+			 */
+			ii->rmb_table[idx].security_key =
+				~ii->rmb_table[idx].security_key;
+			wmb();
+
+			memset(&ii->rmb_table[idx], 0,
+			       sizeof(ii->rmb_table[idx]));
+		}
+	}
+
+	mutex_unlock(&ii->rmb_table_lock);
+}
+
 /* Reap any completed RX descriptors. */
 void isbdm_process_rx_done(struct isbdm *ii)
 {
@@ -559,7 +1041,7 @@ void isbdm_process_rx_done(struct isbdm *ii)
 
 	while (ring->cons_idx != hw_next) {
 		struct isbdm_buf *buf;
-		struct isbdm_descriptor *desc = &ring->entries[ring->cons_idx];
+		struct isbdm_descriptor *desc = &ring->descs[ring->cons_idx];
 
 		if (list_empty(&ring->inflight_list)) {
 			dev_err(&ii->pdev->dev, "RX inflight underflow");
@@ -621,9 +1103,9 @@ void isbdm_rx_overflow(struct isbdm *ii)
 	 */
 	i = (ISBDM_READL(ii, ISBDM_RX_RING_HEAD) - 1) & mask;
 	while ((i != ring->prod_idx) &&
-	       (!(ring->entries[i].flags & ISBDM_DESC_LS))) {
+	       (!(ring->descs[i].flags & ISBDM_DESC_LS))) {
 
-		ring->entries[i].flags |= ISBDM_DESC_SW_POISON;
+		ring->descs[i].flags |= ISBDM_DESC_SW_POISON;
 		i = (i - 1) & mask;
 	}
 
