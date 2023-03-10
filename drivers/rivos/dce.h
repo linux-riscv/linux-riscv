@@ -5,10 +5,6 @@
 #include "linux/eventfd.h"
 #include <linux/workqueue.h>
 
-#define DCE_CTRL 0
-
-#define DCE_STATUS 8
-
 #define DCE_INTERRUPT_CONFIG_DESCRIPTOR_COMPLETION 48
 #define DCE_INTERRUPT_CONFIG_TIMEOUT               56
 #define DCE_INTERRUPT_CONFIG_ERROR_CONDITION       64
@@ -22,6 +18,11 @@
 #define DCE_REG_WQIRQSTS    0x20
 #define DCE_REG_WQCR        0x0
 
+#define DCE_GCS				  (127 * 4096)
+#define DCE_GCS_KEYOWN_BASE   0x10
+#define DCE_GCS_KEYOWN_STRIDE 8
+#define DCE_GCS_KEYOWN(fn)    (DCE_GCS + DCE_GCS_KEYOWN_BASE + \
+                               fn * DCE_GCS_KEYOWN_STRIDE)
 
 #define DCE_OPCODE_CLFLUSH            0
 #define DCE_OPCODE_MEMCPY             1
@@ -59,6 +60,7 @@
 #define DCE_MINOR 0x0
 #define DCE_NR_DEVS  2
 #define DCE_NR_VIRTFN 7
+#define DCE_NR_FN (DCE_NR_VIRTFN + 1)
 
 /* TRANSCTL fields */
 #define TRANSCTL_SUPV		BIT(31)
@@ -121,6 +123,12 @@ typedef struct DataAddrNode {
 #define NUM_WQ      64
 #define DEFAULT_NUM_DSC_PER_WQ 64
 
+#define DCE_NR_KEYS 64
+#define DCE_KEYS_PER_QUEUE 2
+#define DCE_KEY_VALID 0x80
+/* TODO: checking sl < DCE_NR_KEYS would be good */
+#define DCE_KEY_VALID_ENTRY(sl) (DCE_KEY_VALID | (sl&0x3F))
+
 typedef struct __attribute__((packed, aligned(64))) WQITE {
     uint64_t DSCBA;
     uint64_t DSCPTA;
@@ -128,7 +136,7 @@ typedef struct __attribute__((packed, aligned(64))) WQITE {
     uint8_t padding[3];
     uint32_t TRANSCTL;
     uint64_t WQ_CTX_SAVE_BA;
-    // TBA: key slot management
+	uint8_t  keys[DCE_KEYS_PER_QUEUE];
 } WQITE;
 
 /* shared with HW which expects both head and tail
