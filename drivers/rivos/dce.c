@@ -437,6 +437,8 @@ static int setup_user_wq(struct submitter_dce_ctx* ctx,
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 0) |
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
+	dce_priv->WQIT[wq_num].keys[0]  = DCE_KEY_VALID_ENTRY(6);
+	dce_priv->WQIT[wq_num].keys[1]  = DCE_KEY_VALID_ENTRY(18);
 
 	/* enable queue in HW, does its own wmb()*/
 	set_queue_enable(dce_priv, wq_num, true);
@@ -528,6 +530,9 @@ int setup_kernel_wq(
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
+	/* TODO: get from user */
+	dce_priv->WQIT[wq_num].keys[0]  = DCE_KEY_VALID_ENTRY(6);
+	dce_priv->WQIT[wq_num].keys[1]  = DCE_KEY_VALID_ENTRY(18);
 	/* enable the queue in HW, does its own wmb() */
 	set_queue_enable(dce_priv, wq_num, true);
 
@@ -955,6 +960,11 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	for (int i = 0; i < NUM_WQ; i++) {
 		init_wq(drv_priv->wq+i);
+	}
+
+	/* Simple setup for key ownership, all for all for now*/
+	for (int fn = 0; fn < DCE_NR_FN; fn++) {
+		dce_reg_write(drv_priv, DCE_GCS_KEYOWN(fn), ~(u64)0);
 	}
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
