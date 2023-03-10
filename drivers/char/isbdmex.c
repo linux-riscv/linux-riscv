@@ -102,7 +102,7 @@ static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 	u64 pending = atomic64_xchg(&ii->pending_irqs, 0);
 	u64 handled = ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ | ISBDM_TXDONE_IRQ |
 		      ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXDONE_IRQ |
-		      ISBDM_IPSR_IIP;
+		      ISBDM_IPSR_IIP | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
 
 	if (pending & (ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ)) {
 		dev_err(&ii->pdev->dev, "memory fault %llx\n", pending);
@@ -131,6 +131,9 @@ static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 
 	if (pending & ISBDM_TXDONE_IRQ)
 		isbdm_reap_tx(ii);
+
+	if (pending & ISBDM_CMDDONE_IRQ)
+		isbdm_reap_cmds(ii);
 
 	return IRQ_HANDLED;
 }
@@ -169,6 +172,16 @@ static int isbdmex_request_irq(struct pci_dev *pdev)
 	return ret;
 }
 
+void isbdmex_user_ctx_release(struct kref *ref)
+{
+	struct isbdm_user_ctx *ctx;
+
+	ctx = container_of(ref, struct isbdm_user_ctx, ref);
+
+	WARN_ON_ONCE(ctx->last_error.inflight_commands);
+
+	kfree(ctx);
+}
 
 /******************************************************************************/
 /* fops/user handling */
@@ -176,31 +189,72 @@ static int isbdmex_request_irq(struct pci_dev *pdev)
 static int isbdmex_open(struct inode *inode, struct file *file)
 {
 
+	struct isbdm_user_ctx *ctx;
 	struct isbdm *ii;
+	int rc;
 
 	ii = isbdmex_locate(iminor(inode));
 	if (!ii)
 		return -ENODEV;
 
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	kref_init(&ctx->ref);
+
 	/*
 	 * TODO: Refcounting on the device to make sure it doesn't disappear out
 	 * from under us.
 	 */
+	file->private_data = ctx;
+	ctx->isbdm = ii;
+	ctx->sva = iommu_sva_bind_device(&ii->pdev->dev, current->mm);
+	if (IS_ERR(ctx->sva)) {
+		rc = PTR_ERR(ctx->sva);
+		dev_err(&ii->pdev->dev, "pasid allocation failed: %d\n", rc);
+		kfree(ctx);
+		return rc;
+	}
 
-	file->private_data = ii;
 	return 0;
 }
 
 static int isbdmex_release(struct inode *inode, struct file *file)
 {
+	struct isbdm_user_ctx *ctx;
+
+	ctx = file->private_data;
+
 	/* TODO: Refcounting on the device! See serio_raw_release() for ex. */
+	isbdm_free_all_rmbs(ctx->isbdm, file);
+	iommu_sva_unbind_device(ctx->sva);
+	kref_put(&ctx->ref, isbdmex_user_ctx_release);
+	file->private_data = NULL;
+	return 0;
+}
+
+static int isbdmex_get_last_error(struct isbdm *ii, struct isbdm_user_ctx *ctx,
+				  void __user *argp)
+{
+	struct isbdm_last_error last_error;
+
+	/* Lock the cmd ring to avoid racy updates to the last_error struct. */
+	mutex_lock(&ii->cmd_ring.lock);
+	memcpy(&last_error, &ctx->last_error, sizeof(last_error));
+	ctx->last_error.error = ISBDM_STATUS_SUCCESS;
+	mutex_unlock(&ii->cmd_ring.lock);
+	if (copy_to_user(argp, &last_error, sizeof(last_error)))
+		return -EFAULT;
+
 	return 0;
 }
 
 static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	char __user *argp;
-	struct isbdm *ii = file->private_data;
+	struct isbdm_user_ctx *ctx = file->private_data;
+	struct isbdm *ii = ctx->isbdm;
 	u64 value;
 	int rc;
 
@@ -233,6 +287,22 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		isbdm_rx_threshold(ii);
 		break;
 
+	case IOCTL_ALLOC_RMB:
+		rc = isbdmex_alloc_rmb(ii, file, argp);
+		break;
+
+	case IOCTL_FREE_RMB:
+		rc = isbdmex_free_rmb(ii, file, (unsigned long)argp);
+		break;
+
+	case IOCTL_RDMA_CMD:
+		rc = isbdmex_send_command(ii, ctx, argp);
+		break;
+
+	case IOCTL_GET_LAST_ERROR:
+		rc = isbdmex_get_last_error(ii, ctx, argp);
+		break;
+
 	default:
 		rc = -ENOENT;
 		break;
@@ -244,7 +314,8 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 			    loff_t *file_offset)
 {
-	struct isbdm *ii = file->private_data;
+	struct isbdm_user_ctx *ctx = file->private_data;
+	struct isbdm *ii = ctx->isbdm;
 	ssize_t done;
 
 	do {
@@ -280,7 +351,8 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 static ssize_t isbdmex_write(struct file *file, const char __user *va,
 			     size_t size, loff_t *file_offset)
 {
-	struct isbdm *ii = file->private_data;
+	struct isbdm_user_ctx *ctx = file->private_data;
+	struct isbdm *ii = ctx->isbdm;
 	ssize_t rc;
 
 	rc = isbdmex_send(ii, va, size);
@@ -340,6 +412,10 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	pci_set_master(pdev);
+	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+		dev_err_probe(dev, ret, "SVA enablement failed\n");
+		goto deinit;
+	}
 
 	/* IRQs */
 	ret = isbdmex_request_irq(pdev);
