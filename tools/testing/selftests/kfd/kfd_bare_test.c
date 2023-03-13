@@ -46,9 +46,6 @@ struct Doorbell {
 					& ~((uint64_t)(page_size)	\
 					    - 1ULL))
 
-#define KFD_DEV "/dev/kfd"
-static int kfd;
-
 // hack until DPA kernel driver exposes this somehow
 #define DRM_DEV "/dev/dri/renderD128"
 static int drm_fd;
@@ -80,21 +77,12 @@ static void get_version(void)
 		args.major_version, args.minor_version);
 }
 
-int amdgpu_device_initialize(int fd,
-			     uint32_t *major_version,
-			     uint32_t *minor_version,
-			     void *device_handle);
-
-// necessary for acquire vm
 static void open_render_fd(void)
 {
 	drm_fd = open(DRM_DEV, O_RDWR);
-	// non fatal for now
-	// DPA doesn't have DRM yet, so just use DPA KFD
 	if (drm_fd < 0) {
 		perror("open drm_fd");
-		drm_fd = -1;
-		drm_fd = kfd;
+		exit(1);
 	}
 }
 
