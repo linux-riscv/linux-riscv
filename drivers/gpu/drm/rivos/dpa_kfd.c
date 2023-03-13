@@ -463,6 +463,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	}
 
 	dpa_app->is_kfd = false;
+	dpa_app->drm_priv = file_priv;
 
 	mutex_unlock(&dpa_processes_lock);
 	return 0;
