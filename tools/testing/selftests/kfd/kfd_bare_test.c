@@ -1,5 +1,4 @@
-// gcc -O2 -Werror -o kfd_bare_test kfd_bare_test.c
-// riscv64-linux-gnu-gcc-10 -O2 -Werror -o kfd_bare_test_riscv kfd_bare_test.c
+// from selftests dir: make CROSS_COMPILE=riscv64-linux-gnu- TARGETS=kfd
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,8 +53,6 @@ static int kfd;
 #define DRM_DEV "/dev/dri/renderD128"
 static int drm_fd;
 
-static uint32_t gpu_id;
-
 #define NUM_DEV_APERTURES NUM_OF_SUPPORTED_GPUS
 struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
 
@@ -71,15 +68,6 @@ struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
 #define AXPY_Y_DIM (1)
 #define AXPY_Z_DIM (1)
 
-static void open_kfd(void)
-{
-	kfd = open(KFD_DEV, O_RDWR);
-	if (kfd < 0) {
-		perror("open");
-		exit(1);
-	}
-}
-
 static void get_version(void)
 {
 	struct drm_dpa_get_version args;
@@ -90,43 +78,6 @@ static void get_version(void)
 	}
 	fprintf(stderr, "version: major %d minor %d\n",
 		args.major_version, args.minor_version);
-}
-
-static void get_process_apertures_new(void)
-{
-	struct kfd_ioctl_get_process_apertures_new_args args;
-	int i, ret;
-
-	memset(&dev_apertures, 0, sizeof(dev_apertures));
-	args.kfd_process_device_apertures_ptr = (uint64_t)
-		&dev_apertures;
-	args.num_of_nodes = NUM_DEV_APERTURES;
-
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_PROCESS_APERTURES_NEW, &args);
-	if (ret) {
-		perror("ioctl get process apertures new");
-		exit(1);
-	}
-	fprintf(stderr,"aperture nodes filled: %d\n", args.num_of_nodes);
-	for (i = 0; i < args.num_of_nodes; i++) {
-		fprintf(stderr, "aperture[%d]:\n"
-			"\t lds_base 0x%" PRIx64 "\n"
-			"\t lds_limit 0x%" PRIx64 "\n"
-			"\t scratch_base 0x%" PRIx64 "\n"
-			"\t scratch_limit 0x%" PRIx64 "\n"
-			"\t gpuvm_base 0x%" PRIx64 "\n"
-			"\t gpuvm_limit 0x%" PRIx64 "\n"
-			"\t gpu_id 0x%" PRIx32 "\n",
-			i,
-			(uint64_t) dev_apertures[i].lds_base,
-			(uint64_t) dev_apertures[i].lds_limit,
-			(uint64_t) dev_apertures[i].scratch_base,
-			(uint64_t) dev_apertures[i].scratch_limit,
-			(uint64_t) dev_apertures[i].gpuvm_base,
-			(uint64_t) dev_apertures[i].gpuvm_limit,
-			dev_apertures[i].gpu_id);
-		gpu_id = dev_apertures[i].gpu_id;
-	}
 }
 
 int amdgpu_device_initialize(int fd,
@@ -144,42 +95,6 @@ static void open_render_fd(void)
 		perror("open drm_fd");
 		drm_fd = -1;
 		drm_fd = kfd;
-	}
-}
-
-// necessary for allocations to work
-static void acquire_vm(void)
-{
-	struct kfd_ioctl_acquire_vm_args args;
-	int ret;
-
-	args.drm_fd = drm_fd;
-	args.gpu_id = gpu_id;
-
-	ret = ioctl(drm_fd,  DRM_IOCTL_DPA_ACQUIRE_VM, &args);
-	if (ret) {
-		perror("ioctl aquire vm");
-		exit(1);
-	}
-
-}
-
-static void set_memory_policy(void)
-{
-	struct kfd_ioctl_set_memory_policy_args args;
-	int ret;
-
-	args.alternate_aperture_base = dev_apertures[0].gpuvm_base;
-	args.alternate_aperture_size = dev_apertures[0].gpuvm_limit -
-		dev_apertures[0].gpuvm_base;
-	args.gpu_id = gpu_id;
-	args.default_policy = KFD_IOC_CACHE_POLICY_NONCOHERENT;
-	args.alternate_policy = KFD_IOC_CACHE_POLICY_COHERENT;
-
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_SET_MEMORY_POLICY, &args);
-	if (ret) {
-		perror("ioctl set memory policy");
-		exit(1);
 	}
 }
 
@@ -208,7 +123,6 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 	struct kfd_ioctl_alloc_memory_of_gpu_args args;
 	int ret;
 
-	args.gpu_id = gpu_id;
 	args.va_addr = (uint64_t)user_ptr;
 	args.size = size;
 	args.mmap_offset = (uint64_t)user_ptr;
@@ -267,40 +181,10 @@ static void mmap_gpu_obj(int fd, void *user_ptr, size_t size, uint64_t mmap_offs
 	}
 }
 
-static void mmap_kfd(void *user_ptr, size_t size, uint64_t mmap_offset)
-{
-	return mmap_gpu_obj(kfd, user_ptr, size, mmap_offset);
-}
-
-// not used yet
 static void mmap_dev_mem(void *user_ptr, size_t size, uint64_t mmap_offset)
 {
 	// device memory is mapped through the DRM fd apparently
 	return mmap_gpu_obj(drm_fd, user_ptr, size, mmap_offset);
-}
-
-static void map_memory_to_gpu(uint64_t handle)
-{
-	struct kfd_ioctl_map_memory_to_gpu_args args;
-	int ret;
-	uint32_t gpu_ids[1] = { gpu_id };
-
-	args.handle = handle;
-	args.device_ids_array_ptr = (uint64_t)&gpu_ids;
-	args.n_devices = 1;
-	args.n_success = 0;
-
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_MAP_MEMORY_TO_GPU, &args);
-	fprintf(stderr, "%s: gpu_id 0x%x args.handle = 0x%lx n_success = %d\n",
-		__func__, gpu_id, (uint64_t)args.handle, args.n_success);
-
-	if (ret) {
-		perror("ioctl map memory of gpu");
-		exit(1);
-	}
-	if (!args.n_success)
-		exit(1);
-
 }
 
 static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
@@ -413,7 +297,6 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 
 	args.ring_base_address = (uint64_t)ring_base;
 	args.ring_size = (uint32_t)ring_size;
-	args.gpu_id = gpu_id;
 	args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
 	args.queue_percentage = KFD_MAX_QUEUE_PERCENTAGE;
 	args.queue_priority = KFD_MAX_QUEUE_PRIORITY;
@@ -635,9 +518,6 @@ int main(int argc, char *argv[])
 
 	open_render_fd();
 	get_version();
-	get_process_apertures_new();
-	acquire_vm();
-	set_memory_policy();
 
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
