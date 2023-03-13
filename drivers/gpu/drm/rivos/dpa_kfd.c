@@ -1413,9 +1413,6 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_kfd_process *p,
 	dev_warn(dev, "%s: flags 0x%x size 0x%llx\n", __func__,
 		 args->flags, args->size);
 
-	if (args->gpu_id != DPA_GPU_ID)
-		return -ENODEV;
-
 	if (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
 		r = dpa_alloc_vram(dpa, args->size, p->drm_priv, &buf, &offset,
 			KFD_IOC_ALLOC_MEM_FLAGS_VRAM);
