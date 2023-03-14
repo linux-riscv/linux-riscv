@@ -14,7 +14,6 @@
 #include <sys/mman.h>
 #include <linux/kfd_ioctl.h>
 #include <drm_dpa.h>
-#include <elf.h>
 
 #define LITTLEENDIAN_CPU
 #include "hsa.h"
@@ -53,17 +52,8 @@ static int drm_fd;
 #define NUM_DEV_APERTURES NUM_OF_SUPPORTED_GPUS
 struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
 
-// ELF Section Header type values
-#define SYMTAB 0x2
-#define STRTAB 0x3
-
 // keep read and write indices one CL apart
 #define CACHELINE_SIZE (64)
-
-// hardcoded arguments for axpy kernel
-#define AXPY_X_DIM (4)
-#define AXPY_Y_DIM (1)
-#define AXPY_Z_DIM (1)
 
 static void get_version(void)
 {
@@ -175,60 +165,6 @@ static void mmap_dev_mem(void *user_ptr, size_t size, uint64_t mmap_offset)
 	return mmap_gpu_obj(drm_fd, user_ptr, size, mmap_offset);
 }
 
-static void parse_kernels(void *elf_base, unsigned int *kern_start_offset)
-{
-    if (elf_base == NULL) {
-        perror("Missing ELF header");
-        exit(1);
-    }
-
-    Elf64_Ehdr *e_header = (Elf64_Ehdr *) elf_base;
-    Elf64_Off sh_off = e_header->e_shoff;
-    uint64_t sh_num = e_header->e_shnum;
-    uint64_t sh_entrysize = e_header->e_shentsize;
-
-    Elf64_Shdr *sh_header = (Elf64_Shdr *) (elf_base + sh_off);
-    Elf64_Shdr *sh_end = (Elf64_Shdr *) (elf_base + sh_off + (sh_num * sh_entrysize));
-    Elf64_Off symtab_off = 0, strtab_off = 0;
-    uint64_t sh_size = 0;
-    if (sh_header == NULL) {
-        perror("Missing section header table");
-        exit(1);
-    }
-
-    while (sh_header < sh_end) {
-        switch (sh_header->sh_type) {
-            case SYMTAB:
-                symtab_off = sh_header->sh_offset;
-                sh_size = sh_header->sh_size;
-
-            case STRTAB:
-                strtab_off = sh_header->sh_offset;
-        }
-        sh_header++;
-    }
-
-    Elf64_Sym *sym_entry = (Elf64_Sym *) (elf_base + symtab_off);
-    Elf64_Sym *symtab_end = (Elf64_Sym *) (elf_base + symtab_off + sh_size);
-    if (sym_entry == NULL) {
-        perror("Missing symbol table");
-        exit(1);
-    }
-
-	// Extract the kernel offset
-    while (sym_entry < symtab_end) {
-        char *str_addr = (char *) (elf_base + strtab_off + sym_entry->st_name);
-        if (!strncmp(str_addr, "_Z", 2)) {
-            *kern_start_offset = sym_entry->st_value + 4096;
-            return;
-        }
-        sym_entry++;
-    }
-
-    perror("No kernel offset found\n");
-    exit(1);
-}
-
 #if 0
 static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
 				uint32_t *event_id, uint32_t *event_slot_index)
@@ -331,88 +267,48 @@ static void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 	fprintf(stderr, "completion_signal: 0x%lx\n\n", pkt->completion_signal.handle);
 }
 
-static void dump_buffer_u64(uint64_t *buf, unsigned length)
+#define NULL_X_DIM (32)
+#define NULL_Y_DIM (1)
+#define NULL_Z_DIM (1)
+
+#define RIG64_EXIT_INSTRUCTION (0x0000000000080073ULL)
+
+static int init_null_kernel(void **kern_ptr, size_t *kernel_size, struct KernelDescriptor **kd_ptr)
 {
-	int i;
-	for (i = 0; i < length; i++) {
-		fprintf(stderr, "%08lx\n", buf[i]);
+	uint64_t kd_addr;
+	uint64_t *kern_data;
+
+	*kernel_size = getpagesize();
+	*kern_ptr = mmap(NULL, *kernel_size, PROT_READ | PROT_WRITE,
+			 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	if (*kern_ptr == MAP_FAILED) {
+		perror("mmap kernel");
+		return 1;
 	}
-}
+	kern_data = *kern_ptr;
+	memset(kern_data, -1, *kernel_size);
 
-static void dump_buffer_f32(float *buf, unsigned length)
-{
-	int i;
-	for (i = 0; i < length; i++) {
-		fprintf(stderr, "%f\n", buf[i]);
+	// just one instruction, exit
+	kern_data[0] = RIG64_EXIT_INSTRUCTION;
+
+	// kernel descriptor will go after the kernel binary + one page gap
+	kd_addr = ALIGN_UP_PGSZ(*kern_ptr + *kernel_size, getpagesize()) +
+		getpagesize();
+	*kd_ptr = mmap((void *)kd_addr,
+		      getpagesize(), PROT_READ | PROT_WRITE,
+		      MAP_ANONYMOUS | MAP_PRIVATE,
+		      -1, 0);
+	if (*kd_ptr == MAP_FAILED) {
+		perror("mmap kernel descriptor");
+		return 1;
 	}
-}
 
-#define ARG0_LOC (24)
-#define ARG1_LOC (32)
-#define ARG2_LOC (40)
-const size_t axpy_x_offset = CACHELINE_SIZE;
-const size_t axpy_y_offset = CACHELINE_SIZE * 2;
+	memset((void*)*kd_ptr, -1, sizeof(**kd_ptr));
+	(*kd_ptr)->kernel_code_entry_byte_offset = (int64_t)(*kern_ptr - (void*)(*kd_ptr));
+	fprintf(stderr, "kernel code byte offset 0x%" PRIx64 "\n",
+		(*kd_ptr)->kernel_code_entry_byte_offset);
 
-#define AXPY_XY_BUFSIZE (4)
-
-// set up kernel arguments for a specific instance of axpy
-static void init_axpy_kern_args(uint8_t *kern_args_ptr, size_t size)
-{
-	// copied from axpy.cu
-	// 3 arguments a, x, y
-	float a = 2.0f;
-	float host_x[AXPY_XY_BUFSIZE] = {1.0f, 2.0f, 3.0f, 4.0f};
-	float host_y[AXPY_XY_BUFSIZE] = {0.5f, 1.5f, 2.5f, 3.5f};
-
-	// we're not going to bother allocating separate buffers for x and y
-	// arrays, instead just put them somewhere on the kernel arguments page
-
-
-	// layout is:
-	// 0 -- pointer to arg 0 (literal)
-	// 8 -- pointer to arg 1 (pointer to x array)
-	// 16 -- pointer to arg 2 (pointer to y array)
-
-	// 24 -- arg 0 -- 4 byte float
-	// 32 -- arg 1 -- pointer to x
-	// 40 -- arg 2 -- pointer to y
-
-	// 64 -- arg 1 array
-	// 128 -- arg 2 array
-
-	void *a_arg_ptr = kern_args_ptr + ARG0_LOC;
-	void *x_arg_ptr = kern_args_ptr + ARG1_LOC;
-	void *y_arg_ptr = kern_args_ptr + ARG2_LOC;
-	void *x_ptr = kern_args_ptr + axpy_x_offset;
-	void *y_ptr = kern_args_ptr + axpy_y_offset;
-
-	fprintf(stderr, "launching axpy with: \na = %f\n", a);
-	fprintf(stderr, "x array: \n");
-	dump_buffer_f32(host_x, AXPY_XY_BUFSIZE);
-	fprintf(stderr, "y array: \n");
-	dump_buffer_f32(host_y, AXPY_XY_BUFSIZE);
-
-
-	memset(kern_args_ptr, 2, size);
-
-	// pointers to args
-	memcpy(kern_args_ptr + 0 * sizeof(uint64_t), &a_arg_ptr, sizeof(a_arg_ptr));
-	memcpy(kern_args_ptr + 1 * sizeof(uint64_t), &x_arg_ptr, sizeof(x_arg_ptr));
-	memcpy(kern_args_ptr + 2 * sizeof(uint64_t), &y_arg_ptr, sizeof(y_arg_ptr));
-
-       	// copy literal first arg is at 24 bytes in
-	memcpy(kern_args_ptr + ARG0_LOC, &a, sizeof(a));
-
-	// pointers to x and y arrays
-	memcpy(kern_args_ptr + ARG1_LOC, &x_ptr, sizeof(x_ptr));
-	memcpy(kern_args_ptr + ARG2_LOC, &y_ptr, sizeof(y_ptr));
-
-	// copy arrays to their locations
-	memcpy(x_ptr, host_x, sizeof(host_x));
-	memcpy(y_ptr, host_y, sizeof(host_y));
-
-	fprintf(stderr, "kernargs buffer:\n");
-	dump_buffer_u64((uint64_t*)kern_args_ptr, 48/(sizeof(uint64_t)));
+	return 0;
 }
 
 static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
@@ -452,56 +348,14 @@ int main(int argc, char *argv[])
 
 	struct Doorbell *doorbell_map = NULL;
 
-	int kern_fd = -1;
-	struct stat kstat;
-	unsigned int kern_start_offset = 0;
 	hsa_kernel_dispatch_packet_t *aql_packet;
 	hsa_barrier_and_packet_t *aql_barrier_packet;
 
 	struct KernelDescriptor *kd_ptr;
-	uint64_t kd_addr;
 
-	// if we have arguments expect an ELF file with a RIG binary
-	// we are only expecting a very specific axpy kernel binary
-	if (argc > 1) {
-		if (lstat(argv[1], &kstat)) {
-			perror("lstat");
-			return 1;
-		}
-		fprintf(stderr, "kernel object size %lu bytes\n",
-			kstat.st_size);
-
-		kernel_size = kstat.st_size;
-		kern_fd = open(argv[1], O_RDONLY);
-		if (kern_fd < 0) {
-			perror("open");
-			return 1;
-		}
-		kern_ptr = mmap(NULL, kernel_size, PROT_READ, MAP_SHARED,
-				kern_fd, 0);
-		if (kern_ptr == MAP_FAILED) {
-			perror("mmap kernel");
-			return 1;
-		}
-		// kernel descriptor will go after the kernel binary + one page gap
-		kd_addr = ALIGN_UP_PGSZ(kern_ptr + kernel_size, getpagesize()) +
-			getpagesize();
-		kd_ptr = mmap((void *)kd_addr,
-			  getpagesize(), PROT_READ | PROT_WRITE,
-			  MAP_ANONYMOUS | MAP_PRIVATE,
-			  -1, 0);
-		if (kd_ptr == MAP_FAILED) {
-			perror("mmap kernel descriptor");
-			return 1;
-		}
-		memset((void*)kd_ptr, -1, sizeof(*kd_ptr));
-		parse_kernels(kern_ptr, &kern_start_offset);
-		// the packet processor takes the address of kd and adds
-		// (signed) kernel_code_entry_byte_offset to that to get
-		// starting PC -- so this will be a negative 64-bit offset
-		kd_ptr->kernel_code_entry_byte_offset = (int64_t)(kern_ptr + kern_start_offset - (void*)kd_ptr);
-		fprintf(stderr, "kernel code byte offset 0x%" PRIx64 "\n",
-			kd_ptr->kernel_code_entry_byte_offset);
+	if (init_null_kernel(&kern_ptr, &kernel_size, &kd_ptr)) {
+		fprintf(stderr, "null kernel init failed\n");
+		exit(1);
 	}
 
 	open_render_fd();
@@ -541,12 +395,6 @@ int main(int argc, char *argv[])
 		uint64_t kd_mmap_offset = 0;
 		uint64_t kd_handle = 0;
 
-		uint64_t kern_args_mmap_offset = 0;
-		uint64_t kern_args_handle = 0;
-		void *kern_args_ptr;
-
-		uint64_t kern_args_size = getpagesize();
-
 		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
@@ -554,15 +402,6 @@ int main(int argc, char *argv[])
 		alloc_memory_of_gpu(kd_ptr, getpagesize(), USER, &kd_mmap_offset, &kd_handle);
 		fprintf(stderr, "kern_desc_ptr: 0x%lx\n", (unsigned long)kd_ptr);
 		fprintf(stderr, "kern_desc_mmap_offset: 0x%lx\n", kd_mmap_offset);
-
-		alloc_aligned_host_memory(&kern_args_ptr, kern_args_size);
-		alloc_memory_of_gpu(kern_args_ptr, kern_args_size, USER, &kern_args_mmap_offset,
-				    &kern_args_handle);
-		fprintf(stderr, "kern_args_ptr: 0x%lx\n", (unsigned long)kern_args_ptr);
-		fprintf(stderr, "kern_args_mmap_offset: 0x%lx\n", (unsigned long)kern_args_mmap_offset);
-
-		// only designed to support axpy kernel
-		init_axpy_kern_args(kern_args_ptr, kern_args_size);
 
 		// send an empty barrier packet first to test multiple packets
 		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;
@@ -576,17 +415,17 @@ int main(int argc, char *argv[])
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
 		aql_packet->setup = 0;
-		aql_packet->workgroup_size_x = AXPY_X_DIM;
-		aql_packet->workgroup_size_y = AXPY_Y_DIM;
-		aql_packet->workgroup_size_z = AXPY_Z_DIM;
+		aql_packet->workgroup_size_x = NULL_X_DIM;
+		aql_packet->workgroup_size_y = NULL_Y_DIM;
+		aql_packet->workgroup_size_z = NULL_Z_DIM;
 		aql_packet->reserved0 = 0;
-		aql_packet->grid_size_x = AXPY_X_DIM;;
-		aql_packet->grid_size_y = AXPY_Y_DIM;;
-		aql_packet->grid_size_z = AXPY_Z_DIM;;
+		aql_packet->grid_size_x = NULL_X_DIM;;
+		aql_packet->grid_size_y = NULL_Y_DIM;;
+		aql_packet->grid_size_z = NULL_Z_DIM;;
 		aql_packet->private_segment_size = 0;
 		aql_packet->group_segment_size = 0;
 		aql_packet->kernel_object = (uint64_t) kd_ptr;
-		aql_packet->kernarg_address = kern_args_ptr;
+		aql_packet->kernarg_address = 0;
 		aql_packet->reserved2 = 0;
 		aql_packet->completion_signal.handle = 0;
 
@@ -613,8 +452,6 @@ int main(int argc, char *argv[])
 			munmap(doorbell_map, doorbell_size);
 			exit(1);
 		}
-		fprintf(stderr, "axpy y buffer after execution: \n");
-		dump_buffer_f32((float *)(kern_args_ptr + axpy_y_offset), AXPY_XY_BUFSIZE);
 		destroy_queue(queue_id);
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
