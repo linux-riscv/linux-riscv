@@ -748,10 +748,8 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma) {
 	pfn = phys_to_pfn(priv->mmio_start_phys);
 	pfn += (ctx->wq_num + 1);
 
-	vma->vm_flags |= VM_IO;
-	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
 	/* Make sure the door bell does not work with fork() */
-	vma->vm_flags |= VM_DONTCOPY;
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP | VM_DONTCOPY);
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	// printk(KERN_INFO "Mappping wq %d from 0x%lx to 0x%lx\n", wq_num, vma->vm_start,pfn);
