@@ -329,7 +329,7 @@ static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struc
 				__func__);
 		return -EINVAL;
 	}
-	vma->vm_flags = VM_DONTEXPAND;
+	vm_flags_set(vma, VM_DONTEXPAND);
 	return 0;
 }
 
