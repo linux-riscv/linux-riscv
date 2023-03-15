@@ -34,10 +34,10 @@ struct KernelDescriptor {
 	uint8_t reserved2[6];
 };
 
-// Doorbells are 8-bytes, but 16-byte aligned
+// Doorbells are 8B long, 64B aligned, 64 per doorbell page
 struct Doorbell {
 	uint64_t doorbell_write_offset;
-	uint64_t padding;
+	uint8_t padding[56];
 };
 
 #define ALIGN_UP_PGSZ(addr, page_size) (((uint64_t)(addr) +	\
