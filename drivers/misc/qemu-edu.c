@@ -43,7 +43,7 @@ static int qemu_edu_open(struct inode *inode, struct file *fp)
 	ctx->pasid = 0;
 
 	if (dev->sva_enabled && !sva_disabled) {
-		ctx->sva = iommu_sva_bind_device(dev->miscdev.parent, current->mm, NULL);
+		ctx->sva = iommu_sva_bind_device(dev->miscdev.parent, current->mm);
 		if (IS_ERR(ctx->sva)) {
 			ret = PTR_ERR(ctx->sva);
 			dev_err(dev->miscdev.parent, "SVA allocation failed: %d.\n", ret);
