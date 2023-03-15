@@ -15,27 +15,28 @@
 
 // DUC-SS register regions
 #define DUC_REGS_DISPATCH			0x0000
-#define DUC_REGS_INTERNAL_VF		0x0ec0
-#define DUC_REGS_INTERNAL_PF		0x0f18
-#define DUC_REGS_FW					0x1368
-#define DUC_REGS_CTN				0x1390
-#define DUC_REGS_DMA				0x13a0
+#define DUC_REGS_INTERNAL_VF		0x0940
+#define DUC_REGS_QL_SYNC			0x0980
+#define DUC_REGS_INTERNAL_PF		0x0b80
+#define DUC_REGS_FW					0x0fd0
+#define DUC_REGS_CTN				0x1008
+#define DUC_REGS_DMA				0x1018
 #define DUC_REGS_DOORBELLS			0x2000
 
 // Individual regs within DUC_REGS_FW region
-#define DUC_REGS_FW_VER				0x1368
-#define DUC_REGS_FW_PASID			0x1370
-#define DUC_REGS_FW_DESC			0x1378
-#define DUC_REGS_FW_DOORBELL		0x1380
-#define DUC_REGS_FW_TIMESTAMP		0x1388
+#define DUC_REGS_FW_VER				0x0fd0
+#define DUC_REGS_FW_PASID			0x0fd8
+#define DUC_REGS_FW_DESC			0x0fe0
+#define DUC_REGS_FW_DOORBELL		0x0fe8
+#define DUC_REGS_FW_TIMESTAMP		0x1000
 
 #define DUC_PAGE_SIZE           (1 << 12)
 #define DUC_NUM_MSIX_INTERRUPTS	8
 
-#define DUC_REGS_MSIX_CAUSE_START       (17 * DUC_PAGE_SIZE)
+#define DUC_REGS_MSIX_CAUSE_START       (18 * DUC_PAGE_SIZE)
 #define DUC_REGS_MSIX_CAUSE_END			\
 	(DUC_REGS_MSIX_CAUSE_START + DUC_NUM_MSIX_INTERRUPTS)
-#define DUC_REGS_MSIX                   (18 * DUC_PAGE_SIZE)
+#define DUC_REGS_MSIX                   (19 * DUC_PAGE_SIZE)
 
 #define DUC_MMIO_SIZE				0x80000
 
