@@ -176,7 +176,6 @@ static void isbdm_tx_enqueue(struct isbdm *ii)
 		buf->desc_idx = ring->prod_idx;
 		desc = &ring->descs[ring->prod_idx];
 		desc->iova = cpu_to_le64(buf->physical);
-		desc->reserved = cpu_to_le16(0);
 		flags = buf->flags;
 		if (flags & ISBDM_DESC_LS)
 			flags |= ISBDM_DESC_TX_ND;
@@ -185,7 +184,7 @@ static void isbdm_tx_enqueue(struct isbdm *ii)
 
 		WARN_ON_ONCE(!buf->size);
 
-		desc->length = cpu_to_le16(buf->size - 1);
+		desc->length = cpu_to_le32(buf->size & ISBDM_DESC_SIZE_MASK);
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
@@ -251,7 +250,6 @@ static void isbdm_rx_refill(struct isbdm *ii)
 		buf->desc_idx = ring->prod_idx;
 		desc->iova = cpu_to_le64(buf->physical);
 		desc->flags = 0;
-		desc->reserved = 0;
 		desc->length = 0;
 		list_add_tail(&buf->node, &ring->inflight_list);
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
@@ -811,6 +809,8 @@ ssize_t isbdmex_send(struct isbdm *ii, const char __user *va, size_t size)
 			buf->size = buf->capacity;
 		}
 
+		WARN_ON_ONCE(buf->size > ISBDM_DESC_SIZE_MAX);
+
 		buf->flags = first;
 		first = 0;
 		not_done = copy_from_user(buf->buf, va, buf->size);
@@ -1064,7 +1064,7 @@ void isbdm_process_rx_done(struct isbdm *ii)
 		}
 
 		buf->flags = le32_to_cpu(desc->flags);
-		buf->size = le16_to_cpu(desc->length) + 1;
+		buf->size = le32_to_cpu(desc->length) & ISBDM_DESC_SIZE_MASK;
 		if (buf->size > buf->capacity) {
 			dev_err(&ii->pdev->dev,
 				"RX size %zu exceeds capacity %zu\n",
