@@ -126,6 +126,10 @@
 	 ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ | \
 	 ISBDM_ATS_UR_IRQ | ISBDM_PRI_RF_IRQ)
 
+/* Size mask for TX and RX descriptors, though the max size is 64KB. */
+#define ISBDM_DESC_SIZE_MASK 0x0001FFFF
+#define ISBDM_DESC_SIZE_MAX 0x00010000
+
 /* Generate an interrupt on completion, in TX descriptor */
 #define ISBDM_DESC_TX_ND 0x20000000
 
@@ -137,8 +141,7 @@
 /* RX and TX hardware descriptor format */
 struct isbdm_descriptor {
 	__le64 iova;
-	__le16 length;
-	__le16 reserved;
+	__le32 length;
 	__le32 flags;
 };
 
