@@ -1,4 +1,4 @@
-// from selftests dir: make CROSS_COMPILE=riscv64-linux-gnu- TARGETS=kfd
+// from selftests dir: make CROSS_COMPILE=riscv64-linux-gnu- TARGETS=dpa
 
 #include <stdio.h>
 #include <stdlib.h>
