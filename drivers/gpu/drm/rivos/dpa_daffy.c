@@ -107,26 +107,12 @@ void daffy_free_fw_queue(struct dpa_device *dpa_dev)
 	kfree(q->fw_queue);
 }
 
-irqreturn_t handle_daffy(int irq, void *dpa_dev)
-{
-	struct dpa_device *dpa = dpa_dev;
-
-	irq -= dpa->base_irq;
-	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, irq);
-	u64 addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq;
-	// XXX Parse cause
-	iowrite8(ioread8(addr), addr);
-	wake_up_interruptible(&dpa->wq);
-	return IRQ_HANDLED;
-}
-
 int daffy_get_version_cmd(struct dpa_device *dev, u32 *version)
 {
 	struct dpa_fw_queue_pkt pkt;
 	volatile struct dpa_fw_queue_pkt *qpkt;
 	struct daffy_get_version_cmd *cmd = &pkt.u.dgvc;
 	unsigned index;
-	int ret = 0;
 
 	if (!queue_has_space(&dev->qinfo)) {
 		// XXX wait on wait queue
@@ -144,12 +130,14 @@ int daffy_get_version_cmd(struct dpa_device *dev, u32 *version)
 		return -EINVAL;
 	}
 	qpkt = dev->qinfo.h_ring + index;
-	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
-	if (ret)
-		goto out;
+	// XXX wait for response?
+	usleep_range(100000, 200000);
+	dev_warn(dev->dev, "%s: after sleep: rsp = %u ver = 0x%x ridx = %llu\n",
+		 __func__, qpkt->hdr.response, qpkt->u.dgvc.version,
+		dev->qinfo.fw_queue->h_read_index);
 	*version = qpkt->u.dgvc.version;
-out:
-	return ret;
+
+	return 0;
 }
 
 int daffy_destroy_queue_cmd(struct dpa_device *dev,
@@ -175,10 +163,9 @@ int daffy_destroy_queue_cmd(struct dpa_device *dev,
 		goto out;
 	}
 	qpkt = dev->qinfo.h_ring + index;
-	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
-	if (ret)
-		goto out;
-	dev_warn(dev->dev, "%s: rsp = %u ridx = %llu\n",
+	// XXX wait for response
+	usleep_range(100000, 200000);
+	dev_warn(dev->dev, "%s: after sleep: rsp = %u ridx = %llu\n",
 		 __func__, qpkt->hdr.response, dev->qinfo.fw_queue->h_read_index);
 
 out:
@@ -229,12 +216,14 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 		// goto out_unmap_rwptr;
 	}
 	qpkt = dev->qinfo.h_ring + index;
-	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
-	if (ret)
-		goto out;
+	// XXX wait for response
+	usleep_range(100000, 200000);
+	dev_warn(dev->dev, "%s: after sleep: rsp = %u queue id = 0x%x ridx = %llu\n",
+		 __func__, qpkt->hdr.response, qpkt->u.dcqc.queue_id,
+		dev->qinfo.fw_queue->h_read_index);
 	args->queue_id = qpkt->u.dcqc.queue_id;
 	// doorbell_offset will get converted from page offset to something else by caller
 	args->doorbell_offset = qpkt->u.dcqc.doorbell_offset;
-out:
+
 	return ret;
 }
