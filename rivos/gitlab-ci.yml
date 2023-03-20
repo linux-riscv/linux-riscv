@@ -5,6 +5,8 @@ include:
 
 variables:
   INSTALL_PATH: "/rivos/sysroot/riscv/boot"
+  KUBERNETES_CPU_REQUEST: "32"
+  KUBERNETES_CPU_LIMIT: "32"
 
 # Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
 prepare-version:
@@ -26,7 +28,6 @@ docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   cache:
-    key: "$CI_COMMIT_REF_SLUG"
     paths:
       - rivos/ccache/
   stage: build
@@ -37,6 +38,7 @@ docker-build-defconfig:
     - *prepare-ccache-conf
     - bash rivos/build.sh "defconfig" "defconfig" &> make_logs_defconfig.txt
     - ccache --show-stats
+  timeout: 60min
   artifacts:
     paths:
       - linux_defconfig.tar.gz
@@ -46,19 +48,21 @@ docker-build-defconfig:
 docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['docker-cpu-xl']
+  tags: ['k8s']
   cache:
-    key: "$CI_COMMIT_REF_SLUG"
     paths:
       - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
   script:
+    - cat /proc/cpuinfo
+    - cat /proc/meminfo
     - sudo apt update && sudo apt install -y kmod ccache
     - *prepare-ccache-conf
     - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" &> make_logs_ubuntu_defconfig.txt
     - ccache --show-stats
+  timeout: 60min
   artifacts:
     paths:
       - linux_ubuntu_defconfig.tar.gz
@@ -74,9 +78,8 @@ docker-build-ubuntu-defconfig:
 docker-build-ubuntu-kasan-outline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['docker-cpu-xl']
+  tags: ['k8s']
   cache:
-    key: "$CI_COMMIT_REF_SLUG"
     paths:
       - rivos/ccache/
   stage: build
@@ -88,6 +91,7 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - *prepare-ccache-conf
     - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_outline_defconfig.txt
     - ccache --show-stats
+  timeout: 60min
   artifacts:
     paths:
       - linux_ubuntu_kasan_outline_defconfig.tar.gz
@@ -97,9 +101,8 @@ docker-build-ubuntu-kasan-outline-defconfig:
 docker-build-ubuntu-kasan-inline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['docker-cpu-xl']
+  tags: ['k8s']
   cache:
-    key: "$CI_COMMIT_REF_SLUG"
     paths:
       - rivos/ccache/
   stage: build
@@ -112,6 +115,7 @@ docker-build-ubuntu-kasan-inline-defconfig:
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
     - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_inline_defconfig.txt
     - ccache --show-stats
+  timeout: 60min
   artifacts:
     paths:
       - linux_ubuntu_kasan_inline_defconfig.tar.gz
