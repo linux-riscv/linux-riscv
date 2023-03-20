@@ -252,35 +252,35 @@ static int isbdmex_get_last_error(struct isbdm *ii, struct isbdm_user_ctx *ctx,
 
 static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	char __user *argp;
+	u64 __user *argp64;
 	struct isbdm_user_ctx *ctx = file->private_data;
 	struct isbdm *ii = ctx->isbdm;
 	u64 value;
 	int rc;
 
 	if (is_compat_task())
-		argp = compat_ptr(arg);
+		argp64 = compat_ptr(arg);
 	else
-		argp = (char __user *)arg;
+		argp64 = (void __user *)arg;
 	rc = 0;
 
 	switch (cmd) {
 	case IOCTL_SET_IPMR:
-		if (get_user(value, argp) != 0)
+		if (get_user(value, argp64) != 0)
 			return -EFAULT;
 
-		rc = put_user(isbdmex_ioctl_set_ipmr(ii, value), argp);
+		rc = put_user(isbdmex_ioctl_set_ipmr(ii, value), argp64);
 		break;
 
 	case IOCTL_CLEAR_IPMR:
-		if (get_user(value, argp) != 0)
+		if (get_user(value, argp64) != 0)
 			return -EFAULT;
 
-		rc = put_user(isbdmex_ioctl_clear_ipmr(ii, value), argp);
+		rc = put_user(isbdmex_ioctl_clear_ipmr(ii, value), argp64);
 		break;
 
 	case IOCTL_GET_IPSR:
-		rc = put_user(isbdmex_ioctl_get_ipsr(ii), argp);
+		rc = put_user(isbdmex_ioctl_get_ipsr(ii), argp64);
 		break;
 
 	case IOCTL_RX_REFILL:
@@ -288,19 +288,23 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		break;
 
 	case IOCTL_ALLOC_RMB:
-		rc = isbdmex_alloc_rmb(ii, file, argp);
+		rc = isbdmex_alloc_rmb(ii, file, argp64);
 		break;
 
 	case IOCTL_FREE_RMB:
-		rc = isbdmex_free_rmb(ii, file, (unsigned long)argp);
+		rc = isbdmex_free_rmb(ii, file, (unsigned long)argp64);
 		break;
 
 	case IOCTL_RDMA_CMD:
-		rc = isbdmex_send_command(ii, ctx, argp);
+		rc = isbdmex_send_command(ii, ctx, argp64);
 		break;
 
 	case IOCTL_GET_LAST_ERROR:
-		rc = isbdmex_get_last_error(ii, ctx, argp);
+		rc = isbdmex_get_last_error(ii, ctx, argp64);
+		break;
+
+	case IOCTL_GET_RX_DROP_CNT:
+		rc = put_user(isbdmex_get_dropped_rx_count(ii), argp64);
 		break;
 
 	default:
