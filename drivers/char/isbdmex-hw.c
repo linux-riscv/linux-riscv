@@ -587,6 +587,36 @@ static int isbdmex_dequeue_one(struct isbdm *ii, struct list_head *head)
 	return 1;
 }
 
+/*
+ * Get the dropped packet count, maintaining higher bits in software. Assumes
+ * the RX ring's lock is already held.
+ */
+static u64 get_dropped_rx_count(struct isbdm *ii)
+{
+	u64 hw_count = ISBDM_READQ(ii, ISBDM_RX_TLP_DROP_CNT);
+
+	/* If the high bit has changed, update the software bits. */
+	if ((hw_count ^ ii->dropped_rx_tlps) & ISBDM_RX_TLP_DROP_CTR_HIGH_BIT) {
+		ii->dropped_rx_tlps += ISBDM_RX_TLP_DROP_CTR_HIGH_BIT;
+
+	/*
+	 * If we didn't observe a high bit change but the value went down,
+	 * either we missed an update or the hardware counter did something
+	 * unexpected.
+	 */
+	} else if (hw_count < ii->dropped_rx_tlps) {
+		dev_warn(&ii->pdev->dev,
+			 "RX drop counter went backwards from %llx -> %llx\n",
+			 ii->dropped_rx_tlps & ISBDM_RX_TLP_DROP_CTR_MASK,
+			 hw_count);
+	}
+
+	ii->dropped_rx_tlps =
+		(ii->dropped_rx_tlps & ~ISBDM_RX_TLP_DROP_CTR_MASK) | hw_count;
+
+	return ii->dropped_rx_tlps;
+}
+
 /* Process and release buffers that the hardware has completed sending. */
 void isbdm_reap_tx(struct isbdm *ii)
 {
@@ -784,7 +814,7 @@ void isbdm_hw_reset(struct isbdm *ii)
  * Turn a transmit request into a set of buffers, and enqueue it onto the
  * hardware or a software waiting list.
  */
-ssize_t isbdmex_send(struct isbdm *ii, const char __user *va, size_t size)
+ssize_t isbdmex_send(struct isbdm *ii, const void __user *va, size_t size)
 {
 	struct isbdm_buf *buf, *tmp;
 	int first = ISBDM_DESC_FS;
@@ -849,7 +879,7 @@ out:
 
 /* Submit an RDMA command from userspace */
 int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
-			 const char __user *user_cmd)
+			 const void __user *user_cmd)
 {
 	struct isbdm_command *command;
 	struct task_struct *task = get_current();
@@ -893,8 +923,8 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 
 	/* Make sure sure usermode isn't trying to set reserved bits. */
 	value = le64_to_cpu(command->cmd.rmb_offset);
-	if (value > ISBDM_RDMA_RMB_OFFSET_MASK) {
-		dev_err(&ii->pdev->dev, "RMB offset out of range\n");
+	if (value & ISBDM_RDMA_RMB_OFFSET_RESERVED) {
+		dev_err(&ii->pdev->dev, "RMB offset reserved bits set\n");
 		rc = -ERANGE;
 		goto out;
 	}
@@ -931,7 +961,7 @@ out:
  * index on success.
  */
 int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
-		      const char __user *user_rmb)
+		      const void __user *user_rmb)
 {
 	struct task_struct *task = get_current();
 	int idx;
@@ -1109,6 +1139,11 @@ void isbdm_rx_overflow(struct isbdm *ii)
 		i = (i - 1) & mask;
 	}
 
+	/*
+	 * The dropped RX TLP counter just went up for sure. read it to avoid
+	 * missing a rollover of the high bit and losing rollovers.
+	 */
+	get_dropped_rx_count(ii);
 	mutex_unlock(&ring->lock);
 	return;
 }
@@ -1122,7 +1157,7 @@ void isbdm_rx_threshold(struct isbdm *ii)
 }
 
 /* Read one message from the wait list and into user mode. */
-ssize_t isbdmex_read_one(struct isbdm *ii, char __user *va, size_t size)
+ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 {
 	struct isbdm_buf *buf, *tmp;
 	ssize_t completed = 0;
@@ -1189,4 +1224,14 @@ u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask)
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii)
 {
 	return ISBDM_READQ(ii, ISBDM_IPSR);
+}
+
+u64 isbdmex_get_dropped_rx_count(struct isbdm *ii)
+{
+	u64 value;
+
+	mutex_lock(&ii->rx_ring.lock);
+	value = get_dropped_rx_count(ii);
+	mutex_unlock(&ii->rx_ring.lock);
+	return value;
 }
