@@ -47,6 +47,7 @@
 #define ISBDM_IPMR		96
 #define ISBDM_IRCR		104
 #define ISBDM_ADMIN		112
+#define ISBDM_RX_TLP_DROP_CNT	160
 
 #define ISBDM_WRITEQ(isbdm, reg, val) writeq(cpu_to_le64(val), (isbdm)->base + (reg))
 #define ISBDM_WRITEL(isbdm, reg, val) writel(cpu_to_le32(val), (isbdm)->base + (reg))
@@ -126,6 +127,10 @@
 	 ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ | \
 	 ISBDM_ATS_UR_IRQ | ISBDM_PRI_RF_IRQ)
 
+#define ISBDM_RX_TLP_DROP_CTR_SIZE (1ULL << 40)
+#define ISBDM_RX_TLP_DROP_CTR_MASK (ISBDM_RX_TLP_DROP_CTR_SIZE - 1)
+#define ISBDM_RX_TLP_DROP_CTR_HIGH_BIT (ISBDM_RX_TLP_DROP_CTR_SIZE >> 1)
+
 /* Size mask for TX and RX descriptors, though the max size is 64KB. */
 #define ISBDM_DESC_SIZE_MASK 0x0001FFFF
 #define ISBDM_DESC_SIZE_MAX 0x00010000
@@ -197,7 +202,13 @@ struct isbdm_remote_buffer {
 
 /* Fields within the fifth qword of the command descriptor */
 /* Offset within the remote memory buffer */
-#define ISBDM_RDMA_RMB_OFFSET_MASK 0xffffffffffff
+#define ISBDM_RDMA_RMB_OFFSET_MASK 0xffffffffffffULL
+#define ISBDM_RDMA_RMB_OFFSET_RESERVED 0x3fff000000000000ULL
+
+/* Non-cached hint */
+#define ISBDM_RDMA_RMB_OFFSET_NCH (1ULL << 62)
+/* Relaxed ordering */
+#define ISBDM_RDMA_RMB_OFFSET_RO (1ULL << 63)
 
 /* Command descriptor used by hardware */
 struct isbdm_rdma_command {
@@ -235,6 +246,7 @@ struct isbdm_rdma_command {
 #define IOCTL_FREE_RMB		_IO('3', 6)	/* Destroy remote memory buf. */
 #define IOCTL_RDMA_CMD		_IO('3', 7)	/* Send RDMA command. */
 #define IOCTL_GET_LAST_ERROR	_IO('3', 8)	/* Get error status. */
+#define IOCTL_GET_RX_DROP_CNT	_IO('3', 9)	/* Get RX drop count. */
 
 /* Info about a hardware ring (tx, rx, or cmd). */
 struct isbdm_ring {
@@ -352,6 +364,8 @@ struct isbdm {
 	struct miscdevice	misc;
 	/* Node on the isbdmex_list. */
 	struct list_head	node;
+	/* Shadow copy of the dropped RX TLP count that manages upper bits. */
+	u64 dropped_rx_tlps;
 };
 
 /* Drivers support routines */
@@ -365,23 +379,24 @@ void isbdm_deinit_hw(struct isbdm *ii);
 void isbdm_enable(struct isbdm *ii);
 void isbdm_disable(struct isbdm *ii);
 void isbdm_hw_reset(struct isbdm *ii);
-ssize_t isbdmex_send(struct isbdm *ii, const char __user *va, size_t size);
+ssize_t isbdmex_send(struct isbdm *ii, const void __user *va, size_t size);
 int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
-			 const char __user *user_cmd);
+			 const void __user *user_cmd);
 
 int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
-		      const char __user *user_rmb);
+		      const void __user *user_rmb);
 
 int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi);
 void isbdm_free_all_rmbs(struct isbdm *ii, struct file *file);
 void isbdm_process_rx_done(struct isbdm *ii);
 void isbdm_rx_overflow(struct isbdm *ii);
-ssize_t isbdmex_read_one(struct isbdm *ii, char __user *va, size_t size);
+ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size);
 void isbdm_rx_threshold(struct isbdm *ii);
 
 /* Hardware routines for test. */
 u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
+u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
 
 #endif
