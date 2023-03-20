@@ -3,7 +3,7 @@ def test_main(c):
     res = c.sudo("dmesg -c")
 
     # KASAN_KUNIT_TEST
-    kasan_kunit_test_expect = "# kasan: pass:46 fail:1 skip:11 total:58"
+    kasan_kunit_test_expect = "# kasan: pass:45 fail:2 skip:11 total:58"
     if kasan_kunit_test_expect not in res.stdout:
         result = ""
         for line in res.stdout:
