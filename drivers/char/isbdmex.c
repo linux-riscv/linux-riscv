@@ -11,8 +11,8 @@
 
 #include <linux/bitmap.h>
 #include <linux/device.h>
+#include <linux/dmapool.h>
 #include <linux/io.h>
-#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/pci-epf.h>
@@ -359,7 +359,7 @@ static ssize_t isbdmex_write(struct file *file, const char __user *va,
 	struct isbdm *ii = ctx->isbdm;
 	ssize_t rc;
 
-	rc = isbdmex_send(ii, va, size);
+	rc = isbdmex_raw_send(ii, va, size);
 	return rc;
 }
 
@@ -421,11 +421,22 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto deinit;
 	}
 
-	/* IRQs */
+	ii->inline_pool = dma_pool_create("isbdm-inline",
+					  &ii->pdev->dev,
+					  ISBDM_MAX_INLINE,
+					  0,
+					  0);
+
+	if (!ii->inline_pool)  {
+		ret = -ENOMEM;
+		dev_err_probe(dev, ret, "Cannot create dma pool\n");
+		goto deinit;
+	}
+
 	ret = isbdmex_request_irq(pdev);
 	if (ret) {
 		dev_err_probe(dev, ret, "IRQ setup failed\n");
-		goto deinit;
+		goto release_pool;
 	}
 
 	ret = isbdmex_new_instance(ii);
@@ -454,9 +465,18 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto free_misc_name;
 	}
 
+	ii->ib_device = isbdm_device_create(ii);
+	if (!ii->ib_device) {
+		dev_err_probe(dev, ret, "Can't create IB device\n");
+		goto unregister_misc;
+	}
+
 	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware location */
 
 	return 0;
+
+unregister_misc:
+	misc_deregister(&ii->misc);
 
 free_misc_name:
 	kfree(ii->misc.name);
@@ -467,6 +487,10 @@ unget_instance:
 
 release_irq:
 	/* TODO: Undo isbdmex_request_irq(). */
+
+release_pool:
+	dma_pool_destroy(ii->inline_pool);
+
 deinit:
 	isbdm_deinit_hw(ii);
 	return ret;
@@ -482,6 +506,7 @@ static void isbdmex_remove(struct pci_dev *pdev)
 	/* Some resources are freed by devres */
 	misc_deregister(&ii->misc);
 	isbdmex_del_instance(ii);
+	dma_pool_destroy(ii->inline_pool);
 	isbdm_deinit_hw(ii);
 	return;
 }
