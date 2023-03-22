@@ -11,7 +11,6 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
-#include <linux/ioasid.h>
 #include <linux/iopoll.h>
 #include <linux/list.h>
 #include <linux/miscdevice.h>
@@ -86,7 +85,7 @@ static void free_cmd_list(struct isbdm *ii, struct list_head *head)
  * Grab a buffer and remove it from the free list, or allocate a new one.
  * Assumes the ring's lock is already held.
  */
-static struct isbdm_buf *get_buf(struct isbdm *ii, struct isbdm_ring *ring)
+struct isbdm_buf *get_buf(struct isbdm *ii, struct isbdm_ring *ring)
 {
 
 	struct isbdm_buf *buf;
@@ -106,8 +105,7 @@ static struct isbdm_buf *get_buf(struct isbdm *ii, struct isbdm_ring *ring)
 }
 
 /* Put a buffer onto the free list. Assumes the ring's lock is held. */
-static void put_buf(struct isbdm *ii, struct isbdm_ring *ring,
-		    struct isbdm_buf *buf)
+void put_buf(struct isbdm *ii, struct isbdm_ring *ring, struct isbdm_buf *buf)
 {
 
 	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
@@ -115,7 +113,7 @@ static void put_buf(struct isbdm *ii, struct isbdm_ring *ring,
 	list_add(&buf->node, &ring->free_list);
 }
 
-static struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring)
+struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring)
 {
 	struct isbdm_command *command;
 
@@ -126,6 +124,9 @@ static struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring)
 					   struct isbdm_command, node);
 
 		list_del(&command->node);
+		command->user_ctx = NULL;
+		command->qp = NULL;
+		command->inline_dma_addr = 0;
 		return command;
 	}
 
@@ -133,8 +134,8 @@ static struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring)
 }
 
 /* Put a command onto the free list. Assumes the ring's lock is held. */
-static void put_cmd(struct isbdm *ii, struct isbdm_ring *ring,
-		    struct isbdm_command *cmd)
+void put_cmd(struct isbdm *ii, struct isbdm_ring *ring,
+	     struct isbdm_command *cmd)
 {
 
 	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
@@ -151,7 +152,7 @@ static int ring_is_full(struct isbdm_ring *ring)
 }
 
 /* Fill out descriptors for as many packets as possible on the waitlist. */
-static void isbdm_tx_enqueue(struct isbdm *ii)
+void isbdm_tx_enqueue(struct isbdm *ii)
 {
 	struct isbdm_buf *buf;
 	u32 flags;
@@ -193,7 +194,7 @@ static void isbdm_tx_enqueue(struct isbdm *ii)
 }
 
 /* Start as many commands as fit in the hardware table. */
-static void isbdm_cmd_enqueue(struct isbdm *ii)
+void isbdm_cmd_enqueue(struct isbdm *ii)
 {
 	struct isbdm_command *cmd;
 	struct isbdm_rdma_command *cmd_desc;
@@ -688,6 +689,9 @@ void isbdm_reap_cmds(struct isbdm *ii)
 
 	while (ring->cons_idx != hw_next) {
 		struct isbdm_command *command;
+		struct isbdm_user_ctx *user_ctx;
+		u64 size_pasid_flags;
+		u32 status = ISBDM_STATUS_SUCCESS;
 
 		if (list_empty(&ring->inflight_list)) {
 			dev_err(&ii->pdev->dev, "command inflight underflow");
@@ -707,19 +711,20 @@ void isbdm_reap_cmds(struct isbdm *ii)
 		}
 
 		list_del(&command->node);
-		/* Shuttle the notify result back to the file context. */
-		if (le64_to_cpu(command->cmd.size_pasid_flags) &
-		    ISBDM_RDMA_NV) {
+		size_pasid_flags = le64_to_cpu(command->cmd.size_pasid_flags);
+		if (size_pasid_flags & ISBDM_RDMA_NV)
+			status = ii->notify_area[command->desc_idx];
 
-			uint32_t status = ii->notify_area[command->desc_idx];
-
-			/* Write the error back if it was the first. */
+		user_ctx = command->user_ctx;
+		if (user_ctx) {
+			/*
+			 * Shuttle the notify result back to the file context.
+			 */
 			if ((status != ISBDM_STATUS_SUCCESS) &&
-			    (command->user_ctx->last_error.error ==
+			    (user_ctx->last_error.error ==
 			     ISBDM_STATUS_SUCCESS)) {
 
-				command->user_ctx->last_error.error =
-					le32_to_cpu(status);
+				user_ctx->last_error.error = status;
 
 				/*
 				 * Ensure the error gets out before decrementing
@@ -727,13 +732,17 @@ void isbdm_reap_cmds(struct isbdm *ii)
 				 */
 				smp_wmb();
 			}
+
+			WARN_ON_ONCE(!user_ctx->last_error.inflight_commands);
+
+			user_ctx->last_error.inflight_commands--;
+			kref_put(&user_ctx->ref, isbdmex_user_ctx_release);
+			command->user_ctx = NULL;
+
+		} else {
+			isbdm_complete_cmd(ii, command, status);
 		}
 
-		WARN_ON_ONCE(!command->user_ctx->last_error.inflight_commands);
-
-		command->user_ctx->last_error.inflight_commands--;
-		kref_put(&command->user_ctx->ref, isbdmex_user_ctx_release);
-		command->user_ctx = NULL;
 		list_add(&command->node, &ring->free_list);
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
 	}
@@ -810,73 +819,6 @@ void isbdm_hw_reset(struct isbdm *ii)
 	ISBDM_WRITEQ(ii, ISBDM_IPMR, -1ULL);
 }
 
-/*
- * Turn a transmit request into a set of buffers, and enqueue it onto the
- * hardware or a software waiting list.
- */
-ssize_t isbdmex_send(struct isbdm *ii, const void __user *va, size_t size)
-{
-	struct isbdm_buf *buf, *tmp;
-	int first = ISBDM_DESC_FS;
-	LIST_HEAD(local_list);
-	int not_done;
-	ssize_t rc;
-	size_t remaining = size;
-
-	mutex_lock(&ii->tx_ring.lock);
-	/* Loop creating packets and queueing them on to our local list. */
-	while (remaining != 0) {
-		buf = get_buf(ii, &ii->tx_ring);
-		if (!buf) {
-			rc = -ENOMEM;
-			goto out;
-		}
-
-		if (remaining < buf->capacity) {
-			buf->size = remaining;
-
-		} else {
-			buf->size = buf->capacity;
-		}
-
-		WARN_ON_ONCE(buf->size > ISBDM_DESC_SIZE_MAX);
-
-		buf->flags = first;
-		first = 0;
-		not_done = copy_from_user(buf->buf, va, buf->size);
-		if (not_done != 0) {
-			rc = -EFAULT;
-			goto out;
-		}
-
-		va += buf->size;
-		remaining -= buf->size;
-		if (remaining == 0) {
-			buf->flags |= ISBDM_DESC_LS;
-		}
-
-		list_add_tail(&buf->node, &local_list);
-	}
-
-	/*
-	 * Now that all the buffers are set up, enqueue them onto the waitlist,
-	 * then stick as many as possible into the hardware.
-	 */
-
-	list_splice_tail_init(&local_list, &ii->tx_ring.wait_list);
-	isbdm_tx_enqueue(ii);
-	rc = size;
-
-out:
-	/* On failure, clean up any buffers on the local list. */
-	list_for_each_entry_safe(buf, tmp, &local_list, node) {
-		put_buf(ii, &ii->tx_ring, buf);
-	}
-
-	mutex_unlock(&ii->tx_ring.lock);
-	return rc;
-}
-
 /* Submit an RDMA command from userspace */
 int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 			 const void __user *user_cmd)
@@ -888,7 +830,7 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 	int rc;
 	uint64_t value;
 
-	if (pasid == INVALID_IOASID) {
+	if (pasid == IOMMU_PASID_INVALID) {
 		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
 		return -EAGAIN;
 	}
@@ -964,13 +906,12 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 		      const void __user *user_rmb)
 {
 	struct task_struct *task = get_current();
-	int idx;
 	int not_done;
 	uint64_t pasid = task->mm->pasid;
 	struct isbdm_remote_buffer rbcopy;
 	uint64_t value;
 
-	if (pasid == INVALID_IOASID) {
+	if (pasid == IOMMU_PASID_INVALID) {
 		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
 		return -EAGAIN;
 	}
@@ -991,12 +932,25 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 	rbcopy.pasid_flags = cpu_to_le64(value);
 	/* Stick the file in to know which entries to clean up on close. */
 	rbcopy.sw_avail = cpu_to_le64((unsigned long)file);
+	return isbdm_alloc_rmb(ii, &rbcopy);
+}
+
+/*
+ * Create a new remote memory buffer for potential use by ISBDM. Returns the RMB
+ * index on success.
+ */
+int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
+{
+	int idx;
+
+	/* This member being zero is representative of a free slot. */
+	WARN_ON_ONCE(rmb->sw_avail == 0);
 
 	/* Hunt for a free entry in the hardware. */
 	mutex_lock(&ii->rmb_table_lock);
 	for (idx = 0; idx < ISBDMEX_RMB_TABLE_SIZE; idx++) {
 		if (ii->rmb_table[idx].sw_avail == 0) {
-			memcpy(&ii->rmb_table[idx], &rbcopy, sizeof(rbcopy));
+			memcpy(&ii->rmb_table[idx], rmb, sizeof(*rmb));
 			break;
 		}
 	}
@@ -1006,6 +960,15 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 		return -ENOSPC;
 
 	return idx;
+}
+
+void isbdm_set_rmb_key(struct isbdm *ii, int rmbi, u64 key)
+{
+	if (WARN_ON_ONCE(rmbi >= ISBDMEX_RMB_TABLE_SIZE))
+		return;
+
+	WRITE_ONCE(ii->rmb_table[rmbi].security_key, cpu_to_le64(key));
+	smp_wmb();
 }
 
 /* Free a previously allocated remote memory buffer */
@@ -1019,19 +982,29 @@ int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi)
 		return -ERANGE;
 	}
 
-	mutex_lock(&ii->rmb_table_lock);
 	if (ii->rmb_table[rmbi].sw_avail == token) {
-		/* Invert the security key first to prevent torn reads */
-		ii->rmb_table[rmbi].security_key =
-			~ii->rmb_table[rmbi].security_key;
-
-		wmb();
-		memset(&ii->rmb_table[rmbi], 0, sizeof(ii->rmb_table[rmbi]));
+		isbdm_free_rmb(ii, rmbi);
 		rc = 0;
 	}
 
-	mutex_unlock(&ii->rmb_table_lock);
 	return rc;
+}
+
+/* Unconditionally free the RMB at the given index. */
+void isbdm_free_rmb(struct isbdm *ii, int rmbi)
+{
+	mutex_lock(&ii->rmb_table_lock);
+
+	/*
+	 * Invert the security key first to prevent the remote reading a
+	 * half-zeroed value
+	 */
+	ii->rmb_table[rmbi].security_key =
+		~ii->rmb_table[rmbi].security_key;
+
+	wmb();
+	memset(&ii->rmb_table[rmbi], 0, sizeof(ii->rmb_table[rmbi]));
+	mutex_unlock(&ii->rmb_table_lock);
 }
 
 /* Free all remote memory buffers associated with this file. */
@@ -1105,6 +1078,14 @@ void isbdm_process_rx_done(struct isbdm *ii)
 		list_del(&buf->node);
 		list_add_tail(&buf->node, &ring->wait_list);
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
+		if (buf->flags & ISBDM_DESC_FS) {
+			ii->packet_start = buf;
+		}
+
+		if (buf->flags & ISBDM_DESC_LS) {
+			isbdm_process_rx_packet(ii, ii->packet_start, buf);
+			ii->packet_start = NULL;
+		}
 	}
 
 	/* If the RX threshold interrupt is not in use, refill now */
@@ -1163,6 +1144,7 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 	ssize_t completed = 0;
 	LIST_HEAD(packet_list);
 	struct isbdm_ring *ring = &ii->rx_ring;
+	size_t buf_off = sizeof(struct isbdm_packet_header);
 
 	mutex_lock(&ring->lock);
 	if (!isbdmex_dequeue_one(ii, &packet_list)) {
@@ -1170,8 +1152,10 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 	}
 
 	list_for_each_entry(buf, &packet_list, node) {
-		size_t size_to_copy = buf->size;
+		size_t size_to_copy = buf->size - buf_off;
 		int not_done;
+
+		WARN_ON_ONCE(buf->size < buf_off);
 
 		if (size_to_copy > (size - completed))
 			size_to_copy = size - completed;
@@ -1180,7 +1164,7 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 			break;
 
 		not_done = copy_to_user(va + completed,
-					buf->buf,
+					buf->buf + buf_off,
 					size_to_copy);
 
 		if (not_done != 0) {
@@ -1189,6 +1173,12 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 		}
 
 		completed += size_to_copy;
+
+		/*
+		 * The first descriptor had to skip the packet header, all
+		 * others are data straight up.
+		 */
+		buf_off = 0;
 	}
 
 out:
