@@ -1549,7 +1549,7 @@ static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_kfd_process *p,
 	struct drm_dpa_unmap_memory_from_gpu *args = data;
 
 	// XXX loop over gpu id verify ID passed in matches
-	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
+	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle & 0xFFFFFFFF);
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
@@ -1592,7 +1592,7 @@ static int dpa_ioctl_free_memory_of_gpu(struct dpa_kfd_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_free_memory_of_gpu *args = data;
-	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle);
+	struct dpa_kfd_buffer *buf = find_buffer(p, args->handle & 0xFFFFFFFF);
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
