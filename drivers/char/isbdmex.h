@@ -10,9 +10,13 @@
 #include <linux/iommu.h>
 #include <linux/kref.h>
 #include <linux/list.h>
+#include <linux/miscdevice.h>
 #include <linux/mutex.h>
 #include <linux/types.h>
 #include <linux/wait.h>
+
+#include <rdma/isbdm-abi.h>
+#include "isbdm-ib.h"
 
 /* The current arbitrarily hardcoded ring size. */
 #define ISBDMEX_RING_SIZE 1024
@@ -92,8 +96,56 @@
 #define ISBDM_RX_BUFFER_SIZE_TO_REG(size) \
 	(__builtin_ctzll(size) - 9)
 
-/* The success code from an RDMA command. All others are failures. */
+/*
+ * The success code from an RDMA command, written to the physical address
+ * designated in notify_iova if the NV flag is set. All others are failures.
+ */
 #define ISBDM_STATUS_SUCCESS 0
+
+/*
+ * Illegal command, non-zero reserved, PASID not enabled, privileged PASID not
+ * enabled
+ */
+#define ISBDM_STATUS_MALFORMED_COMMAND 0x80000001
+
+/* UR/CA response to RMBA read */
+#define ISBDM_STATUS_RMBA_ACCESS_FAULT 0x80000002
+
+/* RMBA data entry was poisoned */
+#define ISBDM_STATUS_RMBA_DATA_CORRUPTION 0x80000003
+
+/*
+ * UR/CA response to translation request, RF/Invalid response to page request,
+ * or ATS disabled
+ */
+#define ISBDM_STATUS_RMB_TRANSLATION_FAULT 0x80000004
+
+/*
+ * UR/CA response received, security key mismatch, write attempt to RO buffer,
+ * or accessing bytes beyond the buffer
+ */
+#define ISBDM_STATUS_RMB_ACCESS_FAULT 0x80000005
+
+/* RMB data was poisoned */
+#define ISBDM_STATUS_RMB_DATA_CORRUPTION 0x80000006
+
+/*
+ * UR/CA response to translation request, RF/Invalid response to page target,
+ * ATS disabled, PRI disabled and page not present, or requested permission not
+ * granted
+ */
+#define ISBDM_STATUS_LMB_TRANSLATION_FAULT 0x80000007
+
+/* UR/CA response received for local buffer access */
+#define ISBDM_STATUS_LMB_ACCESS_FAULT 0x80000008
+
+/* Local memory buffer data was poisoned */
+#define ISBDM_STATUS_LMB_DATA_CORRUPTION 0x80000009
+
+/*
+ * Command aborted due to command ring being disabled, or BME being turned off
+ */
+#define ISBDM_STATUS_ABORTED 0x8000000A
 
 /* Interrupt bits (both mask and status) */
 #define ISBDM_LNKSTS_IRQ (1 << 0)
@@ -200,6 +252,18 @@ struct isbdm_remote_buffer {
 #define ISBDM_RDMA_COMMAND_MASK 0x1f
 #define ISBDM_RDMA_COMMAND_SHIFT 59
 
+/* Command field values to do all the things. */
+
+#define ISBDM_COMMAND_RESERVED 0ull
+/* Read from remote into local buffer */
+#define ISBDM_COMMAND_READ 1ull
+/* Write from local buffer to remote */
+#define ISBDM_COMMAND_WRITE 2ull
+/* Compare and swap */
+#define ISBDM_COMMAND_CAS 3ull
+/* Fetch and add */
+#define ISBDM_COMMAND_FETCH_ADD 4ull
+
 /* Fields within the fifth qword of the command descriptor */
 /* Offset within the remote memory buffer */
 #define ISBDM_RDMA_RMB_OFFSET_MASK 0xffffffffffffULL
@@ -228,6 +292,29 @@ struct isbdm_rdma_command {
     __le64 amo_value1;
     /* Exchange value for CAS */
     __le64 amo_value2;
+};
+
+/* The magic that goes at the start of the packet. */
+#define ISBDM_PACKET_MAGIC 0x15BD
+/* Raw I/O from directly reading/writing the ISBDM device. */
+#define ISBDM_PACKET_RAW 0x01
+/* Infiniband send op. */
+#define ISBDM_PACKET_IB_SEND 0x02
+
+/* Protocol structure defined by software for send/recv packets. */
+struct isbdm_packet_header {
+	/* Set this to cpu_to_le16(ISBDM_PACKET_MAGIC). */
+	__le16 magic;
+	/* See ISBDM_PACKET_TYPE_* definitions. */
+	u8 type;
+	/* Padding */
+	u8 reserved;
+	/* Source LID for IB UD sends. */
+	__le16 src_lid;
+	/* Source Queue Pair number for IB UD sends. */
+	__le32 src_qp;
+	/* Destination Queue Pair number for IB sends. */
+	__le32 dest_qp;
 };
 
 /*
@@ -317,6 +404,8 @@ struct isbdm_user_ctx {
 	struct isbdm_last_error last_error;
 };
 
+struct isbdm_qp;
+
 /* Another struct for tracking RDMA commands. */
 struct isbdm_command {
 	struct list_head node;
@@ -326,7 +415,17 @@ struct isbdm_command {
 	uint32_t desc_idx;
 	/* The usermode file context, for returning the status code. */
 	struct isbdm_user_ctx *user_ctx;
+	/* The queue pair this command was sent from. */
+	struct isbdm_qp *qp;
+	/* A copy of the work queue entry associated with this command. */
+	struct isbdm_wqe wqe;
+	/*
+	 * The address of a DMA pool buffer, used for RDMA ops with inline data.
+	 */
+	dma_addr_t inline_dma_addr;
 };
+
+struct isbdm_device;
 
 /* Per-instance hardware info */
 struct isbdm {
@@ -345,9 +444,16 @@ struct isbdm {
 	struct isbdm_ring rx_ring;
 	struct isbdm_ring tx_ring;
 	struct isbdm_ring cmd_ring;
+	/* Remembers the most recent descriptor with the FIRST_SEGMENT bit. */
+	struct isbdm_buf *packet_start;
 	struct isbdm_remote_buffer *rmb_table;
 	dma_addr_t rmb_table_physical;
 	struct mutex rmb_table_lock;
+	/*
+	 * Pool of DMA coherent buffers that gets used when ibverbs sends an
+	 * RDMA operation with inline data.
+	 */
+	struct dma_pool *inline_pool;
 	/*
 	 * Keep an array parallel to the cmd_ring for notify writes from the
 	 * hardware. A fancier version of this driver would support notify
@@ -366,12 +472,23 @@ struct isbdm {
 	struct list_head	node;
 	/* Shadow copy of the dropped RX TLP count that manages upper bits. */
 	u64 dropped_rx_tlps;
+
+	/* Pointer to the device structure tracking all the rdma entries. */
+	struct isbdm_device *ib_device;
 };
 
 /* Drivers support routines */
 void isbdmex_user_ctx_release(struct kref *ref);
 
 /* Hardware-poking routines */
+struct isbdm_buf *get_buf(struct isbdm *ii, struct isbdm_ring *ring);
+void put_buf(struct isbdm *ii, struct isbdm_ring *ring, struct isbdm_buf *buf);
+struct isbdm_command *get_cmd(struct isbdm *ii, struct isbdm_ring *ring);
+void put_cmd(struct isbdm *ii, struct isbdm_ring *ring,
+	     struct isbdm_command *cmd);
+
+void isbdm_tx_enqueue(struct isbdm *ii);
+void isbdm_cmd_enqueue(struct isbdm *ii);
 void isbdm_reap_tx(struct isbdm *ii);
 void isbdm_reap_cmds(struct isbdm *ii);
 int isbdm_init_hw(struct isbdm *ii);
@@ -379,14 +496,17 @@ void isbdm_deinit_hw(struct isbdm *ii);
 void isbdm_enable(struct isbdm *ii);
 void isbdm_disable(struct isbdm *ii);
 void isbdm_hw_reset(struct isbdm *ii);
-ssize_t isbdmex_send(struct isbdm *ii, const void __user *va, size_t size);
+ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size);
 int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 			 const void __user *user_cmd);
 
 int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 		      const void __user *user_rmb);
 
+int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb);
+void isbdm_set_rmb_key(struct isbdm *ii, int rmbi, u64 key);
 int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi);
+void isbdm_free_rmb(struct isbdm *ii, int rmbi);
 void isbdm_free_all_rmbs(struct isbdm *ii, struct file *file);
 void isbdm_process_rx_done(struct isbdm *ii);
 void isbdm_rx_overflow(struct isbdm *ii);
@@ -398,5 +518,11 @@ u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
+
+void isbdm_complete_cmd(struct isbdm *ii, struct isbdm_command *command,
+			uint32_t status);
+
+void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
+			     struct isbdm_buf *end);
 
 #endif
