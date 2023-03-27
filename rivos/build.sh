@@ -25,18 +25,18 @@ kernel_build() {
         cd ..
     fi
 
-    make LOCALVERSION=$local_version ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} -j $(nproc)
+    time make LOCALVERSION=$local_version ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} -j $(nproc)
 
     # Prepare installation for packaging
     mkdir -p "${INSTALL_PATH}/${config}"
 
     # Compile and install the kernel (for legacy)
-    make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
+    time make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
 
     # Create the debian package with kernel + modules
     # INSTALL_MOD_STRIP will fix the module size issue caused by relocations
     # https://github.com/riscv-collab/riscv-gnu-toolchain/issues/1036
-    make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" INSTALL_MOD_STRIP=1 O=build_${config} bindeb-pkg
+    time make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" INSTALL_MOD_STRIP=1 O=build_${config} bindeb-pkg
 
     # FIXME dirty
     rm -f linux-image*dbg*.deb
