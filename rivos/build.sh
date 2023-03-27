@@ -2,7 +2,8 @@
 
 set -e
 
-COMPILE="ccache riscv64-unknown-linux-gnu-"
+COMPILE="riscv64-unknown-linux-gnu-"
+CC="sccache riscv64-unknown-linux-gnu-gcc"
 
 # For now, build only a monolithic kernel for our VM
 # and a rudimentary install
@@ -15,27 +16,27 @@ kernel_build() {
     # Replace _ with - as _ is not valid in Debian versions
     local_version="${config//_/-}"
 
-    make LOCALVERSION=$local_version ARCH=riscv CROSS_COMPILE="${COMPILE}" O=build_${config} ${config_base}
+    make LOCALVERSION=$local_version ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} ${config_base}
 
     if [ ! -z "$config_to_merge" ]; then
         # Avoid a mrproper by stepping into the directory
         cd build_${config}
-        ARCH=riscv CROSS_COMPILE="${COMPILE}" ../scripts/kconfig/merge_config.sh .config ../$config_to_merge
+        ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" ../scripts/kconfig/merge_config.sh .config ../$config_to_merge
         cd ..
     fi
 
-    make LOCALVERSION=$local_version ARCH=riscv CROSS_COMPILE="${COMPILE}" O=build_${config} -j $(nproc)
+    make LOCALVERSION=$local_version ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} -j $(nproc)
 
     # Prepare installation for packaging
     mkdir -p "${INSTALL_PATH}/${config}"
 
     # Compile and install the kernel (for legacy)
-    make LOCALVERSION=${local_version} ARCH=riscv CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
+    make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
 
     # Create the debian package with kernel + modules
     # INSTALL_MOD_STRIP will fix the module size issue caused by relocations
     # https://github.com/riscv-collab/riscv-gnu-toolchain/issues/1036
-    make LOCALVERSION=${local_version} ARCH=riscv CROSS_COMPILE="${COMPILE}" INSTALL_MOD_STRIP=1 O=build_${config} bindeb-pkg
+    make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" INSTALL_MOD_STRIP=1 O=build_${config} bindeb-pkg
 
     # FIXME dirty
     rm -f linux-image*dbg*.deb
