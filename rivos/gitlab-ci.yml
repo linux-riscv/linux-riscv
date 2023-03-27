@@ -41,7 +41,7 @@ docker-build-defconfig:
 docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['k8s']
+  tags: ['docker-cpu-xl']
   stage: build
   dependencies:
     - prepare-version
@@ -70,7 +70,7 @@ docker-build-ubuntu-defconfig:
 docker-build-ubuntu-kasan-outline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['k8s']
+  tags: ['docker-cpu-xl']
   stage: build
   dependencies:
     - prepare-version
@@ -94,7 +94,7 @@ docker-build-ubuntu-kasan-outline-defconfig:
 docker-build-ubuntu-kasan-inline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  tags: ['k8s']
+  tags: ['docker-cpu-xl']
   stage: build
   dependencies:
     - prepare-version
