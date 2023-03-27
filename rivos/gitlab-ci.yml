@@ -36,7 +36,7 @@ docker-build-defconfig:
   script:
     - sudo apt update && sudo apt install -y kmod ccache
     - *prepare-ccache-conf
-    - bash rivos/build.sh "defconfig" "defconfig" &> make_logs_defconfig.txt
+    - bash rivos/build.sh "defconfig" "defconfig" | tee -i make_logs_defconfig.txt
     - ccache --show-stats
   timeout: 60min
   artifacts:
@@ -60,7 +60,7 @@ docker-build-ubuntu-defconfig:
     - cat /proc/meminfo
     - sudo apt update && sudo apt install -y kmod ccache
     - *prepare-ccache-conf
-    - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" &> make_logs_ubuntu_defconfig.txt
+    - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" | tee -i make_logs_ubuntu_defconfig.txt
     - ccache --show-stats
   timeout: 60min
   artifacts:
@@ -89,7 +89,7 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - *kasan-conf-generic
     - sudo apt update && sudo apt install -y kmod ccache
     - *prepare-ccache-conf
-    - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_outline_defconfig.txt
+    - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_outline_defconfig.txt
     - ccache --show-stats
   timeout: 60min
   artifacts:
@@ -113,7 +113,7 @@ docker-build-ubuntu-kasan-inline-defconfig:
     - sudo apt update && sudo apt install -y kmod ccache
     - *prepare-ccache-conf
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
-    - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" &> make_logs_ubuntu_kasan_inline_defconfig.txt
+    - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_inline_defconfig.txt
     - ccache --show-stats
   timeout: 60min
   artifacts:
