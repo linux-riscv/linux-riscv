@@ -16,28 +16,21 @@ prepare-version:
     # Debugging helper
     - cat gitvars.env
 
-.prepare-ccache-conf: &prepare-ccache-conf
-    - export PATH="/usr/lib/ccache:$PATH"
-    - export CCACHE_DIR="$PWD/rivos/ccache"
-    - export CCACHE_BASEDIR="$PWD"
-    - ccache --max-size=0
-    - ccache --max-files=0
-    - ccache --show-stats
-
 docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
-  cache:
-    paths:
-      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
+  extends: .build-caching
   script:
-    - sudo apt update && sudo apt install -y kmod ccache
-    - *prepare-ccache-conf
+    - sudo apt update && sudo apt install -y kmod
+    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+    - sccache --show-stats
+    - date
     - bash rivos/build.sh "defconfig" "defconfig" | tee -i make_logs_defconfig.txt
-    - ccache --show-stats
+    - date
+    - sccache --show-stats
   timeout: 60min
   artifacts:
     paths:
@@ -49,19 +42,18 @@ docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['k8s']
-  cache:
-    paths:
-      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
+  extends: .build-caching
   script:
-    - cat /proc/cpuinfo
-    - cat /proc/meminfo
-    - sudo apt update && sudo apt install -y kmod ccache
-    - *prepare-ccache-conf
+    - sudo apt update && sudo apt install -y kmod
+    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+    - sccache --show-stats
+    - date
     - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" | tee -i make_logs_ubuntu_defconfig.txt
-    - ccache --show-stats
+    - date
+    - sccache --show-stats
   timeout: 60min
   artifacts:
     paths:
@@ -79,18 +71,19 @@ docker-build-ubuntu-kasan-outline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['k8s']
-  cache:
-    paths:
-      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
+  extends: .build-caching
   script:
     - *kasan-conf-generic
-    - sudo apt update && sudo apt install -y kmod ccache
-    - *prepare-ccache-conf
+    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+    - sccache --show-stats
+    - sudo apt update && sudo apt install -y kmod
+    - date
     - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_outline_defconfig.txt
-    - ccache --show-stats
+    - date
+    - sccache --show-stats
   timeout: 60min
   artifacts:
     paths:
@@ -102,19 +95,20 @@ docker-build-ubuntu-kasan-inline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
   tags: ['k8s']
-  cache:
-    paths:
-      - rivos/ccache/
   stage: build
   dependencies:
     - prepare-version
+  extends: .build-caching
   script:
     - *kasan-conf-generic
-    - sudo apt update && sudo apt install -y kmod ccache
-    - *prepare-ccache-conf
+    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+    - sccache --show-stats
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
+    - sudo apt update && sudo apt install -y kmod
+    - date
     - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_inline_defconfig.txt
-    - ccache --show-stats
+    - date
+    - sccache --show-stats
   timeout: 60min
   artifacts:
     paths:
