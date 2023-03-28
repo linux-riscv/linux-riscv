@@ -110,12 +110,13 @@ void daffy_free_fw_queue(struct dpa_device *dpa_dev)
 irqreturn_t handle_daffy(int irq, void *dpa_dev)
 {
 	struct dpa_device *dpa = dpa_dev;
+	void __iomem *addr;
 
 	irq -= dpa->base_irq;
 	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, irq);
-	u64 addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq;
+	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq;
 	// XXX Parse cause
-	iowrite8(ioread8(addr), addr);
+	writeb(readb(addr), addr);
 	wake_up_interruptible(&dpa->wq);
 	return IRQ_HANDLED;
 }

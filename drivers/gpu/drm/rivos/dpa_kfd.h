@@ -93,7 +93,7 @@ struct dpa_device {
 
 	int drm_minor;
 
-	volatile char *regs;
+	void __iomem *regs;
 
 	int base_irq;
 	wait_queue_head_t wq;

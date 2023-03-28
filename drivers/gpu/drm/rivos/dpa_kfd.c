@@ -308,7 +308,8 @@ static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struc
 
 		list_for_each_entry_safe(block, on, &buf->blocks, link) {
 			paddr = dpa->hbm_base + drm_buddy_block_offset(block);
-			chunk_size = min(size, drm_buddy_block_size(&dpa->mm, block));
+			chunk_size = min_t(unsigned long, size,
+					   drm_buddy_block_size(&dpa->mm, block));
 			ret = remap_pfn_range(vma, start, phys_to_pfn(paddr), chunk_size,
 				vma->vm_page_prot);
 			if (chunk_size == size)
@@ -512,7 +513,7 @@ int dpa_gem_object_create(unsigned long size,
 	list_for_each_entry_safe(block, on, &buf->blocks, link) {
 		va = dpa->hbm_va + drm_buddy_block_offset(block);
 		size = drm_buddy_block_size(&dpa->mm, block);
-		memset(va, 0, size);
+		memset((void *)va, 0, size);
 	}
 
 	mutex_unlock(&dpa->mm_lock);
@@ -612,7 +613,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto disable_device;
 
 	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
-	dev_warn(dev, "np is 0x%llx\n", np);
+	dev_warn(dev, "np is %p\n", np);
 	err = of_address_to_resource(np, 0, &r);
 	if (err)
 		dev_err(dev, "No memory address assigned to the region\n");
@@ -620,7 +621,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dpa->hbm_base = r.start;
 	dpa->hbm_size = resource_size(&r);
-	dpa->hbm_va = devm_memremap(dpa_device, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
+	dpa->hbm_va = (u64)devm_memremap(dpa_device, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
 	dev_info(dev, "HBM base: 0x%llx, HBM size: 0x%llx\n",
 		dpa->hbm_base, dpa->hbm_size);
 
@@ -699,7 +700,7 @@ int dpa_alloc_vram(
 	if (ret) {
 		goto err;
 	}
-	printk(KERN_INFO "%s: Allowing drm_priv 0x%lx\n", __func__, drm_priv);
+	pr_info("%s: Allowing drm_priv %p\n", __func__, drm_priv);
 	ret = drm_vma_node_allow(&gobj->vma_node, drm_priv);
 
 	*bo = gem_to_dpa_buf(gobj);
@@ -1390,7 +1391,7 @@ static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
 
 	mutex_lock(&p->lock);
 	if (p->drm_file) {
-		ret = p->drm_file == file ? 0 : -EBUSY;
+		ret = p->drm_file == drm_file ? 0 : -EBUSY;
 		goto err_drm_file;
 	}
 	p->drm_file = drm_file;
@@ -2063,7 +2064,7 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 				return ret;
 			}
 		} else {
-			dev_warn(p->dev->dev, "%s: buffer id %u not found\n",
+			dev_warn(p->dev->dev, "%s: buffer id %llu not found\n",
 				 __func__, id);
 			return -EINVAL;
 		}
