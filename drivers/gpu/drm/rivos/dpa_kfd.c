@@ -482,9 +482,8 @@ int dpa_gem_object_create(unsigned long size,
 	struct drm_buddy * mm = &dpa->mm;
 	struct drm_buddy_block *block, *on;
 	u64 va;
-	unsigned i, count;
+	unsigned i;
 	int err;
-	struct drm_printer p = drm_info_printer(dev);
 
 	*obj = NULL;
 	/* Memory should be aligned at least to a page size. */
@@ -526,7 +525,6 @@ int dpa_gem_object_create(unsigned long size,
 
 	return 0;
 
-out_free:
 	for (i = 0; i < buf->page_count; i++) {
 		if (buf->pages[i]) {
 			__free_pages(buf->pages[i], 0);
@@ -1379,7 +1377,6 @@ static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
 						 void *data, struct drm_file *file)
 {
 	struct dpa_kfd_process *p = file->driver_priv;
-	struct drm_dpa_acquire_vm *args = data;
 	struct file *drm_file;
 	int ret;
 
@@ -2134,7 +2131,7 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 	default:
 		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
 	}
-out:
+
 	return ret;
 }
 
