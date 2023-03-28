@@ -111,12 +111,12 @@ irqreturn_t handle_daffy(int irq, void *dpa_dev)
 {
 	struct dpa_device *dpa = dpa_dev;
 	void __iomem *addr;
+	int vec = irq - dpa->base_irq;
 
-	irq -= dpa->base_irq;
 	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, irq);
-	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq;
+	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq * sizeof(u64);
 	// XXX Parse cause
-	writeb(readb(addr), addr);
+	writeq(readq(addr), addr);
 	wake_up_interruptible(&dpa->wq);
 	return IRQ_HANDLED;
 }
