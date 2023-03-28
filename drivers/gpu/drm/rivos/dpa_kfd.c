@@ -385,9 +385,10 @@ static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file
 	pci_set_drvdata(dpa->pdev, NULL);
 }
 
-static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv) {
-
+static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
+{
 	struct dpa_kfd_process *dpa_app = NULL;
+	struct device *dpa_dev;
 
 	// big lock for this
 	mutex_lock(&dpa_processes_lock);
@@ -432,7 +433,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dpa_app->dev = dpa;
 
 	// Bind device and allocate PASID
-	struct device *dpa_dev = dpa_app->dev->dev;
+	dpa_dev = dpa_app->dev->dev;
 	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
 	if (IS_ERR(dpa_app->sva)) {
 		int ret = PTR_ERR(dpa_app->sva);
@@ -481,11 +482,10 @@ int dpa_gem_object_create(unsigned long size,
 	struct drm_buddy_block *block, *on;
 	u64 va;
 	unsigned i, count;
-	size = ALIGN(size, PAGE_SIZE);
-	*obj = NULL;
 	int err;
 	struct drm_printer p = drm_info_printer(dev);
 
+	*obj = NULL;
 	/* Memory should be aligned at least to a page size. */
 	size = ALIGN(size, PAGE_SIZE);
 
@@ -540,6 +540,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct drm_device *ddev;
 	struct device *dev = &pdev->dev;
+	struct device_node *np;
+	struct resource r;
 	int err, vec;
 	u16 vendor, device;
 	u32 version;
@@ -609,8 +611,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto disable_device;
 
-	struct device_node *np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
-	struct resource r;
+	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
 	dev_warn(dev, "np is 0x%llx\n", np);
 	err = of_address_to_resource(np, 0, &r);
 	if (err)
@@ -1377,12 +1378,12 @@ static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
 						 void *data, struct drm_file *file)
 {
 	struct dpa_kfd_process *p = file->driver_priv;
-	if (!p)
-		return -EINVAL;
 	struct drm_dpa_acquire_vm *args = data;
 	struct file *drm_file;
 	int ret;
 
+	if (!p)
+		return -EINVAL;
 	drm_file = file->filp;
 	if (!drm_file)
 		return -EINVAL;
@@ -1886,6 +1887,7 @@ static const struct drm_driver dpa_drm_driver;
 static int dpa_kfd_open(struct inode *inode, struct file *filep)
 {
 	struct dpa_kfd_process *dpa_app = NULL;
+	struct device *dpa_dev;
 
 	// big lock for this
 	mutex_lock(&dpa_processes_lock);
@@ -1929,7 +1931,7 @@ static int dpa_kfd_open(struct inode *inode, struct file *filep)
 	dpa_app->dev = dpa;
 
 	// Bind device and allocate PASID
-	struct device *dpa_dev = dpa_app->dev->dev;
+	dpa_dev = dpa_app->dev->dev;
 	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
 	if (IS_ERR(dpa_app->sva)) {
 		int ret = PTR_ERR(dpa_app->sva);
@@ -2017,15 +2019,17 @@ static int dpa_kfd_release(struct inode *inode, struct file *filep)
 
 static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 {
-	mutex_lock(&dpa_processes_lock);
-	struct dpa_kfd_process *p = get_current_process();
-	mutex_unlock(&dpa_processes_lock);
+	struct dpa_kfd_process *p;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
 	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long pfn;
 	int ret = -EFAULT;
+
+	mutex_lock(&dpa_processes_lock);
+	p = get_current_process();
+	mutex_unlock(&dpa_processes_lock);
 
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
 		 __func__, mmap_offset, size, gpu_id, type, (u64)vma->vm_start);
