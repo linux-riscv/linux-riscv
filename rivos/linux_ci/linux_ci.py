@@ -14,7 +14,7 @@ import argparse
 SSH_MAX_TRIALS = 100
 SSH_SLEEP_INTERVAL_SEC = 5
 vm_path = "ubuntu-22.10-preinstalled-server-riscv64+unmatched.img"
-qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,h=true,len-satp-mode=2,satp-mode[0]=mbare,satp-mode[1]={} -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -virtfs local,path={},mount_tag=host0,security_model=passthrough,id=host0 -s"
+qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,h=true,len-satp-mode=2,satp-mode[0]=mbare,satp-mode[1]={} -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -virtfs local,path={},mount_tag=host0,security_model=passthrough,id=host0 -device virtio-rng-pci -s"
 host_vm = "ubuntu@localhost:10022"
 host_pwd = "ubuntu"
 satp_mode_list = [ "sv39", "sv48", "sv57" ]
@@ -68,8 +68,9 @@ def host_dl_prepared_vm():
 def host_dl_firmware():
     print("* Downloading firmware...", end = "")
     sys.stdout.flush()
-    launch_external_wait("wget http://launchpadlibrarian.net/636498883/u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb".split(" "))
-    launch_external_wait("dpkg-deb --extract u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb .".split(" "))
+    launch_external_wait("wget --no-verbose --no-check-certificate https://ghiti.fr/nextcloud/index.php/s/pnCJ4KSsoC8m5jf/download/u-boot".split(" "))
+    launch_external_wait("mkdir -p usr/lib/u-boot/qemu-riscv64_smode/".split(" "))
+    launch_external_wait("mv u-boot usr/lib/u-boot/qemu-riscv64_smode/uboot.elf".split(" "))
     print("OK")
 
 def userspace_prepare_vm(c, kernel_version):

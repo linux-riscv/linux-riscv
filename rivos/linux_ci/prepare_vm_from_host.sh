@@ -29,6 +29,6 @@ sudo losetup -d "${loop_dev}"
 
 # Download u-boot from Ubuntu Kinetic
 # FIXME
-mkdir -p firmware
-wget http://launchpadlibrarian.net/636498883/u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb
-dpkg-deb --extract u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb firmware/
+wget --no-verbose --no-check-certificate https://ghiti.fr/nextcloud/index.php/s/pnCJ4KSsoC8m5jf/download/u-boot
+mkdir -p firmware/usr/lib/u-boot/qemu-riscv64_smode/
+mv u-boot firmware/usr/lib/u-boot/qemu-riscv64_smode/
