@@ -57,7 +57,6 @@
 #define VENDOR_ID 0x1EFD
 #define DEVICE_ID 0x0010
 #define DEVICE_VF_ID 0x0011
-#define DCE_MINOR 0x0
 #define DCE_NR_DEVS  2
 #define DCE_NR_VIRTFN 7
 #define DCE_NR_FN (DCE_NR_VIRTFN + 1)
@@ -244,9 +243,8 @@ struct dce_driver_priv
 	struct pci_dev *pdev;
 	struct device * pci_dev;
 	struct device dev;
-	dev_t dev_num;
 	struct cdev cdev;
-	int vf_number;/* VF only */
+	int id; /* cdev unique id, also dce_driver minor, by chance */
 	bool sva_enabled;/* PASID / SVA */
 	uint64_t mmio_start;
 	uint64_t mmio_start_phys;

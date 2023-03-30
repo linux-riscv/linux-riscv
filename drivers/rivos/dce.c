@@ -19,8 +19,13 @@
 
 #include "dce.h"
 
+#define MAX_DCE_DEVICES 16
+
 static dev_t dev_num;
 static dev_t dev_vf_num;
+
+static DEFINE_IDA(dce_minor_ida);
+static DEFINE_IDA(dcevf_minor_ida);
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg) {
 	uint64_t result = ioread64((void __iomem *)(priv->mmio_start + reg));
@@ -820,21 +825,21 @@ int setup_memory_regions(struct dce_driver_priv * drv_priv)
 	return 0;
 }
 
-static DEFINE_IDA(dce_minor_ida);
+/* Probing, registering and device name management below */
+
+static struct pci_driver dce_driver;
+
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int err=0;
 	struct dce_driver_priv *drv_priv;
 	struct device* dev = &pdev->dev;
 	struct cdev *cdev;
-	bool isPF = true;
+	bool isPF = pdev->is_physfn;
 	int minor;
-
 
 	dev_info(dev, "Probing DCE: vendor:%x device:%x\n",
 			(int)pdev->vendor, (int)pdev->device);
-
-	isPF = (pdev->device == DEVICE_ID);
 
 	if (!isPF && pdev->device != DEVICE_VF_ID) {
 		dev_err(dev, "Unhandled device type!\n");
@@ -890,18 +895,35 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	device_initialize(dev);
 	if (isPF) {
-		dev->devt = MKDEV(MAJOR(dev_num), 0);
-		dev_set_name(dev, "dce");
+		minor = ida_alloc(&dce_minor_ida, GFP_KERNEL);
+		if (minor <0) {
+			dev_err(dev, "Failure to get minor\n");
+			goto free_resources_and_fail;
+		}
+		drv_priv->id = minor;
+		dev->devt = MKDEV(MAJOR(dev_num), minor);
+		err = dev_set_name(dev, "dce%dfn0", minor);
 	}
 	else {
-		minor = ida_simple_get(&dce_minor_ida, 0, 0, GFP_KERNEL);
-		if(minor <0){
+		int vf_num = pci_iov_vf_id(pdev);
+		int pf_id;
+		struct dce_driver_priv *pfdrv = pci_iov_get_pf_drvdata(pdev, &dce_driver);
+		if (IS_ERR(pfdrv)) {
+			dev_err(dev, "Failed to get PF driver data");
+			goto free_resources_and_fail;
+		}
+		pf_id = pfdrv->id;
+		if (vf_num < 0) {
+			dev_err(dev, "Failed to identify PF");
+			goto free_resources_and_fail;
+		}
+		minor = ida_alloc(&dcevf_minor_ida,  GFP_KERNEL);
+		if (minor <0) {
 			dev_err(dev, "Failure to get minor\n");
 			goto free_resources_and_fail;
 		}
 		dev->devt = MKDEV(MAJOR(dev_vf_num), minor);
-		err = dev_set_name(dev, "dcevf%d", minor);
-		drv_priv->vf_number = minor;
+		err = dev_set_name(dev, "dce%dfn%d", pf_id, vf_num+1);
 	}
 
 	dev->parent = &pdev->dev;
@@ -1037,12 +1059,12 @@ static int __init dce_driver_init(void)
 {
 	int err;
 	/* PF driver init */
-	err = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
+	err = alloc_chrdev_region(&dev_num, 0, MAX_DCE_DEVICES, DEVICE_NAME);
 	if (err) return err;
 
 	err = pci_register_driver(&dce_driver);
 	/* VF driver init */
-	err = alloc_chrdev_region(&dev_vf_num, 0, DCE_NR_VIRTFN, DEVICE_VF_NAME);
+	err = alloc_chrdev_region(&dev_vf_num, 0, MAX_DCE_DEVICES*DCE_NR_VIRTFN, DEVICE_VF_NAME);
 	if (err) return err;
 
 	err = pci_register_driver(&dcevf_driver);
