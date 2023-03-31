@@ -151,7 +151,7 @@ typedef struct DataAddrNode {
 /* TODO: checking sl < DCE_NR_KEYS would be good */
 #define DCE_KEY_VALID_ENTRY(sl) (DCE_KEY_VALID | (sl&0x3F))
 
-typedef struct __attribute__((packed, aligned(64))) WQITE {
+typedef struct __packed __aligned(64) WQITE {
 	uint64_t DSCBA;
 	uint64_t DSCPTA;
 	uint8_t  DSCSZ;
@@ -161,10 +161,15 @@ typedef struct __attribute__((packed, aligned(64))) WQITE {
 	uint8_t  keys[DCE_KEYS_PER_QUEUE];
 } WQITE;
 
-/* shared with HW which expects both head and tail
- * to be 64B aligned and 64B apart */
-typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
-	/* init by driver, read by driver/SW, written by HW */
+/*
+ * shared with HW which expects both head and tail
+ * to be 64B aligned and 64B apart
+ * head updated by HW
+ * tail updated by SW (driver for kernel queues, userspce for user queues)
+ */
+typedef struct __packed __aligned(64) HeadTailIndex {
+	/* init by driver, read by driver/SW, written by HW, expect LE repr */
+	/* Valid usecase? Documentation/process/volatile-considered-harmful.rst*/
 	volatile u64 head;
 	u64 padding1[7];
 	/* init by driver, read by HW, written by SW/Driver */
@@ -172,8 +177,8 @@ typedef struct __attribute__((packed, aligned(64))) HeadTailIndex {
 	u64 padding2[7];
 } HeadTailIndex;
 
-/*struct shared with HW, expects exact layout */
-typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
+/*struct shared with HW, expects exact layout and LE repr */
+typedef struct __packed __aligned(64) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
 	uint16_t operand0;
@@ -193,19 +198,19 @@ typedef struct DescriptorRing {
 	DCEDescriptor *descriptors;
 	HeadTailIndex *hti;
 
-	/* Local cached copy of WQITE.DSCSZ
-	 * TODO: Change to mask? */
+	/* Local cached copy of WQITE.DSCSZ*/
+	/* TODO: Change to mask? */
 	size_t length;
 
-	/* Sequence num of the last job where clean up was performed
-	 * written by clean_up_worker, read by dce_push_descriptor */
+	/*
+	 * Sequence num of the last job where clean up was performed
+	 * written by clean_up_worker, read by dce_push_descriptor
+	 */
 	uint32_t clean_up_index;
 
-	/* IOVA for configuration of the data strucs shared with HW
-	 * Kept for cleanup*/
+	/* IOVA of the data strucs shared with HW, kept for cleanup*/
 	dma_addr_t desc_dma;
 	dma_addr_t hti_dma;
-
 } DescriptorRing;
 
 typedef struct UserArea {
@@ -223,14 +228,13 @@ typedef struct KernelQueueReq {
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-#define SETUP_USER_WQ 	  _IOW(0xAA, 3, UserArea *)
+#define SETUP_USER_WQ     _IOW(0xAA, 3, UserArea *)
 #define REQUEST_KERNEL_WQ _IOW(0xAA, 4, KernelQueueReq *)
 
 #define MIN(a, b) \
-	({ __typeof__ (a) _a = (a); \
-	   __typeof__ (b) _b = (b); \
-	   _a < _b ? _a : _b; })
-
+	({	__typeof__(a) _a = (a); \
+		__typeof__(b) _b = (b); \
+		_a < _b ? _a : _b; })
 
 static const struct pci_device_id pci_use_msi[] = {
 	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_ID,
@@ -251,9 +255,11 @@ typedef struct work_queue {
 	DescriptorRing descriptor_ring;
 
 	struct mutex wq_tail_lock;
-	/* Locks around modifications in the per WQ loop of clean_up_work
+	/*
+	 * Locks around modifications in the per WQ loop of clean_up_work
 	 * Probably unecessary if using atomic set of clean_up_index and
-	 * a single threaded kernel workqueue */
+	 * a single threaded kernel workqueue
+	 */
 	struct mutex wq_clean_lock;
 } work_queue;
 
