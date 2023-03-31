@@ -117,8 +117,10 @@ void clean_up_work(struct work_struct *work)
 		}
 	}
 
-	/* TODO: What if more events happened since the read
-	 * They are currently lost*/
+	/*
+	 * TODO: What if more events happened since the read
+	 * They are currently lost. Fix when updating IRQ semantics
+	 */
 	irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	if (irq_sts) {
 		dev_dbg(dce_priv->pci_dev, "Rescheduling worker!");
@@ -229,8 +231,8 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 
 static int release_shared_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 {
-	/* Policy, wait for jobs for this context
-	 * to execute */
+	/* Policy, wait for jobs for this context to execute */
+	/* TODO: Probably not always what we want */
 	return 0;
 }
 
@@ -241,8 +243,7 @@ static int release_user_queue(struct dce_driver_priv *priv, int wq_num)
 	// head/tail and associated indices are in userspace
 	struct work_queue *wq = priv->wq + wq_num;
 	/* Disable queue in HW */
-	/* TODO: Need to poll for completion?
-	 * Should we use abort ? */
+	/* TODO: Need to poll for completion? Should we use abort ? */
 	set_queue_enable(priv, wq_num, false);
 
 	memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
@@ -270,8 +271,10 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	}
 	wq = priv->wq + wq_num;
 	dev_info(priv->pci_dev, "Release on fd for queue %d\n", wq_num);
-	/*Lock the queue, this should make sure that not other operation happens on it
-	 * before it is marked as disabled */
+	/*
+	 * Lock the queue, this should make sure that not other operation happens on it
+	 * before it is marked as disabled
+	 */
 	mutex_lock(&(wq->wq_tail_lock));
 	switch (wq->type) {
 	case KERNEL_WQ:
@@ -325,6 +328,7 @@ static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num)
 {
 	int DSCSZ = priv->WQIT[wq_num].DSCSZ;
 	int num_desc = DEFAULT_NUM_DSC_PER_WQ;
+
 	while (DSCSZ--)
 		num_desc *= 2;
 	return num_desc;
@@ -346,15 +350,19 @@ static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor *des
 	/*always leave one slot free */
 	/*TODO: This needs to be clean_index not head */
 	if (tail_idx == (head_idx + queue_size - 1)) {
-		/* TODO: ring is full, handle it, with the right size even better */
+		/* TODO: ring is full, handle it, with the right size even better*/
+		dev_err(priv->pci_dev, "Full queue, not handled yet\n");
 	}
 	dest = ring->descriptors + (tail_idx % queue_size);
 	/*copy descriptor to queue and make it observable */
 	*dest = *descriptor;
 	dma_wmb();
-	/* increment tail index, and make sure the write is observable
-	 * the previous write should be observable to HW before the write
-	 * to tail is, otherwise corrupted job data might be considered */
+	/*
+	 * increment tail index, but make sure the job is observable first
+	 * the previous write should be observable to device before the write
+	 * to tail is, otherwise corrupted job data might be considered
+	 * /!\ may not wait for notify to check tail!
+	 */
 	ring->hti->tail++;
 	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
 	notify_queue_update(priv, wq_num);
@@ -392,6 +400,7 @@ void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num)
 static int reserve_unused_wq(struct dce_driver_priv *priv)
 {
 	int ret = -1;
+
 	mutex_lock(&(priv->lock));
 	for (int i = 0; i < NUM_WQ; ++i) {
 		struct work_queue *wq = priv->wq + i;
@@ -410,11 +419,16 @@ static int reserve_unused_wq(struct dce_driver_priv *priv)
 static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool enable)
 {
 	u64 wq_enable;
-	/* Ensure that writes to the in mem structures are observable before enable */
+
 	if (enable)
+	/* Ensure that writes to the updated mem structures are observable by
+	 * device before actually enabling the queue
+	 */
 		wmb();
-	/* TODO: This is the best we can do for now before HW offers a solution
-	 * for atomic clear/set of enable bits */
+	/*
+	 * TODO: This is the best we can do for now before HW offers a solution
+	 * for atomic clear/set of enable bits.
+	 */
 	mutex_lock(&dev_ctx->dce_reg_lock);
 	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
 	if (enable)
@@ -431,7 +445,7 @@ static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num)
 	/*
 	 * We want all previous writes to be observable before
 	 * the dce_reg_write which is an io_write
-	 * The device should observe he updated tail index or jobs may be missed
+	 * The device should observe the updated tail index or jobs may be missed
 	 */
 	wmb();
 	dce_reg_write(dev_ctx, WQCR_REG, 1);
@@ -497,8 +511,10 @@ static int request_user_wq(struct submitter_dce_ctx *ctx, UserArea *ua)
 		return -ENOBUFS;
 	} else {
 		ctx->wq_num = wqnum;
-		/* TODO: Refactor, pass only &wq to setup_memory
-		 * return WQ as DISABLED on error */
+		/*
+		 * TODO: Refactor, pass only &wq to setup_memory
+		 * return WQ as DISABLED on error
+		 */
 		return setup_user_wq(ctx, ctx->wq_num, ua);
 	}
 	return 0;
@@ -516,7 +532,7 @@ int setup_kernel_wq(
 	memset(ring, 0, sizeof(DescriptorRing));
 	/* Only setup reserved queues */
 	if (dce_priv->wq[wq_num].type != RESERVED_WQ) {
-		pr_err("Queue setup only possible on reserved queue, clean/reserve first \n");
+		pr_err("Queue setup only possible on reserved queue, clean/reserve first\n");
 		err = -EFAULT;
 		goto type_error;
 	}
@@ -537,9 +553,10 @@ int setup_kernel_wq(
 		}
 	}
 
+	/* TODO: Some commonality with user queue code, regroup in the same place*/
 	/* Supervisor memory setup */
-	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12)
-	 * TODO: Some commonality with user queue code, regroup in the same place*/
+
+	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
 	length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
 	ring->length = length;
 
@@ -554,13 +571,13 @@ int setup_kernel_wq(
 		goto descriptor_alloc_error;
 	}
 
-	// printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
-	// 	(uint64_t)ring->descriptors);
+	//printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
+	//	(uint64_t)ring->descriptors);
 
 	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
 		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	if (!ring->hti) {
-		dev_err(dce_priv->pci_dev, "Failed to allocate queue management structure\n");
+		err = -ENOMEM;
 		goto hti_alloc_error;
 	}
 	ring->hti->head = 0;
@@ -579,8 +596,7 @@ int setup_kernel_wq(
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
-	dev_info(dce_priv->pci_dev, "wq %d as KERNEL_WQ", wq_num);
-
+	dev_info(dce_priv->pci_dev, "wq %d as KERNEL_WQ\n", wq_num);
 	return 0;
 
 efd_error:
@@ -596,9 +612,11 @@ type_error:
 	return err;
 }
 
-/* set up default shared kernel submission queue 0
+/*
+ * set up default shared kernel submission queue 0
  * type of queue is set late, but it is ok because this is done
- * before device is published */
+ * before device is published
+ */
 int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 {
 	struct work_queue *wq = &(dce_priv->wq[0]);
@@ -628,14 +646,17 @@ static int request_kernel_wq(struct submitter_dce_ctx *ctx, KernelQueueReq *kqr)
 	/* allocate a queue to context or fallback to wq 0*/
 	{
 		int wqnum = reserve_unused_wq(ctx->dev);
+
 		if (wqnum < 0) { /* no more free queues */
 			ctx->wq_num = 0; /* Fallback to shared queue */
 			/* TODO: Would it make more sense to just fault here*/
 			pr_info("Out of wq!");
 		} else {
 			ctx->wq_num = wqnum;
-			/* TODO: Refactor, pass only &wq to setup_memory
-			 * requires a separate activation function for the queue */
+			/*
+			 * TODO: Refactor, pass only &wq to setup_memory
+			 * requires a separate activation function for the queue
+			 */
 			if (setup_kernel_wq(ctx->dev, wqnum, kqr) < 0) {
 				//TODO: Print an error
 				return -EFAULT;
@@ -659,7 +680,6 @@ void free_resources(struct device *dev, struct dce_driver_priv *priv)
 	/* also take the HW down properly, waiting for it to be unpluggable?*/
 	if (priv->WQIT)
 		dma_free_coherent(priv->pci_dev, 0x1000, priv->WQIT, priv->WQIT_dma);
-	return;
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -775,9 +795,9 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 			}
 
-			// printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
-			// 	wq_num, descriptor.opcode);
-			// printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
+			//printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
+			//	wq_num, descriptor.opcode);
+			//printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			dce_push_descriptor(priv, &descriptor, ctx->wq_num);
 		}
 	}
@@ -841,17 +861,17 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p)
 int setup_memory_regions(struct dce_driver_priv *drv_priv)
 {
 	struct device *dev = drv_priv->pci_dev;
-	int err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	int err = 0;
 
+	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	/* TODO: Actually handle error !? */
 	if (err)
 		dev_info(drv_priv->pci_dev, "DMA set mask failed: %d\n", err);
-	// printk(KERN_INFO"dma_mask: 0x%lx\n",dev->dma_mask);
 	/* WQIT is 4KiB */
-	/* TODO: Error handling, dma_alloc can fail
-	 * TODO: check alignement, the idea is to have a page aligned alloc */
+	/* TODO: Error handling, dma_alloc can fail*/
+	/* TODO: check alignement, the idea is to have a page aligned alloc */
 	drv_priv->WQIT =
 		dma_alloc_coherent(dev, 0x1000, &drv_priv->WQIT_dma, GFP_KERNEL);
-	// printk(KERN_INFO "Writing to DCE_REG_WQITBA!\n");
 	if ((drv_priv->WQIT_dma & GENMASK(11, 0)) != 0) {
 		dev_err(dev, "DCE: WQITBA[11:0]:0x%pad is not all zero!\n",
 			&drv_priv->WQIT_dma);
@@ -981,6 +1001,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/*TODO: Check. pci_match_id is marked as deprecated in kernel doc */
 	if (pci_match_id(pci_use_msi, pdev)) {
 		int vec;
+
 		pci_set_master(pdev);
 		err = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
 		if (err < 0)
@@ -1033,12 +1054,12 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	return 0;
 
-	free_resources_and_fail:
-		free_resources(dev, drv_priv);
+free_resources_and_fail:
+	free_resources(dev, drv_priv);
 
-	disable_device_and_fail:
-		pci_disable_device(pdev);
-		return err;
+disable_device_and_fail:
+	pci_disable_device(pdev);
+	return err;
 }
 
 static int dev_sriov_configure(struct pci_dev *dev, int numvfs)
