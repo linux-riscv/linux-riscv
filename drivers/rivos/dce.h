@@ -1,5 +1,24 @@
-#ifndef DCE_H
-#define DCE_H
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Rivos DCE device driver
+ *
+ * Copyright (C) 2022-2023 Rivos Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
+#ifndef RIVOS_DCE_H
+#define RIVOS_DCE_H
 
 #include "linux/mutex.h"
 #include "linux/eventfd.h"
@@ -16,13 +35,14 @@
 #define DCE_REG_WQRUNSTS    0x10
 #define DCE_REG_WQENABLE    0x18
 #define DCE_REG_WQIRQSTS    0x20
+
 #define DCE_REG_WQCR        0x0
 
-#define DCE_GCS				  (127 * 4096)
-#define DCE_GCS_KEYOWN_BASE   0x10
-#define DCE_GCS_KEYOWN_STRIDE 8
-#define DCE_GCS_KEYOWN(fn)    (DCE_GCS + DCE_GCS_KEYOWN_BASE + \
-                               fn * DCE_GCS_KEYOWN_STRIDE)
+#define DCE_GCS                 (127 * 4096)
+#define DCE_GCS_KEYOWN_BASE     0x10
+#define DCE_GCS_KEYOWN_STRIDE   8
+#define DCE_GCS_KEYOWN(fn) \
+	(DCE_GCS + DCE_GCS_KEYOWN_BASE + fn * DCE_GCS_KEYOWN_STRIDE)
 
 #define DCE_OPCODE_CLFLUSH            0
 #define DCE_OPCODE_MEMCPY             1
@@ -51,7 +71,6 @@
 #define SRC2_IS_LIST                (1 << 2)
 #define DEST_IS_LIST                (1 << 3)
 
-
 #define DEVICE_NAME "dce"
 #define DEVICE_VF_NAME "dcevf"
 #define VENDOR_ID 0x1EFD
@@ -62,20 +81,20 @@
 #define DCE_NR_FN (DCE_NR_VIRTFN + 1)
 
 /* TRANSCTL fields */
-#define TRANSCTL_SUPV		BIT(31)
-#define TRANSCTL_PASID_V	BIT(30)
-#define TRANSCTL_PASID		GENMASK(19, 0)
+#define TRANSCTL_SUPV       BIT(31)
+#define TRANSCTL_PASID_V    BIT(30)
+#define TRANSCTL_PASID      GENMASK(19, 0)
 
 /* JOB_CONTROL fields */
-#define JOB_CTRL_SIZE		GENMASK(47, 0)
+#define JOB_CTRL_SIZE       GENMASK(47, 0)
 
 /* PI_CTL fields */
-#define PI_CTL_NUM_LBA_8_0	GENMASK(45, 37)
-#define PI_CTL_NUM_LBA_15_9	GENMASK(47, 41)
+#define PI_CTL_NUM_LBA_8_0  GENMASK(45, 37)
+#define PI_CTL_NUM_LBA_15_9 GENMASK(47, 41)
 
 /* FMT_INFO fields */
-#define FMT_INFO_LBAS		GENMASK(15, 14)
-#define FMT_INFO_PIF		GENMASK(13, 12)
+#define FMT_INFO_LBAS       GENMASK(15, 14)
+#define FMT_INFO_PIF        GENMASK(13, 12)
 
 enum {
 	DEST,
@@ -88,15 +107,15 @@ enum {
 };
 
 typedef enum {
-    _16GB = 0,
-    _32GB = 1,
-    _64GB = 2,
-    PIF_RESERVED = 3,
+	_16GB = 0,
+	_32GB = 1,
+	_64GB = 2,
+	PIF_RESERVED = 3,
 } PIF_encoding;
 
 /* WQ type based on ownership */
 typedef enum {
-	DISABLED=0,
+	DISABLED = 0,
 	KERNEL_WQ,
 	KERNEL_FLUSHING_WQ,
 	USER_OWNED_WQ,
@@ -104,19 +123,23 @@ typedef enum {
 	RESERVED_WQ,
 } wq_type;
 
+
+/* TODO: Used only in deprecated read*/
 typedef struct AccessInfoRead {
-	uint64_t* value;
+	uint64_t *value;
 	uint64_t  offset;
 } AccessInfoRead;
 
+/* TODO: Used only in deprecated write*/
 typedef struct AccessInfoWrite {
 	uint64_t value;
 	uint64_t offset;
 } AccessInfoWrite;
 
+/* TODO: Unsused ?*/
 typedef struct DataAddrNode {
-       uint64_t ptr;
-       uint64_t size;
+	uint64_t ptr;
+	uint64_t size;
 } DataAddrNode;
 
 #define NUM_WQ      64
@@ -129,12 +152,12 @@ typedef struct DataAddrNode {
 #define DCE_KEY_VALID_ENTRY(sl) (DCE_KEY_VALID | (sl&0x3F))
 
 typedef struct __attribute__((packed, aligned(64))) WQITE {
-    uint64_t DSCBA;
-    uint64_t DSCPTA;
-    uint8_t  DSCSZ;
-    uint8_t padding[3];
-    uint32_t TRANSCTL;
-    uint64_t WQ_CTX_SAVE_BA;
+	uint64_t DSCBA;
+	uint64_t DSCPTA;
+	uint8_t  DSCSZ;
+	uint8_t padding[3];
+	uint32_t TRANSCTL;
+	uint64_t WQ_CTX_SAVE_BA;
 	uint8_t  keys[DCE_KEYS_PER_QUEUE];
 } WQITE;
 
@@ -167,8 +190,8 @@ typedef struct __attribute__((packed, aligned(64))) DCEDescriptor {
 /* representation of a WQ, holds both HW shared regions and managmement */
 typedef struct DescriptorRing {
 	/* Data structures shared with HW*/
-	DCEDescriptor* descriptors;
-	HeadTailIndex* hti;
+	DCEDescriptor *descriptors;
+	HeadTailIndex *hti;
 
 	/* Local cached copy of WQITE.DSCSZ
 	 * TODO: Change to mask? */
@@ -192,9 +215,9 @@ typedef struct UserArea {
 } UserArea;
 
 typedef struct KernelQueueReq {
-    u32 DSCSZ;
-    u32 eventfd_vld;
-    u32 eventfd;
+	u32 DSCSZ;
+	u32 eventfd_vld;
+	u32 eventfd;
 } KernelQueueReq;
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
@@ -210,7 +233,6 @@ typedef struct KernelQueueReq {
 
 
 static const struct pci_device_id pci_use_msi[] = {
-
 	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_ID,
 			 PCI_ANY_ID, PCI_ANY_ID) },
 	{ PCI_DEVICE_SUB(VENDOR_ID, DEVICE_VF_ID,
@@ -223,7 +245,7 @@ typedef struct work_queue {
 
 	// eventfd structure
 	bool efd_ctx_valid;
-	struct eventfd_ctx * efd_ctx;
+	struct eventfd_ctx *efd_ctx;
 
 	/* The actual ring, used for kernel queues*/
 	DescriptorRing descriptor_ring;
@@ -235,13 +257,12 @@ typedef struct work_queue {
 	struct mutex wq_clean_lock;
 } work_queue;
 
-struct dce_driver_priv
-{
+struct dce_driver_priv {
 	struct work_struct clean_up_worker;
 
 	/* probe time assigned information*/
 	struct pci_dev *pdev;
-	struct device * pci_dev;
+	struct device *pci_dev;
 	struct device dev;
 	struct cdev cdev;
 	int id; /* cdev unique id, also dce_driver minor, by chance */
@@ -255,7 +276,7 @@ struct dce_driver_priv
 	struct mutex dce_reg_lock;
 
 	/* Kernel space memory area, read by HW */
-	WQITE * WQIT;
+	WQITE *WQIT;
 	dma_addr_t WQIT_dma;
 
 	/* DCE workqueue configuration space*/
@@ -263,7 +284,7 @@ struct dce_driver_priv
 };
 
 void clean_up_work(struct work_struct *work);
-void free_resources(struct device * dev, struct dce_driver_priv *priv);
+void free_resources(struct device *dev, struct dce_driver_priv *priv);
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg);
 void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value);
@@ -275,8 +296,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int dce_mmap(struct file *file, struct vm_area_struct *vma);
 irqreturn_t handle_dce(int irq, void *dce_priv_p);
 
-int setup_memory_regions(struct dce_driver_priv * drv_priv);
+int setup_memory_regions(struct dce_driver_priv *drv_priv);
 
-int setup_default_kernel_queue(struct dce_driver_priv * dce_priv);
+int setup_default_kernel_queue(struct dce_driver_priv *dce_priv);
 
 #endif
