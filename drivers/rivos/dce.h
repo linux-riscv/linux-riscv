@@ -106,41 +106,41 @@ enum {
 	NUM_SG_TBLS /*each of the above kind needs a SG list, potentially */
 };
 
-typedef enum {
+enum {
 	_16GB = 0,
 	_32GB = 1,
 	_64GB = 2,
 	PIF_RESERVED = 3,
-} PIF_encoding;
+};
 
 /* WQ type based on ownership */
-typedef enum {
+enum wq_type {
 	DISABLED = 0,
 	KERNEL_WQ,
 	KERNEL_FLUSHING_WQ,
 	USER_OWNED_WQ,
 	SHARED_KERNEL_WQ,
 	RESERVED_WQ,
-} wq_type;
+};
 
 
 /* TODO: Used only in deprecated read*/
-typedef struct AccessInfoRead {
+struct AccessInfoRead {
 	uint64_t *value;
 	uint64_t  offset;
-} AccessInfoRead;
+};
 
 /* TODO: Used only in deprecated write*/
-typedef struct AccessInfoWrite {
+struct AccessInfoWrite {
 	uint64_t value;
 	uint64_t offset;
-} AccessInfoWrite;
+};
 
 /* TODO: Unsused ?*/
-typedef struct DataAddrNode {
+struct DataAddrNode {
 	uint64_t ptr;
 	uint64_t size;
-} DataAddrNode;
+};
 
 #define NUM_WQ      64
 #define DEFAULT_NUM_DSC_PER_WQ 64
@@ -151,7 +151,7 @@ typedef struct DataAddrNode {
 /* TODO: checking sl < DCE_NR_KEYS would be good */
 #define DCE_KEY_VALID_ENTRY(sl) (DCE_KEY_VALID | (sl&0x3F))
 
-typedef struct __packed __aligned(64) WQITE {
+struct __packed __aligned(64) WQITE {
 	uint64_t DSCBA;
 	uint64_t DSCPTA;
 	uint8_t  DSCSZ;
@@ -159,7 +159,7 @@ typedef struct __packed __aligned(64) WQITE {
 	uint32_t TRANSCTL;
 	uint64_t WQ_CTX_SAVE_BA;
 	uint8_t  keys[DCE_KEYS_PER_QUEUE];
-} WQITE;
+};
 
 /*
  * shared with HW which expects both head and tail
@@ -167,7 +167,7 @@ typedef struct __packed __aligned(64) WQITE {
  * head updated by HW
  * tail updated by SW (driver for kernel queues, userspce for user queues)
  */
-typedef struct __packed __aligned(64) HeadTailIndex {
+struct __packed __aligned(64) HeadTailIndex {
 	/* init by driver, read by driver/SW, written by HW, expect LE repr */
 	/* Valid usecase? Documentation/process/volatile-considered-harmful.rst*/
 	volatile u64 head;
@@ -175,10 +175,10 @@ typedef struct __packed __aligned(64) HeadTailIndex {
 	/* init by driver, read by HW, written by SW/Driver */
 	u64 tail;
 	u64 padding2[7];
-} HeadTailIndex;
+};
 
 /*struct shared with HW, expects exact layout and LE repr */
-typedef struct __packed __aligned(64) DCEDescriptor {
+struct __packed __aligned(64) DCEDescriptor {
 	uint8_t  opcode;
 	uint8_t  ctrl;
 	uint16_t operand0;
@@ -190,13 +190,13 @@ typedef struct __packed __aligned(64) DCEDescriptor {
 	uint64_t operand2;
 	uint64_t operand3;
 	uint64_t operand4;
-} DCEDescriptor;
+};
 
 /* representation of a WQ, holds both HW shared regions and managmement */
-typedef struct DescriptorRing {
+struct DescriptorRing {
 	/* Data structures shared with HW*/
-	DCEDescriptor *descriptors;
-	HeadTailIndex *hti;
+	struct DCEDescriptor *descriptors;
+	struct HeadTailIndex *hti;
 
 	/* Local cached copy of WQITE.DSCSZ*/
 	/* TODO: Change to mask? */
@@ -211,25 +211,25 @@ typedef struct DescriptorRing {
 	/* IOVA of the data strucs shared with HW, kept for cleanup*/
 	dma_addr_t desc_dma;
 	dma_addr_t hti_dma;
-} DescriptorRing;
+};
 
-typedef struct UserArea {
+struct UserArea {
 	u64 hti;
 	u64 descriptors;
 	u64 numDescs;
-} UserArea;
+};
 
-typedef struct KernelQueueReq {
+struct KernelQueueReq {
 	u32 DSCSZ;
 	u32 eventfd_vld;
 	u32 eventfd;
-} KernelQueueReq;
+};
 
 #define RAW_READ          _IOR(0xAA, 0, struct AccessInfo*)
 #define RAW_WRITE         _IOW(0xAA, 1, struct AccessInfo*)
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
-#define SETUP_USER_WQ     _IOW(0xAA, 3, UserArea *)
-#define REQUEST_KERNEL_WQ _IOW(0xAA, 4, KernelQueueReq *)
+#define SETUP_USER_WQ     _IOW(0xAA, 3, struct UserArea *)
+#define REQUEST_KERNEL_WQ _IOW(0xAA, 4, struct KernelQueueReq *)
 
 #define MIN(a, b) \
 	({	__typeof__(a) _a = (a); \
@@ -244,15 +244,15 @@ static const struct pci_device_id pci_use_msi[] = {
 	{ }
 };
 
-typedef struct work_queue {
-	wq_type type;
+struct work_queue {
+	enum wq_type type;
 
 	// eventfd structure
 	bool efd_ctx_valid;
 	struct eventfd_ctx *efd_ctx;
 
 	/* The actual ring, used for kernel queues*/
-	DescriptorRing descriptor_ring;
+	struct DescriptorRing descriptor_ring;
 
 	struct mutex wq_tail_lock;
 	/*
@@ -282,11 +282,11 @@ struct dce_driver_priv {
 	struct mutex dce_reg_lock;
 
 	/* Kernel space memory area, read by HW */
-	WQITE *WQIT;
+	struct WQITE *WQIT;
 	dma_addr_t WQIT_dma;
 
 	/* DCE workqueue configuration space*/
-	work_queue wq[NUM_WQ];
+	struct work_queue wq[NUM_WQ];
 };
 
 void clean_up_work(struct work_struct *work);

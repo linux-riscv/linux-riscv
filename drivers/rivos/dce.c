@@ -58,7 +58,7 @@ void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value)
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
 }
 
-DescriptorRing *get_desc_ring(struct dce_driver_priv *priv, int wq_num)
+struct DescriptorRing *get_desc_ring(struct dce_driver_priv *priv, int wq_num)
 {
 	return &priv->wq[wq_num].descriptor_ring;
 }
@@ -84,7 +84,7 @@ void clean_up_work(struct work_struct *work)
 		/* break early if we are done */
 		//if (!irq_sts) break;
 		if (flush || irqbit) {
-			DescriptorRing *ring;
+			struct DescriptorRing *ring;
 			uint64_t head, curr;
 
 			mutex_lock(&(wq->wq_clean_lock));
@@ -207,11 +207,11 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 
 	/* Deal with context*/
 	if (ring->desc_dma) {
-		dma_free_coherent(priv->pci_dev, (ring->length * sizeof(DCEDescriptor)),
+		dma_free_coherent(priv->pci_dev, (ring->length * sizeof(struct DCEDescriptor)),
 			ring->descriptors, ring->desc_dma);
 	}
 	if (ring->hti_dma) {
-		dma_free_coherent(priv->pci_dev, sizeof(HeadTailIndex),
+		dma_free_coherent(priv->pci_dev, sizeof(struct HeadTailIndex),
 			ring->hti, ring->hti_dma);
 	}
 	/* Clean up the eventfd ctx */
@@ -224,8 +224,8 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 	wq->type = DISABLED;
 	/* TODO: Describe barrier */
 	wmb();
-	memset(&(wq->descriptor_ring), 0, sizeof(DescriptorRing));
-	memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
+	memset(&(wq->descriptor_ring), 0, sizeof(struct DescriptorRing));
+	memset(&priv->WQIT[wq_num], 0, sizeof(struct WQITE));
 	return 0;
 }
 
@@ -246,7 +246,7 @@ static int release_user_queue(struct dce_driver_priv *priv, int wq_num)
 	/* TODO: Need to poll for completion? Should we use abort ? */
 	set_queue_enable(priv, wq_num, false);
 
-	memset(&priv->WQIT[wq_num], 0, sizeof(WQITE));
+	memset(&priv->WQIT[wq_num], 0, sizeof(struct WQITE));
 	wq->type = DISABLED;
 	return 0;
 }
@@ -336,9 +336,10 @@ static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num)
 
 static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num);
 
-static void dce_push_descriptor(struct dce_driver_priv *priv, DCEDescriptor *descriptor, int wq_num)
+static void dce_push_descriptor(struct dce_driver_priv *priv,
+					struct DCEDescriptor *descriptor, int wq_num)
 {
-	DescriptorRing *ring;
+	struct DescriptorRing *ring;
 	u64 tail_idx, head_idx;
 	struct DCEDescriptor *dest;
 	int queue_size = get_num_desc_for_wq(priv, wq_num);
@@ -452,13 +453,13 @@ static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num)
 }
 
 static int setup_user_wq(struct submitter_dce_ctx *ctx,
-					  int wq_num, UserArea *ua)
+					  int wq_num, struct UserArea *ua)
 {
 	struct dce_driver_priv *dce_priv = ctx->dev;
 	size_t length = ua->numDescs;
-	DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
+	struct DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
 	struct work_queue *wq = dce_priv->wq+wq_num;
-	int size = length * sizeof(DCEDescriptor);
+	int size = length * sizeof(struct DCEDescriptor);
 	int DSCSZ;
 
 	if (wq->type != RESERVED_WQ) {
@@ -478,8 +479,8 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 
 	ring->length = length;
 	/* TODO: Check alignment for both*/
-	ring->descriptors = (DCEDescriptor *)ua->descriptors;
-	ring->hti = (HeadTailIndex *)ua->hti;
+	ring->descriptors = (struct DCEDescriptor *)ua->descriptors;
+	ring->hti = (struct HeadTailIndex *)ua->hti;
 
 	/*Setup WQITE */
 	dce_priv->WQIT[wq_num].DSCBA  = (u64) ring->descriptors;
@@ -501,7 +502,7 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 	return 0;
 }
 
-static int request_user_wq(struct submitter_dce_ctx *ctx, UserArea *ua)
+static int request_user_wq(struct submitter_dce_ctx *ctx, struct UserArea *ua)
 {
 	struct dce_driver_priv *priv = ctx->dev;
 	/*TODO: Could make sense to do UserArea validation here */
@@ -521,15 +522,15 @@ static int request_user_wq(struct submitter_dce_ctx *ctx, UserArea *ua)
 }
 
 int setup_kernel_wq(
-		struct dce_driver_priv *dce_priv, int wq_num, KernelQueueReq *kqr)
+		struct dce_driver_priv *dce_priv, int wq_num, struct KernelQueueReq *kqr)
 {
-	DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
+	struct DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
 	int DSCSZ = 0;
 	size_t length;
 	int err = 0;
 	struct work_queue *wq = dce_priv->wq + wq_num; /*TODO: Range check accessor*/
 
-	memset(ring, 0, sizeof(DescriptorRing));
+	memset(ring, 0, sizeof(struct DescriptorRing));
 	/* Only setup reserved queues */
 	if (dce_priv->wq[wq_num].type != RESERVED_WQ) {
 		pr_err("Queue setup only possible on reserved queue, clean/reserve first\n");
@@ -557,13 +558,13 @@ int setup_kernel_wq(
 	/* Supervisor memory setup */
 
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
-	length = 0x1000 * (1 << DSCSZ) / sizeof(DCEDescriptor);
+	length = 0x1000 * (1 << DSCSZ) / sizeof(struct DCEDescriptor);
 	ring->length = length;
 
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
-		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
+		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(struct DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
 	if (!ring->descriptors) {
 		dev_err(dce_priv->pci_dev, "Failed to allocate job storage\n");
@@ -575,7 +576,7 @@ int setup_kernel_wq(
 	//	(uint64_t)ring->descriptors);
 
 	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
-		sizeof(HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
+		sizeof(struct HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	if (!ring->hti) {
 		err = -ENOMEM;
 		goto hti_alloc_error;
@@ -601,7 +602,7 @@ int setup_kernel_wq(
 
 efd_error:
 hti_alloc_error:
-	dma_free_coherent(dce_priv->pci_dev, length * sizeof(DCEDescriptor),
+	dma_free_coherent(dce_priv->pci_dev, length * sizeof(struct DCEDescriptor),
 		ring->descriptors, ring->desc_dma);
 descriptor_alloc_error:
 	if (wq->efd_ctx_valid) {
@@ -637,7 +638,8 @@ int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 	return 0;
 }
 
-static int request_kernel_wq(struct submitter_dce_ctx *ctx, KernelQueueReq *kqr)
+static int request_kernel_wq(
+					struct submitter_dce_ctx *ctx, struct KernelQueueReq *kqr)
 {
 	/* WQ shouldn't have been assigned at this point */
 	if (ctx->wq_num != -1)
@@ -727,16 +729,17 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 	case REQUEST_KERNEL_WQ:
 		{
-			KernelQueueReq __user *__kqr_input;
-			KernelQueueReq kqr = {.DSCSZ = 0, .eventfd_vld = false, .eventfd = 0};
+			struct KernelQueueReq __user *__kqr_input;
+			struct KernelQueueReq kqr = {
+				.DSCSZ = 0, .eventfd_vld = false, .eventfd = 0};
 
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
 
-			__kqr_input = (KernelQueueReq __user *) arg;
+			__kqr_input = (struct KernelQueueReq __user *) arg;
 			if (__kqr_input) /* TODO: What if NULL ?, should it be -EFAULT as well?*/
-				if (copy_from_user(&kqr, __kqr_input, sizeof(KernelQueueReq)))
+				if (copy_from_user(&kqr, __kqr_input, sizeof(struct KernelQueueReq)))
 					return -EFAULT;
 
 			return request_kernel_wq(ctx, &kqr);
@@ -745,15 +748,15 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case SETUP_USER_WQ:
 		{
-			UserArea __user *__UserArea_input;
-			UserArea ua;
+			struct UserArea __user *__UserArea_input;
+			struct UserArea ua;
 
 			/* Check if PASID is enabled */
 			if (!priv->sva_enabled)
 				return -EFAULT;
 
 			__UserArea_input = (struct UserArea __user *) arg;
-			if (copy_from_user(&ua, __UserArea_input, sizeof(UserArea)))
+			if (copy_from_user(&ua, __UserArea_input, sizeof(struct UserArea)))
 				return -EFAULT;
 
 			/* WQ shouldn't havve been assigned at this point */
