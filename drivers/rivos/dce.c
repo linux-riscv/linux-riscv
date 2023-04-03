@@ -138,9 +138,10 @@ struct submitter_dce_ctx {
 static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool enable);
 int dce_ops_open(struct inode *inode, struct file *file)
 {
-	struct dce_driver_priv *dev = container_of(inode->i_cdev, struct dce_driver_priv, cdev);
+	struct dce_driver_priv *dev =
+		container_of(inode->i_cdev, struct dce_driver_priv, cdev);
 	struct submitter_dce_ctx *ctx;
-	int ret;
+	int err = 0;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -154,29 +155,32 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	if (dev->sva_enabled) {
 		ctx->sva = iommu_sva_bind_device(dev->pci_dev, current->mm);
 		if (IS_ERR(ctx->sva)) {
-			ret = PTR_ERR(ctx->sva);
-			dev_err(dev->pci_dev, "SVA allocation failed: %d.\n", ret);
-			kfree(ctx);
-			return -ENODEV;
+			err = PTR_ERR(ctx->sva);
+			dev_err(dev->pci_dev, "open: sva_bind_device fail:%d!\n", err);
+			goto error;
 		} else {
-			dev_info(dev->pci_dev, "SVA allocation success!\n");
+			dev_info(dev->pci_dev, "open: sva_bind_device success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
-		// printk(KERN_INFO "PASID assigned is %d\n", ctx->pasid);
 		if (ctx->pasid == IOMMU_PASID_INVALID) {
-			dev_err(dev->pci_dev, "PASID allocation failed.\n");
+			dev_err(dev->pci_dev, "open: sva_get_pasid fail!\n");
 			iommu_sva_unbind_device(ctx->sva);
-			kfree(ctx);
-			return -ENODEV;
+			err =  -ENODEV;
+			goto error;
 		} else {
-			dev_info(dev->pci_dev, "PASID allocation success!\n");
+			dev_info(dev->pci_dev, "open: sva_get_pasid success!\n");
 		}
 	} else {
-		return -EFAULT;
+		dev_err(dev->pci_dev, "open: PASID support required, fail!\n");
+		err = -EFAULT;
+		goto error;
 	}
 	/* keep sva context linked to the file */
 	file->private_data = ctx;
 	return 0;
+error:
+	kfree(ctx);
+	return err;
 }
 
 static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
@@ -508,17 +512,15 @@ static int request_user_wq(struct submitter_dce_ctx *ctx, struct UserArea *ua)
 	/*TODO: Could make sense to do UserArea validation here */
 	int wqnum = reserve_unused_wq(priv);
 
-	if (wqnum < 0) { /* no more free queues */
+	if (wqnum < 0) /* no more free queues */
 		return -ENOBUFS;
-	} else {
-		ctx->wq_num = wqnum;
-		/*
-		 * TODO: Refactor, pass only &wq to setup_memory
-		 * return WQ as DISABLED on error
-		 */
-		return setup_user_wq(ctx, ctx->wq_num, ua);
-	}
-	return 0;
+
+	ctx->wq_num = wqnum;
+	/*
+	 * TODO: Refactor, pass only &wq to setup_memory
+	 * return WQ as DISABLED on error
+	 */
+	return setup_user_wq(ctx, ctx->wq_num, ua);
 }
 
 int setup_kernel_wq(
@@ -707,9 +709,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return -EFAULT;
 
 			val = ioread64((void __iomem *)(priv->mmio_start + access_info.offset));
-			if (copy_to_user(access_info.value, &val, 8)) {
-				printk(KERN_INFO "error during ioctl!\n");
-			}
+			if (copy_to_user(access_info.value, &val, 8))
+				dev_info(priv->pci_dev, "error during iread ioctl!\n");
 
 			break;
 		}
