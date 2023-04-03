@@ -128,7 +128,7 @@ parisc|mips|powerpc)
 	installed_image_path="boot/vmlinuz-$version"
 esac
 
-BUILD_DEBUG=$(if_enabled_echo CONFIG_DEBUG_INFO Yes)
+BUILD_DEBUG= #$(if_enabled_echo CONFIG_DEBUG_INFO Yes)
 
 # Setup the directory structure
 rm -rf "$tmpdir" "$dbg_dir" debian/files
