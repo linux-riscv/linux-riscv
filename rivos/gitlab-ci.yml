@@ -37,6 +37,10 @@ docker-build-defconfig:
       - linux_defconfig.tar.gz
       - make_logs_defconfig.txt
     expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
 
 docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
@@ -60,6 +64,10 @@ docker-build-ubuntu-defconfig:
       - linux_ubuntu_defconfig.tar.gz
       - make_logs_ubuntu_defconfig.txt
     expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
 
 .kasan-conf-generic: &kasan-conf-generic
     - echo "CONFIG_KASAN=y" > kasan.conf
@@ -90,6 +98,11 @@ docker-build-ubuntu-kasan-outline-defconfig:
       - linux_ubuntu_kasan_outline_defconfig.tar.gz
       - make_logs_ubuntu_kasan_outline_defconfig.txt
     expire_in: 3 hours
+  rules:
+    - if: '$TEST_ONLY == "yes"'
+      when: never
+    - if: '$TEST_KASAN == "yes"'
+      when: on_success
 
 docker-build-ubuntu-kasan-inline-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
@@ -115,6 +128,11 @@ docker-build-ubuntu-kasan-inline-defconfig:
       - linux_ubuntu_kasan_inline_defconfig.tar.gz
       - make_logs_ubuntu_kasan_inline_defconfig.txt
     expire_in: 3 hours
+  rules:
+    - if: '$TEST_ONLY == "yes"'
+      when: never
+    - if: '$TEST_KASAN == "yes"'
+      when: on_success
 
 package-deb:
   extends: .deploy-deb
@@ -135,8 +153,8 @@ package-deb:
     - rm -rf "${INSTALL_PATH}"
     - tar -C/ -xzf linux_defconfig.tar.gz
     - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
-    - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
-    - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
+    - if [[ "$TEST_KASAN" == "yes" ]]; then tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz; fi
+    - if [[ "$TEST_KASAN" == "yes" ]]; then tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz; fi
 
 sdk-linux-ubuntu-test:
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
@@ -146,7 +164,12 @@ sdk-linux-ubuntu-test:
     - docker-build-ubuntu-defconfig
   script:
     - rm -rf "${INSTALL_DIR}"
-    - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
+    - |
+      if [[ "$TEST_ONLY" == "yes" ]]; then
+        curl -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.ba.rivosinc.com/api/v4/projects/38/jobs/artifacts/${CI_BRANCH_NAME//\//%2F}/download?job=docker-build-ubuntu-defconfig"
+      else
+        tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
+      fi
     - apt update
     - pip install fabric
     - cd rivos/linux_ci
@@ -182,7 +205,7 @@ sdk-linux-ubuntu-kasan-inline-test:
       - rivos/linux_ci/tests_results/
     expire_in: 3h
   rules:
-    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
 
 sdk-linux-ubuntu-kasan-outline-test:
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
@@ -205,7 +228,7 @@ sdk-linux-ubuntu-kasan-outline-test:
       - rivos/linux_ci/tests_results/
     expire_in: 3h
   rules:
-    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
 
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
