@@ -205,8 +205,11 @@ if __name__ == "__main__":
             if not args.no_kernel_install:
                 launch_vm_and_execute_userspace_fn(userspace_install_kernel, version)
 
-            for satp_mode in satp_mode_list:
-                launch_vm_and_execute_userspace_fn(validate_fn[version], version, satp_mode)
+            if args.long_valid:
+                for satp_mode in satp_mode_list:
+                    launch_vm_and_execute_userspace_fn(validate_fn[version], version, satp_mode)
+            else:
+                launch_vm_and_execute_userspace_fn(validate_fn[version], version)
 
         except TimeoutError:
             print("### ERROR: Timeout {} ###".format(version))
