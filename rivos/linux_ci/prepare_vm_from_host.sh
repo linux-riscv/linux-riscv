@@ -9,7 +9,7 @@ sudo apt update
 sudo apt install -y cloud-guest-utils
 
 # Download and extract the VM
-wget https://cdimage.ubuntu.com/releases/22.10/release/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz
+wget --no-verbose https://cdimage.ubuntu.com/releases/22.10/release/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz
 xz -d ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz
 
 # Increase rootfs partition
