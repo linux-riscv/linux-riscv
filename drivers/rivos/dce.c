@@ -858,14 +858,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto disable_device_and_fail;
 	}
 
-	if (isPF) {
-		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
-		if(err < 0){
-			dev_err(dev, "pci_enable_sriov fail\n");
-			goto disable_device_and_fail;
-		}
-	}
-
 	pci_set_master(pdev);
 
 	drv_priv = kzalloc_node(sizeof(struct dce_driver_priv), GFP_KERNEL,
@@ -908,13 +900,13 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		int vf_num = pci_iov_vf_id(pdev);
 		int pf_id;
 		struct dce_driver_priv *pfdrv = pci_iov_get_pf_drvdata(pdev, &dce_driver);
-		if (IS_ERR(pfdrv)) {
-			dev_err(dev, "Failed to get PF driver data");
+		if (IS_ERR_OR_NULL(pfdrv)) {
+			dev_err(dev, "Failed to get PF driver data\n");
 			goto free_resources_and_fail;
 		}
 		pf_id = pfdrv->id;
 		if (vf_num < 0) {
-			dev_err(dev, "Failed to identify PF");
+			dev_err(dev, "Failed to identify VF");
 			goto free_resources_and_fail;
 		}
 		minor = ida_alloc(&dcevf_minor_ida,  GFP_KERNEL);
@@ -922,6 +914,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			dev_err(dev, "Failure to get minor\n");
 			goto free_resources_and_fail;
 		}
+		dev_info(dev, "creating device for dce%dfn%d", pf_id, vf_num + 1);
 		dev->devt = MKDEV(MAJOR(dev_vf_num), minor);
 		err = dev_set_name(dev, "dce%dfn%d", pf_id, vf_num+1);
 	}
@@ -972,6 +965,15 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	} else {
 		dev_warn(dev, "DCE: MSI enable failed\n");
 	}
+
+	if (isPF) {
+		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
+		if(err < 0){
+			dev_err(dev, "pci_enable_sriov fail\n");
+			goto disable_device_and_fail;
+		}
+	}
+
 
 	/* work queue setup */
 	INIT_WORK(&drv_priv->clean_up_worker, clean_up_work);
