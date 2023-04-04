@@ -131,7 +131,7 @@ def launch_vm_and_execute_userspace_fn(fn, kernel_version, satp_mode = "sv48"):
             print("* Connecting via ssh...", end = "")
             sys.stdout.flush()
 
-            with Connection(host_vm, connect_kwargs = { "password": host_pwd, "timeout": 6, "banner_timeout": 6, "auth_timeout": 6 }) as c:
+            with Connection(host_vm, connect_kwargs = { "password": host_pwd, "timeout": 180, "banner_timeout": 100, "auth_timeout": 180 }) as c:
                 for i in range(0, SSH_MAX_TRIALS):
                     print(".", end = "")
                     sys.stdout.flush()
