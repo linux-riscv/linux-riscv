@@ -535,6 +535,16 @@ void __init of_irq_init(const struct of_device_id *matches)
 	INIT_LIST_HEAD(&intc_desc_list);
 	INIT_LIST_HEAD(&intc_parent_list);
 
+	/*
+	 * We need interrupt controller platform drivers to work as soon
+	 * as possible so mark the interrupt controller device nodes with
+	 * FWNODE_FLAG_BEST_EFFORT so that fw_delink knows not to delay
+	 * the probe of the interrupt controller device for suppliers
+	 * without drivers.
+	 */
+	for_each_node_with_property(np, "interrupt-controller")
+		np->fwnode.flags |= FWNODE_FLAG_BEST_EFFORT;
+
 	for_each_matching_node_and_match(np, matches, &match) {
 		if (!of_property_read_bool(np, "interrupt-controller") ||
 				!of_device_is_available(np))
