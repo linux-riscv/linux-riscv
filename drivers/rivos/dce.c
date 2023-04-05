@@ -910,7 +910,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	err = pci_enable_device_mem(pdev);
 	if (err) {
-		dev_err(dev, "pci_enable_device fail\n");
+		dev_err(dev, "pci_enable_device_mem fail\n");
 		return err;
 	}
 
@@ -995,12 +995,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto disable_device_and_fail;
 
-	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
-	if (err) {
-		dev_err(dev, "DCE: cdev add failed\n");
-		goto free_resources_and_fail;
-	}
-
 	/* MSI setup */
 	/*TODO: Check. pci_match_id is marked as deprecated in kernel doc */
 	if (pci_match_id(pci_use_msi, pdev)) {
@@ -1056,6 +1050,12 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err < 0)
 		goto free_resources_and_fail;
 
+	/* Finally expose the device */
+	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
+	if (err) {
+		dev_err(dev, "DCE: cdev add failed\n");
+		goto free_resources_and_fail;
+	}
 	return 0;
 
 free_resources_and_fail:
