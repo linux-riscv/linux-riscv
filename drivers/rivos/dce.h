@@ -268,7 +268,6 @@ struct dce_driver_priv {
 
 	/* probe time assigned information*/
 	struct pci_dev *pdev;
-	struct device *pci_dev;
 	struct device dev;
 	struct cdev cdev;
 	int id; /* cdev unique id, also dce_driver minor, by chance */

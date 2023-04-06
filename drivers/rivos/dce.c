@@ -72,7 +72,7 @@ void clean_up_work(struct work_struct *work)
 	/* clear irq status */
 	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
 	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
-	dev_dbg(dce_priv->pci_dev, "Cleanup start\n");
+	dev_dbg(&dce_priv->dev, "Cleanup start\n");
 
 	for (int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		struct work_queue *wq = dce_priv->wq + wq_num;
@@ -90,7 +90,7 @@ void clean_up_work(struct work_struct *work)
 			mutex_lock(&(wq->wq_clean_lock));
 			ring = get_desc_ring(dce_priv, wq_num);
 			if (!ring->hti) {
-				dev_err(dce_priv->pci_dev, "Invalid ring for wq %d", wq_num);
+				dev_err(&dce_priv->dev, "Invalid ring for wq %d", wq_num);
 				mutex_unlock(&(wq->wq_clean_lock));
 				continue;
 			}
@@ -98,7 +98,7 @@ void clean_up_work(struct work_struct *work)
 			/* Atomic read ? */
 			head = ring->hti->head;
 			curr = ring->clean_up_index;
-			dev_dbg(dce_priv->pci_dev,
+			dev_dbg(&dce_priv->dev,
 				"Cleanup on %d, %llu->%llu", wq_num, curr, head);
 
 			while (curr < head) {
@@ -123,7 +123,7 @@ void clean_up_work(struct work_struct *work)
 	 */
 	irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	if (irq_sts) {
-		dev_dbg(dce_priv->pci_dev, "Rescheduling worker!");
+		dev_dbg(&dce_priv->dev, "Rescheduling worker!");
 		schedule_work(&dce_priv->clean_up_worker);
 	}
 }
@@ -153,25 +153,25 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	ctx->wq_num = -1;
 
 	if (dev->sva_enabled) {
-		ctx->sva = iommu_sva_bind_device(dev->pci_dev, current->mm);
+		ctx->sva = iommu_sva_bind_device(&dev->pdev->dev, current->mm);
 		if (IS_ERR(ctx->sva)) {
 			err = PTR_ERR(ctx->sva);
-			dev_err(dev->pci_dev, "open: sva_bind_device fail:%d!\n", err);
+			dev_err(&dev->dev, "open: sva_bind_device fail:%d!\n", err);
 			goto error;
 		} else {
-			dev_info(dev->pci_dev, "open: sva_bind_device success!\n");
+			dev_info(&dev->dev, "open: sva_bind_device success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
 		if (ctx->pasid == IOMMU_PASID_INVALID) {
-			dev_err(dev->pci_dev, "open: sva_get_pasid fail!\n");
+			dev_err(&dev->dev, "open: sva_get_pasid fail!\n");
 			iommu_sva_unbind_device(ctx->sva);
 			err =  -ENODEV;
 			goto error;
 		} else {
-			dev_info(dev->pci_dev, "open: sva_get_pasid success!\n");
+			dev_info(&dev->dev, "open: sva_get_pasid success!\n");
 		}
 	} else {
-		dev_err(dev->pci_dev, "open: PASID support required, fail!\n");
+		dev_err(&dev->dev, "open: PASID support required, fail!\n");
 		err = -EFAULT;
 		goto error;
 	}
@@ -199,7 +199,7 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 
 		if (clean >= tail)
 			break;
-		dev_dbg(priv->pci_dev,
+		dev_dbg(&priv->dev,
 			"Waiting for queue %d flush - tail:%llu head:%llu, clean:%llu\n",
 			wq_num, tail, head, clean);
 		usleep_range(10000, 100000);
@@ -211,11 +211,12 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 
 	/* Deal with context*/
 	if (ring->desc_dma) {
-		dma_free_coherent(priv->pci_dev, (ring->length * sizeof(struct DCEDescriptor)),
+		dma_free_coherent(&priv->pdev->dev,
+			(ring->length * sizeof(struct DCEDescriptor)),
 			ring->descriptors, ring->desc_dma);
 	}
 	if (ring->hti_dma) {
-		dma_free_coherent(priv->pci_dev, sizeof(struct HeadTailIndex),
+		dma_free_coherent(&priv->pdev->dev, sizeof(struct HeadTailIndex),
 			ring->hti, ring->hti_dma);
 	}
 	/* Clean up the eventfd ctx */
@@ -274,7 +275,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		goto opencleanup;
 	}
 	wq = priv->wq + wq_num;
-	dev_info(priv->pci_dev, "Release on fd for queue %d\n", wq_num);
+	dev_info(&priv->dev, "Release on fd for queue %d\n", wq_num);
 	/*
 	 * Lock the queue, this should make sure that not other operation happens on it
 	 * before it is marked as disabled
@@ -296,7 +297,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	case KERNEL_FLUSHING_WQ:
 	default:
 		err = -EFAULT;
-		dev_err(priv->pci_dev, "Release on queue in unexpected state\n");
+		dev_err(&priv->dev, "Release on queue in unexpected state\n");
 		break;
 	}
 	/* Do we need the dev level lock here ? */
@@ -356,7 +357,7 @@ static void dce_push_descriptor(struct dce_driver_priv *priv,
 	/*TODO: This needs to be clean_index not head */
 	if (tail_idx == (head_idx + queue_size - 1)) {
 		/* TODO: ring is full, handle it, with the right size even better*/
-		dev_err(priv->pci_dev, "Full queue, not handled yet\n");
+		dev_err(&priv->dev, "Full queue, not handled yet\n");
 	}
 	dest = ring->descriptors + (tail_idx % queue_size);
 	/*copy descriptor to queue and make it observable */
@@ -467,14 +468,14 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 	int DSCSZ;
 
 	if (wq->type != RESERVED_WQ) {
-		dev_dbg(ctx->dev->pci_dev,
+		dev_dbg(&ctx->dev->dev,
 			"User queue setup on reserved queue only, clean/reserve first");
 		return -EFAULT;
 	}
 	/* make sure size is multiple of 4K */
 	/* TODO: Check alignement as per spec, i.e. naturally aligned to full queue size*/
 	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) {
-		dev_warn(ctx->dev->pci_dev, "Invalid size requested for User queue:%d", size);
+		dev_warn(&ctx->dev->dev, "Invalid size requested for User queue:%d", size);
 		return -EBADR;
 	}
 	DSCSZ = fls(size) - fls(0x1000);
@@ -502,7 +503,7 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 
 	/* enabled queue in driver */
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
-	dev_info(ctx->dev->pci_dev, "wq %d as USER_OWNED_WQ\n", wq_num);
+	dev_info(&ctx->dev->dev, "wq %d as USER_OWNED_WQ\n", wq_num);
 	return 0;
 }
 
@@ -548,7 +549,7 @@ int setup_kernel_wq(
 
 			if (IS_ERR(efdctx)) {
 				err = PTR_ERR(efdctx);
-				dev_warn(dce_priv->pci_dev, "Unable to get eventfd");
+				dev_warn(&dce_priv->dev, "Unable to get eventfd\n");
 				goto efd_error;
 			}
 			wq->efd_ctx = efdctx;
@@ -566,10 +567,10 @@ int setup_kernel_wq(
 	// Allcate the descriptors as coherent DMA memory
 	// TODO: Error handling, alloc DMA can fail
 	ring->descriptors =
-		dma_alloc_coherent(dce_priv->pci_dev, length * sizeof(struct DCEDescriptor),
+		dma_alloc_coherent(&dce_priv->pdev->dev, length * sizeof(struct DCEDescriptor),
 			&ring->desc_dma, GFP_KERNEL);
 	if (!ring->descriptors) {
-		dev_err(dce_priv->pci_dev, "Failed to allocate job storage\n");
+		dev_err(&dce_priv->dev, "Failed to allocate job storage\n");
 		err = -ENOMEM;
 		goto descriptor_alloc_error;
 	}
@@ -577,7 +578,7 @@ int setup_kernel_wq(
 	//printk(KERN_INFO "Allocated wq %u descriptors at 0x%llx\n", wq_num,
 	//	(uint64_t)ring->descriptors);
 
-	ring->hti = dma_alloc_coherent(dce_priv->pci_dev,
+	ring->hti = dma_alloc_coherent(&dce_priv->pdev->dev,
 		sizeof(struct HeadTailIndex), &ring->hti_dma, GFP_KERNEL);
 	if (!ring->hti) {
 		err = -ENOMEM;
@@ -599,12 +600,12 @@ int setup_kernel_wq(
 
 	/* mark the WQ as enabled in driver */
 	dce_priv->wq[wq_num].type = KERNEL_WQ;
-	dev_info(dce_priv->pci_dev, "wq %d as KERNEL_WQ\n", wq_num);
+	dev_info(&dce_priv->dev, "wq %d as KERNEL_WQ\n", wq_num);
 	return 0;
 
 efd_error:
 hti_alloc_error:
-	dma_free_coherent(dce_priv->pci_dev, length * sizeof(struct DCEDescriptor),
+	dma_free_coherent(&dce_priv->pdev->dev, length * sizeof(struct DCEDescriptor),
 		ring->descriptors, ring->desc_dma);
 descriptor_alloc_error:
 	if (wq->efd_ctx_valid) {
@@ -683,7 +684,7 @@ void free_resources(struct device *dev, struct dce_driver_priv *priv)
 	/* TODO: Free each WQ as well? */
 	/* also take the HW down properly, waiting for it to be unpluggable?*/
 	if (priv->WQIT)
-		dma_free_coherent(priv->pci_dev, 0x1000, priv->WQIT, priv->WQIT_dma);
+		dma_free_coherent(&priv->pdev->dev, 0x1000, priv->WQIT, priv->WQIT_dma);
 }
 
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -710,7 +711,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			val = ioread64((void __iomem *)(priv->mmio_start + access_info.offset));
 			if (copy_to_user(access_info.value, &val, 8))
-				dev_info(priv->pci_dev, "error during iread ioctl!\n");
+				dev_info(&priv->dev, "error during iread ioctl!\n");
 
 			break;
 		}
@@ -832,7 +833,7 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma)
 
 	if (io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE,
 			vma->vm_page_prot)) {
-		dev_warn(priv->pci_dev, "Mapping failed!\n");
+		dev_warn(&priv->dev, "Mapping failed!\n");
 		return -EAGAIN;
 	}
 	// printk(KERN_INFO "mmap completed\n");
@@ -857,30 +858,29 @@ irqreturn_t handle_dce(int irq, void *dce_priv_p)
 	struct dce_driver_priv *dce_priv = dce_priv_p;
 
 	/* FIXME: multiple thread running this? schedule_work reentrant safe?*/
-	dev_dbg(dce_priv->pci_dev, "Got interrupt %d, work scheduled!\n", irq);
+	dev_dbg(&dce_priv->dev, "Got interrupt %d, work scheduled!\n", irq);
 	schedule_work(&dce_priv->clean_up_worker);
 	return IRQ_HANDLED;
 }
 
 int setup_memory_regions(struct dce_driver_priv *drv_priv)
 {
-	struct device *dev = drv_priv->pci_dev;
+	struct device *dev = &drv_priv->pdev->dev;
 	int err = 0;
 
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	/* TODO: Actually handle error !? */
 	if (err)
-		dev_info(drv_priv->pci_dev, "DMA set mask failed: %d\n", err);
+		dev_info(&drv_priv->pdev->dev, "DMA set mask failed: %d\n", err);
 	/* WQIT is 4KiB */
 	/* TODO: Error handling, dma_alloc can fail*/
 	/* TODO: check alignement, the idea is to have a page aligned alloc */
 	drv_priv->WQIT =
 		dma_alloc_coherent(dev, 0x1000, &drv_priv->WQIT_dma, GFP_KERNEL);
 	if ((drv_priv->WQIT_dma & GENMASK(11, 0)) != 0) {
-		dev_err(dev, "DCE: WQITBA[11:0]:0x%pad is not all zero!\n",
+		dev_err(&drv_priv->dev, "DCE: WQITBA[11:0]:0x%pad is not all zero!\n",
 			&drv_priv->WQIT_dma);
-		dma_free_coherent(drv_priv->pci_dev, 0x1000,
-			drv_priv->WQIT, drv_priv->WQIT_dma);
+		dma_free_coherent(dev, 0x1000, drv_priv->WQIT, drv_priv->WQIT_dma);
 		return -EFAULT;
 	}
 	dce_reg_write(drv_priv, DCE_REG_WQITBA, (uint64_t) drv_priv->WQIT_dma);
@@ -930,7 +930,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	drv_priv->pdev = pdev;
-	drv_priv->pci_dev = dev;
 
 	drv_priv->mmio_start_phys = pci_resource_start(pdev, 0);
 	// mmio_len   = pci_resource_len  (pdev, 0);
@@ -975,7 +974,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			dev_err(dev, "Failure to get minor\n");
 			goto free_resources_and_fail;
 		}
-		dev_info(dev, "creating device for dce%dfn%d", pf_id, vf_num + 1);
 		dev->devt = MKDEV(MAJOR(dev_vf_num), minor);
 		err = dev_set_name(dev, "dce%dfn%d", pf_id, vf_num+1);
 	}
@@ -1005,27 +1003,27 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		if (err < 0)
 			dev_err(dev, "Failed setting up IRQ\n");
 
-		dev_info(dev,
+		dev_info(&pdev->dev,
 				"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
 				pdev->msi_enabled,
 				pdev->msix_enabled);
 
 		vec = pci_irq_vector(pdev, 0);
-		dev_info(dev, "irqcount: %d, IRQ vector is %d\n", err, vec);
+		dev_info(&pdev->dev, "irqcount: %d, IRQ vector is %d\n", err, vec);
 
 		/* auto frees on device detach, nice */
 		err = devm_request_threaded_irq(dev, vec, handle_dce, NULL,
 							IRQF_ONESHOT, DEVICE_NAME, drv_priv);
 		if (err < 0)
-			dev_err(dev, "Failed setting up IRQ\n");
+			dev_err(&pdev->dev, "Failed setting up IRQ\n");
 	} else {
-		dev_warn(dev, "DCE: MSI enable failed\n");
+		dev_warn(&pdev->dev, "DCE: MSI enable failed\n");
 	}
 
 	if (isPF) {
 		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
 		if(err < 0){
-			dev_err(dev, "pci_enable_sriov fail\n");
+			dev_err(&pdev->dev, "pci_enable_sriov fail\n");
 			goto disable_device_and_fail;
 		}
 	}
@@ -1053,8 +1051,10 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* Finally expose the device */
 	err = cdev_device_add(&drv_priv->cdev, &drv_priv->dev);
 	if (err) {
-		dev_err(dev, "DCE: cdev add failed\n");
+		dev_err(&pdev->dev, "cdev add failed\n");
 		goto free_resources_and_fail;
+	} else {
+		dev_info(&pdev->dev, "Exposing as %s", dev_name(dev));
 	}
 	return 0;
 
