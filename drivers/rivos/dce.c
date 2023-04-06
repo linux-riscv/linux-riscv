@@ -128,8 +128,8 @@ void clean_up_work(struct work_struct *work)
 	}
 }
 
-struct submitter_dce_ctx {
-	struct dce_driver_priv *dev;
+struct dce_submitter_ctx {
+	struct dce_driver_priv *priv;
 	struct iommu_sva *sva;
 	int wq_num;
 	unsigned int pasid;
@@ -138,40 +138,40 @@ struct submitter_dce_ctx {
 static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool enable);
 int dce_ops_open(struct inode *inode, struct file *file)
 {
-	struct dce_driver_priv *dev =
+	struct dce_driver_priv *priv =
 		container_of(inode->i_cdev, struct dce_driver_priv, cdev);
-	struct submitter_dce_ctx *ctx;
+	struct dce_submitter_ctx *ctx;
 	int err = 0;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
-	ctx->dev = dev;
+	ctx->priv = priv;
 	ctx->sva = NULL;
 	ctx->pasid = 0;
 	ctx->wq_num = -1;
 
-	if (dev->sva_enabled) {
-		ctx->sva = iommu_sva_bind_device(&dev->pdev->dev, current->mm);
+	if (priv->sva_enabled) {
+		ctx->sva = iommu_sva_bind_device(&priv->pdev->dev, current->mm);
 		if (IS_ERR(ctx->sva)) {
 			err = PTR_ERR(ctx->sva);
-			dev_err(&dev->dev, "open: sva_bind_device fail:%d!\n", err);
+			dev_err(&priv->dev, "open: sva_bind_device fail:%d!\n", err);
 			goto error;
 		} else {
-			dev_info(&dev->dev, "open: sva_bind_device success!\n");
+			dev_info(&priv->dev, "open: sva_bind_device success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
 		if (ctx->pasid == IOMMU_PASID_INVALID) {
-			dev_err(&dev->dev, "open: sva_get_pasid fail!\n");
+			dev_err(&priv->dev, "open: sva_get_pasid fail!\n");
 			iommu_sva_unbind_device(ctx->sva);
 			err =  -ENODEV;
 			goto error;
 		} else {
-			dev_info(&dev->dev, "open: sva_get_pasid success!\n");
+			dev_info(&priv->dev, "open: sva_get_pasid success!\n");
 		}
 	} else {
-		dev_err(&dev->dev, "open: PASID support required, fail!\n");
+		dev_err(&priv->dev, "open: PASID support required, fail!\n");
 		err = -EFAULT;
 		goto error;
 	}
@@ -264,8 +264,8 @@ static int release_user_queue(struct dce_driver_priv *priv, int wq_num)
  */
 int dce_ops_release(struct inode *inode, struct file *file)
 {
-	struct submitter_dce_ctx *ctx = file->private_data;
-	struct dce_driver_priv *priv = ctx->dev;
+	struct dce_submitter_ctx *ctx = file->private_data;
+	struct dce_driver_priv *priv = ctx->priv;
 	int wq_num = ctx->wq_num;
 	int err = 0;
 	struct work_queue *wq;
@@ -457,10 +457,10 @@ static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num)
 	dce_reg_write(dev_ctx, WQCR_REG, 1);
 }
 
-static int setup_user_wq(struct submitter_dce_ctx *ctx,
+static int setup_user_wq(struct dce_submitter_ctx *ctx,
 					  int wq_num, struct UserArea *ua)
 {
-	struct dce_driver_priv *dce_priv = ctx->dev;
+	struct dce_driver_priv *dce_priv = ctx->priv;
 	size_t length = ua->numDescs;
 	struct DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
 	struct work_queue *wq = dce_priv->wq+wq_num;
@@ -468,14 +468,14 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 	int DSCSZ;
 
 	if (wq->type != RESERVED_WQ) {
-		dev_dbg(&ctx->dev->dev,
+		dev_dbg(&dce_priv->dev,
 			"User queue setup on reserved queue only, clean/reserve first");
 		return -EFAULT;
 	}
 	/* make sure size is multiple of 4K */
 	/* TODO: Check alignement as per spec, i.e. naturally aligned to full queue size*/
 	if ((size < 0x1000) || (__arch_hweight64(size) != 1)) {
-		dev_warn(&ctx->dev->dev, "Invalid size requested for User queue:%d", size);
+		dev_warn(&dce_priv->dev, "Invalid size requested for User queue:%d", size);
 		return -EBADR;
 	}
 	DSCSZ = fls(size) - fls(0x1000);
@@ -503,13 +503,13 @@ static int setup_user_wq(struct submitter_dce_ctx *ctx,
 
 	/* enabled queue in driver */
 	dce_priv->wq[wq_num].type = USER_OWNED_WQ;
-	dev_info(&ctx->dev->dev, "wq %d as USER_OWNED_WQ\n", wq_num);
+	dev_info(&dce_priv->dev, "wq %d as USER_OWNED_WQ\n", wq_num);
 	return 0;
 }
 
-static int request_user_wq(struct submitter_dce_ctx *ctx, struct UserArea *ua)
+static int request_user_wq(struct dce_submitter_ctx *ctx, struct UserArea *ua)
 {
-	struct dce_driver_priv *priv = ctx->dev;
+	struct dce_driver_priv *priv = ctx->priv;
 	/*TODO: Could make sense to do UserArea validation here */
 	int wqnum = reserve_unused_wq(priv);
 
@@ -642,7 +642,7 @@ int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 }
 
 static int request_kernel_wq(
-					struct submitter_dce_ctx *ctx, struct KernelQueueReq *kqr)
+					struct dce_submitter_ctx *ctx, struct KernelQueueReq *kqr)
 {
 	/* WQ shouldn't have been assigned at this point */
 	if (ctx->wq_num != -1)
@@ -650,7 +650,7 @@ static int request_kernel_wq(
 
 	/* allocate a queue to context or fallback to wq 0*/
 	{
-		int wqnum = reserve_unused_wq(ctx->dev);
+		int wqnum = reserve_unused_wq(ctx->priv);
 
 		if (wqnum < 0) { /* no more free queues */
 			ctx->wq_num = 0; /* Fallback to shared queue */
@@ -662,7 +662,7 @@ static int request_kernel_wq(
 			 * TODO: Refactor, pass only &wq to setup_memory
 			 * requires a separate activation function for the queue
 			 */
-			if (setup_kernel_wq(ctx->dev, wqnum, kqr) < 0) {
+			if (setup_kernel_wq(ctx->priv, wqnum, kqr) < 0) {
 				//TODO: Print an error
 				return -EFAULT;
 			}
@@ -690,8 +690,8 @@ void free_resources(struct device *dev, struct dce_driver_priv *priv)
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct DCEDescriptor descriptor;
-	struct submitter_dce_ctx *ctx = file->private_data;
-	struct dce_driver_priv *priv = ctx->dev;
+	struct dce_submitter_ctx *ctx = file->private_data;
+	struct dce_driver_priv *priv = ctx->priv;
 
 #ifdef CONFIG_IOMMU_SVA
 	/* prevent all ioctl from succeeding if the fd is from a parent process*/
@@ -812,8 +812,8 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 int dce_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct submitter_dce_ctx *ctx = file->private_data;
-	struct dce_driver_priv *priv = ctx->dev;
+	struct dce_submitter_ctx *ctx = file->private_data;
+	struct dce_driver_priv *priv = ctx->priv;
 	unsigned long pfn;
 
 	if (ctx->wq_num == -1)
