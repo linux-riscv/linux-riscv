@@ -153,6 +153,40 @@ out:
 	return ret;
 }
 
+int daffy_get_info_cmd(struct dpa_device *dev,
+					struct dpa_kfd_process *p,
+					struct drm_dpa_get_info *args)
+{
+	struct dpa_fw_queue_pkt pkt;
+	struct dpa_fw_queue_pkt *qpkt;
+	struct daffy_get_info_cmd *cmd = &pkt.u.dgic;
+	unsigned int index;
+	int ret = 0;
+
+	if (!queue_has_space(&dev->qinfo)) {
+		// XXX wait on wait queue
+		dev_warn(dev->dev, "%s: queue is full\n", __func__);
+		return -EBUSY;
+	}
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = GET_INFO;
+
+	index = add_to_queue(dev, &pkt);
+	dev_warn(dev->dev, "%s: added to queue index %u cmd = %u\n",
+		 __func__, index, pkt.hdr.command);
+	if (index == -1)
+		return -EINVAL;
+
+	qpkt = dev->qinfo.h_ring + index;
+	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
+	if (ret)
+		goto out;
+	args->pe_grid_dim_x = qpkt->u.dgic.pe_grid_dim_x;
+	args->pe_grid_dim_y = qpkt->u.dgic.pe_grid_dim_y;
+out:
+	return ret;
+}
+
 int daffy_destroy_queue_cmd(struct dpa_device *dev,
 			    struct dpa_kfd_process *p, u32 queue_id)
 {

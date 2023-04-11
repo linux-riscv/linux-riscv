@@ -1561,6 +1561,21 @@ static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_kfd_process *p,
 
 DRM_KFD_IOCTL(unmap_memory_from_gpu)
 
+static int dpa_ioctl_get_info(struct dpa_kfd_process *p,
+			      struct dpa_device *dpa, void *data)
+{
+	struct drm_dpa_get_info *args = data;
+	int ret = daffy_get_info_cmd(p->dev, p, args);
+
+	if (ret)
+		return ret;
+	dev_warn(p->dev->dev, "%s: dim_x: %d dim_y: %d\n", __func__,
+		args->pe_grid_dim_x, args->pe_grid_dim_y);
+
+	return 0;
+}
+DRM_KFD_IOCTL(get_info);
+
 static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 {
 	struct device *dev = buf->p->dev->dev;
@@ -1864,6 +1879,7 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_FREE_MEMORY_OF_GPU, dpa_drm_ioctl_free_memory_of_gpu, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_MAP_MEMORY_TO_GPU, dpa_drm_ioctl_map_memory_to_gpu, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_UNMAP_MEMORY_FROM_GPU, dpa_drm_ioctl_unmap_memory_from_gpu, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_GET_INFO, dpa_drm_ioctl_get_info, DRM_RENDER_ALLOW),
 };
 
 static const struct drm_driver dpa_drm_driver = {

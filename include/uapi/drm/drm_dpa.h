@@ -26,6 +26,7 @@
 #define DRM_DPA_FREE_MEMORY_OF_GPU 			0x17
 #define DRM_DPA_MAP_MEMORY_TO_GPU 			0x18
 #define DRM_DPA_UNMAP_MEMORY_FROM_GPU 			0x19
+#define DRM_DPA_GET_INFO 				0x1a
 
 #define DPA_IOCTL(dir, name, str) \
 DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
@@ -174,6 +175,11 @@ struct drm_dpa_map_memory_to_gpu {
 	__u32 n_success;		/* to/from KFD */
 };
 
+struct drm_dpa_get_info {
+	__u32 pe_grid_dim_x;
+	__u32 pe_grid_dim_y;
+};
+
 /* Unmap memory from one or more GPUs
  *
  * same arguments as for mapping
@@ -221,5 +227,6 @@ struct drm_dpa_unmap_memory_from_gpu {
 	DPA_IOCTL(IOWR, MAP_MEMORY_TO_GPU, map_memory_to_gpu)
 #define DRM_IOCTL_DPA_UNMAP_MEMORY_FROM_GPU \
 	DPA_IOCTL(IOWR, UNMAP_MEMORY_FROM_GPU, unmap_memory_from_gpu)
-
+#define DRM_IOCTL_DPA_GET_INFO \
+	DPA_IOCTL(IOWR, GET_INFO, get_info)
 #endif

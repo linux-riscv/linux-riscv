@@ -59,12 +59,24 @@ static void get_version(void)
 {
 	struct drm_dpa_get_version args;
 	int ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_VERSION, &args);
+
 	if (ret) {
 		perror("ioctl get version");
 		exit(1);
 	}
 	fprintf(stderr, "version: major %d minor %d\n",
 		args.major_version, args.minor_version);
+}
+
+static void get_info(void)
+{
+	struct drm_dpa_get_info args;
+	int ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_INFO, &args);
+
+	if (ret) {
+		perror("ioctl get info");
+		exit(1);
+	}
 }
 
 static void open_render_fd(void)
@@ -360,6 +372,7 @@ int main(int argc, char *argv[])
 
 	open_render_fd();
 	get_version();
+	get_info();
 
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
