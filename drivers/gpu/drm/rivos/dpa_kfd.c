@@ -1595,41 +1595,6 @@ static int dpa_kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
 		 __func__, mmap_offset, size, gpu_id, type, (u64)vma->vm_start);
 	switch (type) {
-	case KFD_MMAP_TYPE_VRAM:
-	{
-		u64 id = vma->vm_pgoff & 0xFFFFFFFF;
-		struct dpa_kfd_buffer *buf;
-		unsigned long vma_page_count = size >> PAGE_SHIFT;
-		dev_warn(p->dev->dev, "%s: trying to map vram for buf id %llu vma %lu pages\n",
-			 __func__, id, vma_page_count);
-
-		buf = find_buffer(p, id);
-		if (buf) {
-			unsigned long num_pages = buf->page_count;
-			if (buf->type != KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
-				dev_warn(p->dev->dev, "%s: unexpected type for buf %u\n",
-					 __func__, buf->type);
-				return -EINVAL;
-			}
-			if (buf->page_count != vma_page_count) {
-				dev_warn(p->dev->dev, "%s: buf page count %u != vma %lu\n",
-					 __func__, buf->page_count, vma_page_count);
-				return -EINVAL;
-			}
-			ret = vm_insert_pages(vma, vma->vm_start, buf->pages,
-					      &num_pages);
-			if (ret || num_pages) {
-				dev_warn(p->dev->dev, "%s: vm_insert_pages ret = %d num = %lu\n",
-					 __func__, ret, num_pages);
-				return ret;
-			}
-		} else {
-			dev_warn(p->dev->dev, "%s: buffer id %llu not found\n",
-				 __func__, id);
-			return -EINVAL;
-		}
-	}
-	break;
 	case KFD_MMAP_TYPE_DOORBELL:
 		if (size != DPA_DOORBELL_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
