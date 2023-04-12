@@ -141,6 +141,11 @@ struct dpa_kfd_process {
 	// aql queues
 	struct list_head queue_list;
 
+	/* signal related */
+	u64 signal_pages_va;
+	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
+	unsigned signal_pages_count;
+
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
 

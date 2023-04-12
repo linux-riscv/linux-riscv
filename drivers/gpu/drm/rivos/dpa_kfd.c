@@ -6,6 +6,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/cpumask.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/device/class.h>
 #include <linux/dev_printk.h>
@@ -1149,6 +1150,124 @@ static int dpa_ioctl_get_info(struct dpa_kfd_process *p,
 }
 DRM_KFD_IOCTL(get_info);
 
+static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
+					     struct drm_file *file)
+{
+	struct dpa_kfd_process *p = file->driver_priv;
+	struct drm_dpa_create_signal_pages *args = data;
+	unsigned num_pages = args->size / PAGE_SIZE;
+	int ret = 0;
+	long count;
+
+	if (!p)
+		return -EINVAL;
+
+	if ((args->size & (PAGE_SIZE - 1)) ||
+	    (num_pages > DPA_DRM_MAX_SIGNAL_PAGES) ||
+	    (args->va & (PAGE_SIZE - 1)))
+		return -EINVAL;
+
+	dev_warn(dev->dev, "%s: creating %u signal pages\n", __func__,
+		 num_pages);
+
+	mutex_lock(&p->lock);
+
+	/* XXX we don't support resize yet */
+	if (p->signal_pages_count) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	/* assume pages are mapped writable, if not we'll get an error */
+	if ((count = pin_user_pages_fast(args->va, num_pages,
+					 FOLL_LONGTERM | FOLL_WRITE,
+					 p->signal_pages))
+	    != num_pages) {
+		dev_warn(dev->dev, "%s: pin_user_pages() failed %ld for 0x%lx\n",
+			 __func__, count, args->va);
+	
+		/* negative count is an error code */
+		if (count < 0)
+			ret = count;
+
+		/* use -EVINAL error code if only some pages were pinned */
+		if (count >= 0) {
+			unpin_user_pages(p->signal_pages, count);
+			ret = -EINVAL;
+		}
+
+		goto out_unlock;
+	}
+	p->signal_pages_va = args->va;
+	p->signal_pages_count = num_pages;
+
+out_unlock:
+	mutex_unlock(&p->lock);
+
+	return ret;
+}
+
+static int dpa_check_signal(struct dpa_kfd_process *p, u32 signal_index)
+{
+	u64 signal_va = p->signal_pages_va +
+		(signal_index * sizeof(struct drm_dpa_signal));
+	u64 signal_value;
+
+	int ret = copy_from_user(&signal_value, (void __user*)signal_va,
+				 sizeof(signal_value));
+	if (ret < 0) {
+		dev_warn(p->dev->dev, "%s: error checking signal %u at %lx\n",
+			 __func__, signal_index, signal_va);
+		return ret;
+	}
+
+	if (signal_value == 0)
+		return 0;
+	return 1;
+}
+
+static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
+				     struct drm_file *file)
+{
+	struct dpa_kfd_process *p = file->driver_priv;
+	struct drm_dpa_wait_signal *args = data;
+	u64 total_usleep = 0;
+	int ret = 0;
+
+	if (!p)
+		return -EINVAL;
+
+	mutex_lock(&p->lock);
+
+	/* verify signal index is in bounds */
+	if ((args->signal_idx * sizeof(struct drm_dpa_signal)) >=
+	    (p->signal_pages_count * PAGE_SIZE)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+	
+	// XXX implement this using a daffy packet and event waiters
+	do {
+		ret = dpa_check_signal(p, args->signal_idx);
+		if (ret) {
+			mutex_unlock(&p->lock);
+			usleep_range(10000, 10000);
+			total_usleep  += 10000;
+			mutex_lock(&p->lock);
+		}
+	} while ((ret == 1) && ((total_usleep * 1000) < args->timeout_ns));
+
+	dev_warn(p->dev->dev, "%s: idx %u ret = %d\n", __func__,
+		 args->signal_idx, ret);
+
+	if (ret == 1)
+		ret = -EBUSY;
+out_unlock:
+	mutex_unlock(&p->lock);;
+
+	return ret;
+}
+
 static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 {
 	struct device *dev = buf->p->dev->dev;
@@ -1433,6 +1552,8 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_MAP_MEMORY_TO_GPU, dpa_drm_ioctl_map_memory_to_gpu, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_UNMAP_MEMORY_FROM_GPU, dpa_drm_ioctl_unmap_memory_from_gpu, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_GET_INFO, dpa_drm_ioctl_get_info, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_CREATE_SIGNAL_PAGES, dpa_drm_ioctl_create_signal_pages, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
 };
 
 static const struct drm_driver dpa_drm_driver = {
@@ -1551,11 +1672,16 @@ static void dpa_kfd_release_process(struct kref *ref)
 {
 	struct dpa_kfd_process *p = container_of(ref, struct dpa_kfd_process,
 						 ref);
+	int i;
+
 	mutex_lock(&dpa_processes_lock);
 	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 	// XXX mutex lock on process lock ?
 	dpa_kfd_release_process_buffers(p);
+
+	for (i = 0; i < p->signal_pages_count; i++)
+		unpin_user_page(p->signal_pages[i]);
 
 	if (p->drm_file)
 		fput(p->drm_file);

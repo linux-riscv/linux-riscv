@@ -22,6 +22,8 @@
 #define DRM_DPA_MAP_MEMORY_TO_GPU 			0x18
 #define DRM_DPA_UNMAP_MEMORY_FROM_GPU 			0x19
 #define DRM_DPA_GET_INFO 				0x1a
+#define DRM_DPA_CREATE_SIGNAL_PAGES 			0x1b
+#define DRM_DPA_WAIT_SIGNAL 				0x1c
 
 #define DPA_IOCTL(dir, name, str) \
 DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
@@ -141,6 +143,26 @@ struct drm_dpa_get_info {
 	__u32 pe_grid_dim_y;
 };
 
+/* each signal takes one 64B cacheline */
+struct drm_dpa_signal {
+	__u64 signal_value;
+	__u64 pad[7];
+};
+
+#define DPA_DRM_MAX_SIGNAL_PAGES (4)
+#define DPA_DRM_SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct drm_dpa_signal))
+
+struct drm_dpa_create_signal_pages {
+	__u64 va;	/* in to be passed to mmap, must be page aligned */
+	__u32 size;	/* in multiple of page size */
+	__u32 type;	/* ignored for now, eventually different types */
+};
+
+struct drm_dpa_wait_signal {
+	__u64 signal_idx;	/* in signal index, offset in 64B from start */
+	__u64 timeout_ns;	/* in timeout in nano seconds */
+};
+
 /* Unmap memory from one or more GPUs
  *
  * same arguments as for mapping
@@ -180,4 +202,9 @@ struct drm_dpa_unmap_memory_from_gpu {
 	DPA_IOCTL(IOWR, UNMAP_MEMORY_FROM_GPU, unmap_memory_from_gpu)
 #define DRM_IOCTL_DPA_GET_INFO \
 	DPA_IOCTL(IOWR, GET_INFO, get_info)
+#define DRM_IOCTL_DPA_CREATE_SIGNAL_PAGES \
+	DPA_IOCTL(IOWR, CREATE_SIGNAL_PAGES, create_signal_pages)
+#define DRM_IOCTL_DPA_WAIT_SIGNAL \
+	DPA_IOCTL(IOWR, WAIT_SIGNAL, wait_signal)
+
 #endif
