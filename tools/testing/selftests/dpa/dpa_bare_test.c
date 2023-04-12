@@ -177,36 +177,42 @@ static void mmap_dev_mem(void *user_ptr, size_t size, uint64_t mmap_offset)
 	return mmap_gpu_obj(drm_fd, user_ptr, size, mmap_offset);
 }
 
-#if 0
-static void create_signal_event(uint64_t *page_offset, uint32_t *trigger_data,
-				uint32_t *event_id, uint32_t *event_slot_index)
+static struct drm_dpa_signal *get_signal_page()
 {
 	int ret;
-	struct kfd_ioctl_create_event_args args;
+	struct drm_dpa_create_signal_pages args;
+	struct drm_dpa_signal *event_page;
 
+	alloc_aligned_host_memory((void **)&event_page, getpagesize());
 	memset(&args, 0, sizeof(args));
-	args.event_type = KFD_IOC_EVENT_SIGNAL;
+	args.va = (uint64_t)event_page;
+	args.size = getpagesize();
 
-
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_CREATE_EVENT, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_CREATE_SIGNAL_PAGES, &args);
 	if (ret) {
-		perror("ioctl create event");
+		perror("ioctl create signal pages");
 		exit(1);
 	}
-	if (page_offset)
-		*page_offset = args.event_page_offset;
-	if (trigger_data)
-		*trigger_data = args.event_trigger_data;
-	if (event_id)
-		*event_id = args.event_id;
-	if (event_slot_index)
-		*event_slot_index = args.event_slot_index;
 
-	fprintf(stderr, "%s: page_offset 0x%lx trigger_data 0x%x event_id 0x%x "
-		"event_slot_index 0x%x\n", __func__, (uint64_t)args.event_page_offset,
-		args.event_trigger_data, args.event_id, args.event_slot_index);
+	return event_page;
 }
-#endif
+
+static int wait_signal(uint32_t index, uint32_t timeout)
+{
+	struct drm_dpa_wait_signal args;
+	int ret;
+
+	args.signal_idx = index;
+	args.timeout_ns = timeout;
+
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_WAIT_SIGNAL, &args);
+	if (ret) {
+		perror("wait signal ioctl");
+		exit(1);
+	}
+
+	return ret;
+}
 
 static void destroy_queue(uint32_t q_id)
 {
@@ -365,6 +371,9 @@ int main(int argc, char *argv[])
 
 	struct KernelDescriptor *kd_ptr;
 
+	struct drm_dpa_signal *signal_page, *signal;
+	int ret = 0;
+
 	if (init_null_kernel(&kern_ptr, &kernel_size, &kd_ptr)) {
 		fprintf(stderr, "null kernel init failed\n");
 		exit(1);
@@ -373,6 +382,11 @@ int main(int argc, char *argv[])
 	open_render_fd();
 	get_version();
 	get_info();
+	signal_page = get_signal_page();
+	signal = &signal_page[0];
+
+	// initialize first signal to unset
+	signal->signal_value = 1;
 
 	// allocate a user buffer for the queue
 	alloc_aligned_host_memory(&queue_ptr, queue_size);
@@ -465,6 +479,25 @@ int main(int argc, char *argv[])
 			munmap(doorbell_map, doorbell_size);
 			exit(1);
 		}
+
+		// Add another barrier packet with a signal attached so we can wait on that
+		aql_barrier_packet = (hsa_barrier_and_packet_t *)(queue_ptr +
+								  (*q_write_ptr *
+								   sizeof(*aql_barrier_packet)));
+		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
+		aql_barrier_packet->completion_signal.handle = (uint64_t)signal;
+		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
+		*q_write_ptr += 1;
+		doorbell_map[queue_id].doorbell_write_offset = *q_write_ptr;
+		// wait 1 second
+		fprintf(stderr, "waiting for signal back on barrier\n");
+		if ((ret = wait_signal(0, 1000000000))) {
+			fprintf(stderr, "wait for signal returned %d\n", ret);
+		}
+		fprintf(stderr, "signal value is now %" PRIu64 "\n",
+			(uint64_t)signal->signal_value);
+		// 0 means it was completed
+		ret = (int)signal->signal_value;
 		destroy_queue(queue_id);
 	} else {
 		fprintf(stderr, "No kernel to launch, exiting\n");
@@ -472,5 +505,5 @@ int main(int argc, char *argv[])
 
 	munmap(doorbell_map, doorbell_size);
 	close(drm_fd);
-	return 0;
+	return ret;
 }
