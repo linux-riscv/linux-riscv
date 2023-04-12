@@ -138,11 +138,6 @@ struct dpa_kfd_process {
 	// maintain a list of allocations in vram
 	struct list_head buffers;
 
-	// event stuff
-	u64 *event_page;
-	struct idr event_idr;
-	struct list_head event_list;
-
 	// aql queues
 	struct list_head queue_list;
 
@@ -200,46 +195,11 @@ struct kfd_ioctl_desc {
 /* Size of a doorbell page */
 #define DPA_DOORBELL_PAGE_SIZE (PAGE_SIZE)
 
-/* just one page max for signals right now */
-#define DPA_MAX_EVENT_PAGE_SIZE (PAGE_SIZE)
-
-/* per process max on signals based on a page */
-#define DPA_MAX_SIGNAL_EVENTS (PAGE_SIZE / sizeof(u64))
-
-#define KFD_EVENT_TIMEOUT_IMMEDIATE 0
-#define KFD_EVENT_TIMEOUT_INFINITE 0xFFFFFFFFu
-
-/* HSA Event types */
-#define KFD_EVENT_TYPE_SIGNAL (0)
-#define KFD_EVENT_TYPE_HW_EXCEPTION (3)
-#define KFD_EVENT_TYPE_DEBUG (5)
-#define KFD_EVENT_TYPE_MEMORY (8)
-
-/* mostly a copy of what's in amdgpu struct kfd_event */
-struct dpa_kfd_event {
-	unsigned id;
-	int type;
-	spinlock_t lock;
-	wait_queue_head_t wq;
-	bool auto_reset;
-	bool signaled;
-
-	struct list_head events;
-};
-
-/* copy from kfd_event */
-struct dpa_kfd_event_waiter {
-	wait_queue_entry_t wait;
-	struct dpa_kfd_event *event; /* Event to wait for */
-	bool activated;		 /* Becomes true when event is signaled */
-};
-
 irqreturn_t handle_daffy(int irq, void *dpa_dev);
 
 /* offsets to MMAP calls for different things */
 #define KFD_MMAP_TYPE_SHIFT (60)
 #define KFD_MMAP_TYPE_DOORBELL (0x1ULL)
-#define KFD_MMAP_TYPE_EVENTS (0x2ULL)
 
 // temporary until DRM/GEM
 #define KFD_MMAP_TYPE_VRAM (0x0ULL)

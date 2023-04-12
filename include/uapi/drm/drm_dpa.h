@@ -8,11 +8,6 @@
 #define DRM_DPA_GET_CLOCK_COUNTERS 			0x5
 #define DRM_DPA_GET_PROCESS_APERTURES 			0x6
 #define DRM_DPA_UPDATE_QUEUE 				0x7
-#define DRM_DPA_CREATE_EVENT 				0x8
-#define DRM_DPA_DESTROY_EVENT 				0x9
-#define DRM_DPA_SET_EVENT 				0xa
-#define DRM_DPA_RESET_EVENT 				0xb
-#define DRM_DPA_WAIT_EVENTS 				0xc
 #define DRM_DPA_DBG_REGISTER_DEPRECATED 		0xd
 #define DRM_DPA_DBG_UNREGISTER_DEPRECATED 		0xe
 #define DRM_DPA_DBG_ADDRESS_WATCH_DEPRECATED 		0xf
@@ -112,40 +107,6 @@ struct drm_dpa_get_process_apertures_new {
 	__u32 pad;
 };
 
-struct drm_dpa_create_event {
-	__u64 event_page_offset;	/* from KFD */
-	__u32 event_trigger_data;	/* from KFD - signal events only */
-	__u32 event_type;		/* to KFD */
-	__u32 auto_reset;		/* to KFD */
-	__u32 node_id;		/* to KFD - only valid for certain
-							event types */
-	__u32 event_id;		/* from KFD */
-	__u32 event_slot_index;	/* from KFD */
-};
-
-struct drm_dpa_destroy_event {
-	__u32 event_id;		/* to KFD */
-	__u32 pad;
-};
-
-struct drm_dpa_set_event {
-	__u32 event_id;		/* to KFD */
-	__u32 pad;
-};
-
-struct drm_dpa_reset_event {
-	__u32 event_id;		/* to KFD */
-	__u32 pad;
-};
-
-struct drm_dpa_wait_events {
-	__u64 events_ptr;		/* pointed to struct
-					   kfd_event_data array, to KFD */
-	__u32 num_events;		/* to KFD */
-	__u32 wait_for_all;		/* to KFD */
-	__u32 timeout;		/* to KFD */
-	__u32 wait_result;		/* from KFD */
-};
 struct drm_dpa_acquire_vm {
 	__u32 drm_fd;	/* to KFD */
 	__u32 gpu_id;	/* to KFD */
@@ -205,16 +166,6 @@ struct drm_dpa_unmap_memory_from_gpu {
 	DPA_IOCTL(IOWR, GET_PROCESS_APERTURES, get_process_apertures)
 #define DRM_IOCTL_DPA_UPDATE_QUEUE \
 	DPA_IOCTL(IOWR, UPDATE_QUEUE, update_queue)
-#define DRM_IOCTL_DPA_CREATE_EVENT \
-	DPA_IOCTL(IOWR, CREATE_EVENT, create_event)
-#define DRM_IOCTL_DPA_DESTROY_EVENT \
-	DPA_IOCTL(IOWR, DESTROY_EVENT, destroy_event)
-#define DRM_IOCTL_DPA_SET_EVENT \
-	DPA_IOCTL(IOWR, SET_EVENT, set_event)
-#define DRM_IOCTL_DPA_RESET_EVENT \
-	DPA_IOCTL(IOWR, RESET_EVENT, reset_event)
-#define DRM_IOCTL_DPA_WAIT_EVENTS \
-	DPA_IOCTL(IOWR, WAIT_EVENTS, wait_events)
 #define DRM_IOCTL_DPA_GET_PROCESS_APERTURES_NEW \
 	DPA_IOCTL(IOWR, GET_PROCESS_APERTURES_NEW, get_process_apertures_new)
 #define DRM_IOCTL_DPA_ACQUIRE_VM \
