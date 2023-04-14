@@ -479,8 +479,6 @@ int dpa_gem_object_create(unsigned long size,
 	struct device * dev = dpa->dev;
 	struct drm_buddy * mm = &dpa->mm;
 	struct drm_buddy_block *block, *on;
-	u64 va;
-	unsigned i;
 	int err;
 
 	*obj = NULL;
@@ -505,32 +503,35 @@ int dpa_gem_object_create(unsigned long size,
 				     mm->chunk_size,
 				     &buf->blocks,
 				     0);
+	if (err < 0)
+		goto out_unlock;
 
 	/* Zero the blocks allocated */
 	list_for_each_entry_safe(block, on, &buf->blocks, link) {
-		va = dpa->hbm_va + drm_buddy_block_offset(block);
-		size = drm_buddy_block_size(&dpa->mm, block);
-		memset((void *)va, 0, size);
+		void *va = dpa->hbm_va + drm_buddy_block_offset(block);
+
+		memset(va, 0, drm_buddy_block_size(&dpa->mm, block));
 	}
 
 	mutex_unlock(&dpa->mm_lock);
 
 	/* create the node in vma manager */
-	drm_gem_create_mmap_offset_size(&buf->gobj, size);
+	err = drm_gem_create_mmap_offset(&buf->gobj);
+	if (err < 0)
+		goto out_free_blocks;
 
 	*obj = &buf->gobj;
 	(*obj)->funcs = &dpa_gem_object_funcs;
 
 	return 0;
 
-	for (i = 0; i < buf->page_count; i++) {
-		if (buf->pages[i]) {
-			__free_pages(buf->pages[i], 0);
-		}
-	}
-	devm_kfree(dev, buf->pages);
+out_free_blocks:
+	mutex_lock(&dpa->mm_lock);
+	drm_buddy_free_list(mm, &buf->blocks);
+out_unlock:
+	mutex_unlock(&dpa->mm_lock);
 	devm_kfree(dev, buf);
-	return -1;
+	return err;
 }
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -614,10 +615,13 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		dev_err(dev, "No memory address assigned to the region\n");
 
-
 	dpa->hbm_base = r.start;
 	dpa->hbm_size = resource_size(&r);
-	dpa->hbm_va = (u64)devm_memremap(dpa_device, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
+	dpa->hbm_va = devm_memremap(dpa_device, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
+	if (IS_ERR(dpa->hbm_va)) {
+		err = PTR_ERR(dpa->hbm_va);
+		goto disable_device;
+	}
 	dev_info(dev, "HBM base: 0x%llx, HBM size: 0x%llx\n",
 		dpa->hbm_base, dpa->hbm_size);
 

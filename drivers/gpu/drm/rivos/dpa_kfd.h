@@ -81,7 +81,7 @@ struct dpa_device {
 
 	u64 hbm_size;
 	u64 hbm_base;
-	u64 hbm_va;
+	void *hbm_va;
 	/* list of processes using device */
 	//struct list *plist;
 	struct device *dev;
