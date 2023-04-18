@@ -367,6 +367,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	init_waitqueue_head(&dpa->wq);
+	mutex_init(&dpa->daffy_lock);
 
 	INIT_LIST_HEAD(&dpa->dpa_processes);
 	mutex_init(&dpa->dpa_processes_lock);

@@ -108,6 +108,7 @@ struct dpa_device {
 	struct list_head dpa_processes;
 	unsigned int dpa_process_count;
 
+	struct mutex daffy_lock;
 	wait_queue_head_t wq;
 	struct dpa_fwq_info qinfo;
 };

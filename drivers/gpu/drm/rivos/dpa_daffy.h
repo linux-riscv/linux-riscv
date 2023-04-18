@@ -53,12 +53,17 @@ struct dpa_fw_queue_desc {
 
 enum daffy_command {
 	INVALID = 1,
-	GET_INFO,
-	CREATE_QUEUE,
-	MODIFY_QUEUE,
-	PAUSE_QUEUE,
-	QUIESCE_QUEUE,
-	DESTROY_QUEUE,
+	GET_INFO = 2,
+	CREATE_QUEUE = 3,
+	MODIFY_QUEUE = 4,
+	PAUSE_QUEUE = 5,
+	QUIESCE_QUEUE = 6,
+	DESTROY_QUEUE = 7,
+};
+
+enum daffy_response {
+	SUCCESS = 1,
+	ERROR = 2,
 };
 
 struct daffy_pkt_header {

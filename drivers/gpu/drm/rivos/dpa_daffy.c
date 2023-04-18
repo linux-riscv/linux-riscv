@@ -40,7 +40,11 @@ static unsigned int daffy_add_to_queue(struct dpa_device *dev,
 {
 	struct dpa_fwq_info *qinfo = &dev->qinfo;
 	struct dpa_fw_queue_pkt *head = qinfo->h_ring;
-	unsigned int index = (qinfo->fw_queue->h_write_index) &
+	unsigned int index;
+
+	mutex_lock(&dev->daffy_lock);
+
+	index = (qinfo->fw_queue->h_write_index) &
 		(qinfo->fw_queue->h_qsize - 1);
 
 	head += index;
@@ -48,12 +52,15 @@ static unsigned int daffy_add_to_queue(struct dpa_device *dev,
 	if (head->hdr.command != INVALID) {
 		dev_warn(dev->dev, "%s: head packet not invalid 0x%x\n",
 			 __func__, head->hdr.command);
+		mutex_unlock(&dev->daffy_lock);
 		return -1;
 	}
 	pkt->hdr.id = qinfo->fw_queue->h_write_index;
 	memcpy(head, pkt, sizeof(*pkt));
 	dma_wmb();
-	qinfo->fw_queue->h_write_index++; // XXX atomic or locking?
+	qinfo->fw_queue->h_write_index++;
+
+	mutex_unlock(&dev->daffy_lock);
 
 	writeq(1, dev->regs + DUC_REGS_FW_DOORBELL);
 
@@ -168,6 +175,14 @@ int daffy_get_info_cmd(struct dpa_device *dev,
 	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
 	if (ret)
 		goto out;
+
+	if (qpkt->hdr.response != SUCCESS) {
+		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+		goto out;
+	}
+
 	args->pe_grid_dim_x = qpkt->u.dgic.pe_grid_dim_x;
 	args->pe_grid_dim_y = qpkt->u.dgic.pe_grid_dim_y;
 out:
@@ -200,8 +215,12 @@ int daffy_destroy_queue_cmd(struct dpa_device *dev,
 	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
 	if (ret)
 		goto out;
-	dev_warn(dev->dev, "%s: rsp = %u ridx = %llu\n",
-		 __func__, qpkt->hdr.response, dev->qinfo.fw_queue->h_read_index);
+
+	if (qpkt->hdr.response != SUCCESS) {
+		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+	}
 
 out:
 	return ret;
@@ -251,6 +270,14 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 	ret = wait_event_interruptible(dev->wq, qpkt->hdr.response > 0);
 	if (ret)
 		goto out;
+
+	if (qpkt->hdr.response != SUCCESS) {
+		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+		goto out;
+	}
+
 	args->queue_id = qpkt->u.dcqc.queue_id;
 	// doorbell_offset will get converted from page offset to something else by caller
 	args->doorbell_offset = qpkt->u.dcqc.doorbell_offset;
