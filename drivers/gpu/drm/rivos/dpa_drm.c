@@ -1,3 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Rivos DPA device driver
+ *
+ * Copyright (C) 2022-2023 Rivos Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <linux/kernel.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
@@ -32,9 +51,11 @@ static struct list_head dpa_processes;
 static struct mutex dpa_processes_lock;
 static unsigned int dpa_process_count;
 
-static struct dpa_process *get_current_process(void) {
+static struct dpa_process *dpa_get_current_process(void)
+{
 	struct list_head *cur;
 	struct dpa_process *dpa_app;
+
 	list_for_each(cur, &dpa_processes) {
 		struct dpa_process *cur_process =
 			container_of(cur, struct dpa_process,
@@ -54,8 +75,10 @@ static const struct pci_device_id dpa_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 
-static void dpa_setup_queue(struct dpa_device *dpa) {
-	dev_warn(dpa->dev, "DMA address of queue is: %llx\n", dpa->qinfo.fw_queue_dma_addr);
+static void dpa_setup_queue(struct dpa_device *dpa)
+{
+	dev_warn(dpa->dev, "DMA address of queue is: %llx\n",
+		dpa->qinfo.fw_queue_dma_addr);
 	writeq(dpa->qinfo.fw_queue_dma_addr, dpa->regs + DUC_REGS_FW_DESC);
 	writeq(0, dpa->regs + DUC_REGS_FW_PASID);
 }
@@ -71,7 +94,7 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 	int ret = -EFAULT;
 
 	mutex_lock(&dpa_processes_lock);
-	p = get_current_process();
+	p = dpa_get_current_process();
 	mutex_unlock(&dpa_processes_lock);
 
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
@@ -85,19 +108,21 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 			return -EINVAL;
 		}
 
-		// TODO: Right now we only support one MMIO-mapped doorbell page, expand to all 16
+		// TODO: Right now we only support one MMIO-mapped doorbell page,
+		// expand to all 16
 		dev_warn(p->dev->dev, "%s: Mapping doorbell page\n", __func__);
 
 		mutex_lock(&p->lock);
 		pfn = p->doorbell_base;
 		pfn >>= PAGE_SHIFT;
 
-		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
+		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size,
+			vma->vm_page_prot);
 		mutex_unlock(&p->lock);
 
 		if (ret) {
-			dev_warn(p->dev->dev, "%s: failed to map doorbell page"
-					"ret %d\n", __func__, ret);
+			dev_warn(p->dev->dev, "%s: failed to map doorbell page ret %d\n",
+				__func__, ret);
 		}
 		break;
 	default:
@@ -107,18 +132,20 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 	return ret;
 }
 
-static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struct *vma) {
-
+static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struct *vma)
+{
 	struct dpa_drm_buffer *buf = gem_to_dpa_buf(gobj);
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long start = vma->vm_start;
 	unsigned long chunk_size;
 	unsigned long vma_page_count = size >> PAGE_SHIFT;
+	unsigned long num_pages;
 	struct drm_buddy_block *block, *on;
 	u64 paddr;
 	int ret = -EFAULT;
+
 	if (buf) {
-		unsigned long num_pages = buf->page_count;
+		num_pages = buf->page_count;
 		if (buf->type != DPA_IOC_ALLOC_MEM_FLAGS_VRAM) {
 			dev_warn(dpa->dev, "%s: unexpected type for buf %u\n",
 					__func__, buf->type);
@@ -168,6 +195,7 @@ long dpa_drm_ioctl(struct file *filp,
 	struct drm_file *file_priv = filp->private_data;
 	struct drm_device *dev;
 	long ret;
+
 	dev = file_priv->minor->dev;
 	ret = pm_runtime_get_sync(dev->dev);
 	if (ret < 0)
@@ -185,11 +213,11 @@ static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
 	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
-	if (type == DRM_MMAP_TYPE_VRAM) {
+
+	if (type == DRM_MMAP_TYPE_VRAM)
 		return drm_gem_mmap(filp, vma);
-	} else {
+	else
 		return dpa_non_vram_mmap(filp, vma);
-	}
 }
 
 static const struct file_operations dpa_driver_kms_fops = {
@@ -205,6 +233,7 @@ static const struct file_operations dpa_driver_kms_fops = {
 static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
 	struct dpa_process *p = file_priv->driver_priv;
+
 	if (p)
 		kref_put(&p->ref, dpa_release_process);
 	pci_set_drvdata(dpa->pdev, NULL);
@@ -214,11 +243,12 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 {
 	struct dpa_process *dpa_app = NULL;
 	struct device *dpa_dev;
+	int ret = 0;
 
 	// big lock for this
 	mutex_lock(&dpa_processes_lock);
 	// look for process in a list
-	dpa_app = get_current_process();
+	dpa_app = dpa_get_current_process();
 
 	if (dpa_app) {
 		kref_get(&dpa_app->ref);
@@ -258,7 +288,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dpa_dev = dpa_app->dev->dev;
 	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
 	if (IS_ERR(dpa_app->sva)) {
-		int ret = PTR_ERR(dpa_app->sva);
+		ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
 		list_del(&dpa_app->dpa_process_list);
 		dpa_process_count--;
@@ -297,9 +327,9 @@ static int dpa_gem_object_create(unsigned long size,
 			     u64 flags,
 			     struct drm_gem_object **obj)
 {
-	struct dpa_drm_buffer * buf;
-	struct device * dev = dpa->dev;
-	struct drm_buddy * mm = &dpa->mm;
+	struct dpa_drm_buffer *buf;
+	struct device *dev = dpa->dev;
+	struct drm_buddy *mm = &dpa->mm;
 	struct drm_buddy_block *block, *on;
 	int err;
 
@@ -366,7 +396,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	u16 vendor, device;
 	u32 version;
 
-	dev_warn(dev, "%s: start\n", __func__);
+	dev_warn(dev, "%s: DPA start\n", __func__);
 	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
 	if (IS_ERR(dpa))
 		return -ENOMEM;
@@ -380,13 +410,14 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO |
 			      PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
-	printk(KERN_INFO "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X\n", vendor, device);
 
-
-	if ((err = pci_enable_device_mem(pdev)))
+	err = pci_enable_device_mem(pdev);
+	if (err)
 		goto disable_device;
 
-	if ((err = pci_request_mem_regions(pdev, dpa_class_name)))
+	err = pci_request_mem_regions(pdev, dpa_class_name);
+	if (err)
 		goto disable_device;
 
 	// Enable PASID support
@@ -431,7 +462,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dpa->hbm_base = r.start;
 	dpa->hbm_size = resource_size(&r);
-	dpa->hbm_va = (u64)devm_memremap(dev, dpa->hbm_base, dpa->hbm_size, MEMREMAP_WB);
+	dpa->hbm_va = (void *) ((u64) devm_memremap(dev, dpa->hbm_base,
+		dpa->hbm_size, MEMREMAP_WB));
 	if (IS_ERR(dpa->hbm_va)) {
 		err = PTR_ERR(dpa->hbm_va);
 		goto disable_device;
@@ -466,9 +498,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	return 0;
 
-free_queue:
-	daffy_free_fw_queue(dpa);
-
 unmap:
 	iounmap(dpa->regs);
 
@@ -480,13 +509,14 @@ disable_device:
 	return err;
 }
 
-static int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size, u32 alloc_flag)
+static int dpa_reserve_mem_limit(struct dpa_device *dpa, uint64_t size,
+	u32 alloc_flag)
 {
 	int ret = 0;
 	// XXX Actually implement this
 	// if (dpa) {
-	// 	dpa->vram_used += size;
-	// 	dpa->vram_used_aligned += ALIGN(size, VRAM_AVAILABLITY_ALIGN);
+	// dpa->vram_used += size;
+	// dpa->vram_used_aligned += ALIGN(size, VRAM_AVAILABLITY_ALIGN);
 	// }
 // release:
 	return ret;
@@ -497,12 +527,12 @@ static int dpa_alloc_vram(
 		struct dpa_device *dpa,
 		uint64_t size,
 		void *drm_priv,
-		struct dpa_drm_buffer** bo,
+		struct dpa_drm_buffer **bo,
 		uint64_t *offset, uint32_t flags) //, bool criu_resume)
 {
 
 	struct drm_gem_object *gobj = NULL;
-	struct dpa_drm_buffer* buf;
+	struct dpa_drm_buffer *buf;
 	int ret;
 
 	ret = dpa_reserve_mem_limit(dpa, size, flags);
@@ -512,9 +542,8 @@ static int dpa_alloc_vram(
 	}
 
 	ret = dpa_gem_object_create(size, 1, flags, &gobj);
-	if (ret) {
+	if (ret)
 		goto err;
-	}
 	ret = drm_vma_node_allow(&gobj->vma_node, drm_priv);
 
 	*bo = gem_to_dpa_buf(gobj);
@@ -613,12 +642,13 @@ static int dpa_ioctl_create_queue(struct dpa_process *p,
 	if (ret)
 		return ret;
 
-	// we need to convert the page offset from daffy to an offset mmap can recognize
+	// we need to convert the page offset from daffy to an offset
+	// mmap can recognize
 	doorbell_mmap_offset = DRM_MMAP_TYPE_DOORBELL << DRM_MMAP_TYPE_SHIFT;
 	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
 	if (ret) {
-		dev_warn(p->dev->dev, "%s: unable to add aql queue to process,"
-			 " destroying id %u\n", __func__, args->queue_id);
+		dev_warn(p->dev->dev, "%s: unable to add aql queue to process, destroying id %u\n",
+			__func__, args->queue_id);
 		daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
 	}
 	args->doorbell_offset = doorbell_mmap_offset;
@@ -679,16 +709,17 @@ static int dpa_ioctl_get_process_apertures(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_process_apertures *args = data;
-	struct drm_dpa_process_device_apertures *aperture = &args->process_apertures[0];
+	struct drm_dpa_process_device_apertures *aperture =
+		&args->process_apertures[0];
 
-	dev_warn(dpa->dev, "%s\n", __func__);
+	dev_warn(dpa->dev, "%s: Call to get_process_apertures\n", __func__);
 
 	aperture->gpu_id = DPA_GPU_ID;
 	aperture->lds_base = 0;
 	aperture->lds_limit = 0;
 	// gpuvm is the main one
 	aperture->gpuvm_base = PAGE_SIZE;  // don't allow NULL ptrs
-	aperture->gpuvm_limit = DPA_GPUVM_ADDR_LIMIT; // allow everything up to 48 bits
+	aperture->gpuvm_limit = DPA_GPUVM_ADDR_LIMIT; // allow everything up to 48b
 	aperture->scratch_base = 0;
 	aperture->scratch_limit = 0;
 	args->num_of_nodes = 1;
@@ -701,7 +732,8 @@ DRM_IOCTL(get_process_apertures)
 static int dpa_ioctl_update_queue(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
-	return -ENOSYS;
+	pr_warn("%s: update_queue IOCTL not implemented\n", __func__);
+	return 1;
 }
 
 DRM_IOCTL(update_queue)
@@ -726,8 +758,8 @@ static int dpa_ioctl_get_process_apertures_new(struct dpa_process *p,
 	ap.gpu_id = DPA_GPU_ID;
 	ap.gpuvm_base = PAGE_SIZE;
 	ap.gpuvm_limit = DPA_GPUVM_ADDR_LIMIT;
-	ret = copy_to_user((void __user*)args->drm_dpa_process_device_apertures_ptr,
-			   &ap, sizeof(ap));
+	ret = copy_to_user((void __user *)
+		args->drm_dpa_process_device_apertures_ptr, &ap, sizeof(ap));
 	return ret;
 }
 
@@ -808,9 +840,9 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_process *p,
 		buf->type = args->flags;
 		buf->size = args->size;
 		buf->page_count = buf->size >> PAGE_SHIFT;
-		buf->pages = devm_kzalloc(dev, sizeof(struct page*) * buf->page_count, GFP_KERNEL);
+		buf->pages = devm_kzalloc(dev, sizeof(struct page *) * buf->page_count,
+			GFP_KERNEL);
 		if (!buf->pages) {
-			dev_warn(dev, "%s: cannot alloc pages\n", __func__);
 			devm_kfree(dev, buf);
 			return -ENOMEM;
 		}
@@ -831,9 +863,9 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_process *p,
 		if (vma->vm_flags & VM_WRITE)
 			gup_flags |= FOLL_WRITE;
 
-		if ((page_count = pin_user_pages(args->va_addr, buf->page_count,
-						gup_flags, buf->pages, NULL))
-		    != buf->page_count) {
+		page_count = pin_user_pages(args->va_addr, buf->page_count,
+			gup_flags, buf->pages, NULL);
+		if (page_count != buf->page_count) {
 			mmap_read_unlock(current->mm);
 			dev_warn(dev, "%s: get_user_pages() failed %ld vs %u\n", __func__,
 				 page_count, buf->page_count);
@@ -867,9 +899,9 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_process *p,
 
 	// use a macro for this
 	args->handle = (u64)DPA_GPU_ID << 32 | buf->id;
-	if (args->flags & DPA_IOC_ALLOC_MEM_FLAGS_VRAM) {
+	if (args->flags & DPA_IOC_ALLOC_MEM_FLAGS_VRAM)
 		args->mmap_offset = offset;
-	}
+
 	dev_warn(p->dev->dev, "%s: buf id %u handle 0x%llx\n", __func__,
 		 buf->id, args->handle);
 
@@ -910,6 +942,7 @@ static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_process *p,
 
 	// XXX loop over gpu id verify ID passed in matches
 	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
+
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
@@ -942,7 +975,7 @@ static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_create_signal_pages *args = data;
-	unsigned num_pages = args->size / PAGE_SIZE;
+	unsigned int num_pages = args->size / PAGE_SIZE;
 	int ret = 0;
 	long count;
 
@@ -966,11 +999,10 @@ static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 	}
 
 	/* assume pages are mapped writable, if not we'll get an error */
-	if ((count = pin_user_pages_fast(args->va, num_pages,
-					 FOLL_LONGTERM | FOLL_WRITE,
-					 p->signal_pages))
-	    != num_pages) {
-		dev_warn(dev->dev, "%s: pin_user_pages() failed %ld for 0x%lx\n",
+	count = pin_user_pages_fast(args->va, num_pages, FOLL_LONGTERM | FOLL_WRITE,
+		p->signal_pages);
+	if (count != num_pages) {
+		dev_warn(dev->dev, "%s: pin_user_pages() failed %ld for 0x%llx\n",
 			 __func__, count, args->va);
 
 		/* negative count is an error code */
@@ -1000,10 +1032,10 @@ static int dpa_check_signal(struct dpa_process *p, u32 signal_index)
 		(signal_index * sizeof(struct drm_dpa_signal));
 	u64 signal_value;
 
-	int ret = copy_from_user(&signal_value, (void __user*)signal_va,
+	int ret = copy_from_user(&signal_value, (void __user *)signal_va,
 				 sizeof(signal_value));
 	if (ret < 0) {
-		dev_warn(p->dev->dev, "%s: error checking signal %u at %lx\n",
+		dev_warn(p->dev->dev, "%s: error checking signal %u at %llx\n",
 			 __func__, signal_index, signal_va);
 		return ret;
 	}
@@ -1044,13 +1076,13 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		}
 	} while ((ret == 1) && ((total_usleep * 1000) < args->timeout_ns));
 
-	dev_warn(p->dev->dev, "%s: idx %u ret = %d\n", __func__,
+	dev_warn(p->dev->dev, "%s: idx %llu ret = %d\n", __func__,
 		 args->signal_idx, ret);
 
 	if (ret == 1)
 		ret = -EBUSY;
 out_unlock:
-	mutex_unlock(&p->lock);;
+	mutex_unlock(&p->lock);
 
 	return ret;
 }
@@ -1058,6 +1090,7 @@ out_unlock:
 static void dpa_drm_free_buffer(struct dpa_drm_buffer *buf)
 {
 	struct device *dev = buf->p->dev->dev;
+
 	dev_warn(dev, "%s: freeing buf id %u\n",
 		 __func__, buf->id);
 
@@ -1086,6 +1119,7 @@ static int dpa_ioctl_free_memory_of_gpu(struct dpa_process *p,
 {
 	struct drm_dpa_free_memory_of_gpu *args = data;
 	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
+
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
@@ -1138,6 +1172,7 @@ static const struct drm_driver dpa_drm_driver;
 static void dpa_drm_release_process_buffers(struct dpa_process *p)
 {
 	struct dpa_drm_buffer *buf, *tmp;
+
 	mutex_lock(&p->dev->lock);
 	list_for_each_entry_safe(buf, tmp, &p->buffers, process_alloc_list) {
 		if (buf->p == p) {
@@ -1205,7 +1240,7 @@ static int __init dpa_init(void)
 {
 	int ret;
 
-	pr_warn("%s: start\n", __func__);
+	pr_warn("%s: DPA start\n", __func__);
 	dpa_class = class_create(THIS_MODULE, dpa_class_name);
 	if (IS_ERR(dpa_class)) {
 		ret = PTR_ERR(dpa_class);

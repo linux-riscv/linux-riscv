@@ -1,3 +1,22 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Rivos DPA device driver
+ *
+ * Copyright (C) 2022-2023 Rivos Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
 #ifndef _DPA_DRM_DAFFY_H_
 #define _DPA_DRM_DAFFY_H_
 
@@ -9,7 +28,7 @@
 #define DPA_FWQ_PKT_SIZE (64)
 
 // number of packets in a queue (fixed), 16 packets or 1Kb
-#define DPA_FW_QUEUE_SIZE (DPA_FW_QUEUE_PAGE_SIZE / ( DPA_FWQ_PKT_SIZE * 4))
+#define DPA_FW_QUEUE_SIZE (DPA_FW_QUEUE_PAGE_SIZE / (DPA_FWQ_PKT_SIZE * 4))
 
 // allocate one page with this structure at the beginning
 // and send it to the DPA

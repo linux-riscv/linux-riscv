@@ -1,32 +1,51 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Rivos DPA device driver
+ *
+ * Copyright (C) 2022-2023 Rivos Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
 #ifndef __DRM_DPA_H__
 #define __DRM_DPA_H__
 
 #include <drm/drm.h>
 #include <linux/ioctl.h>
 
-#define DRM_DPA_GET_VERSION 				0x1
-#define DRM_DPA_CREATE_QUEUE 				0x2
-#define DRM_DPA_DESTROY_QUEUE 				0x3
-#define DRM_DPA_SET_MEMORY_POLICY 			0x4
-#define DRM_DPA_GET_CLOCK_COUNTERS 			0x5
-#define DRM_DPA_GET_PROCESS_APERTURES 			0x6
-#define DRM_DPA_UPDATE_QUEUE 				0x7
-#define DRM_DPA_DBG_REGISTER_DEPRECATED 		0xd
-#define DRM_DPA_DBG_UNREGISTER_DEPRECATED 		0xe
-#define DRM_DPA_DBG_ADDRESS_WATCH_DEPRECATED 		0xf
-#define DRM_DPA_DBG_WAVE_CONTROL_DEPRECATED 		0x10
+#define DRM_DPA_GET_VERSION						0x1
+#define DRM_DPA_CREATE_QUEUE					0x2
+#define DRM_DPA_DESTROY_QUEUE					0x3
+#define DRM_DPA_SET_MEMORY_POLICY				0x4
+#define DRM_DPA_GET_CLOCK_COUNTERS				0x5
+#define DRM_DPA_GET_PROCESS_APERTURES			0x6
+#define DRM_DPA_UPDATE_QUEUE					0x7
+#define DRM_DPA_DBG_REGISTER_DEPRECATED			0xd
+#define DRM_DPA_DBG_UNREGISTER_DEPRECATED		0xe
+#define DRM_DPA_DBG_ADDRESS_WATCH_DEPRECATED	0xf
+#define DRM_DPA_DBG_WAVE_CONTROL_DEPRECATED		0x10
 #define DRM_DPA_SET_SCRATCH_BACKING_VA			0x11
-#define DRM_DPA_GET_TILE_CONFIG 			0x12
-#define DRM_DPA_SET_TRAP_HANDLER 			0x13
-#define DRM_DPA_GET_PROCESS_APERTURES_NEW 		0x14
-#define DRM_DPA_ACQUIRE_VM 				0x15
-#define DRM_DPA_ALLOC_MEMORY_OF_GPU			0x16
-#define DRM_DPA_FREE_MEMORY_OF_GPU 			0x17
-#define DRM_DPA_MAP_MEMORY_TO_GPU 			0x18
-#define DRM_DPA_UNMAP_MEMORY_FROM_GPU 			0x19
-#define DRM_DPA_GET_INFO 				0x1a
-#define DRM_DPA_CREATE_SIGNAL_PAGES 			0x1b
-#define DRM_DPA_WAIT_SIGNAL 				0x1c
+#define DRM_DPA_GET_TILE_CONFIG					0x12
+#define DRM_DPA_SET_TRAP_HANDLER				0x13
+#define DRM_DPA_GET_PROCESS_APERTURES_NEW		0x14
+#define DRM_DPA_ACQUIRE_VM						0x15
+#define DRM_DPA_ALLOC_MEMORY_OF_GPU				0x16
+#define DRM_DPA_FREE_MEMORY_OF_GPU				0x17
+#define DRM_DPA_MAP_MEMORY_TO_GPU				0x18
+#define DRM_DPA_UNMAP_MEMORY_FROM_GPU			0x19
+#define DRM_DPA_GET_INFO						0x1a
+#define DRM_DPA_CREATE_SIGNAL_PAGES				0x1b
+#define DRM_DPA_WAIT_SIGNAL						0x1c
 
 #define NUM_OF_SUPPORTED_GPUS 7
 
@@ -245,4 +264,4 @@ struct drm_dpa_unmap_memory_from_gpu {
 #define DPA_MAX_QUEUE_PERCENTAGE	100
 #define DPA_MAX_QUEUE_PRIORITY		15
 
-#endif
+#endif /* __DRM_DPA_H__ */

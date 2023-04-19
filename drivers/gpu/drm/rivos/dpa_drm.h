@@ -1,3 +1,22 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Rivos DPA device driver
+ *
+ * Copyright (C) 2022-2023 Rivos Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
 #ifndef _DPA_DRM_H_
 #define _DPA_DRM_H_
 
@@ -48,7 +67,7 @@ static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
 	void *data, struct drm_file *file)				\
 {									\
 	struct dpa_process *p = file->driver_priv;			\
-	struct dpa_device* dpa = drm_to_dpa_dev(dev);			\
+	struct dpa_device *dpa = drm_to_dpa_dev(dev);			\
 	if (!p)								\
 		return -EINVAL;						\
 	return dpa_ioctl_##name(p, dpa, data);				\
@@ -128,7 +147,7 @@ struct dpa_process {
 	/* pasid allocated to this process */
 	u32 pasid;
 
-	unsigned alloc_count;
+	unsigned int alloc_count;
 
 	// maintain a list of allocations in vram
 	struct list_head buffers;
@@ -139,7 +158,7 @@ struct dpa_process {
 	/* signal related */
 	u64 signal_pages_va;
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
-	unsigned signal_pages_count;
+	unsigned int signal_pages_count;
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
@@ -155,7 +174,7 @@ struct dpa_drm_buffer {
 	unsigned int type;
 
 	u64 size;
-	unsigned page_count;
+	unsigned int page_count;
 	struct page **pages;
 
 	struct list_head blocks;
@@ -193,7 +212,7 @@ irqreturn_t handle_daffy(int irq, void *dpa_dev);
 
 #define DRM_GPU_ID_HASH_WIDTH (4)
 #define DRM_MMAP_GPU_ID_SHIFT (48)
-#define DRM_MMAP_GPU_ID_MASK ((1ULL << DRM_GPU_ID_HASH_WIDTH) - 1) \
+#define DRM_MMAP_GPU_ID_MASK (((1ULL << DRM_GPU_ID_HASH_WIDTH) - 1) \
 				<< DRM_MMAP_GPU_ID_SHIFT)
 
 #define DRM_MMAP_GET_GPU_ID(offset) (((offset) >> DRM_MMAP_GPU_ID_SHIFT) & \
