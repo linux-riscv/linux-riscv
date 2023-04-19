@@ -87,7 +87,6 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 {
 	struct dpa_process *p;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
-	unsigned int gpu_id = DRM_MMAP_GET_GPU_ID(mmap_offset);
 	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long pfn;
@@ -97,8 +96,8 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 	p = dpa_get_current_process();
 	mutex_unlock(&dpa_processes_lock);
 
-	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx gpu 0x%x type %llu start 0x%llx\n",
-			__func__, mmap_offset, size, gpu_id, type, (u64)vma->vm_start);
+	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
+			__func__, mmap_offset, size, type, (u64)vma->vm_start);
 	switch (type) {
 
 	case DRM_MMAP_TYPE_DOORBELL:
@@ -556,23 +555,6 @@ static int dpa_alloc_vram(
 err:
 	return ret;
 }
-/* Ioctl handlers */
-static int dpa_ioctl_get_version(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_get_version *args = data;
-
-	args->major_version = 1;
-	// this doesn't seem to actually effect behaviors of userspace so far
-	// XXX check user code, for now just advertise minimal API support
-	args->minor_version = 1;
-	dev_warn(p->dev->dev, "%s: major %d minor %d\n", __func__,
-		 args->major_version, args->minor_version);
-
-	return 0;
-}
-
-DRM_IOCTL(get_version)
 
 static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 			     u32 doorbell_offset)
@@ -676,59 +658,6 @@ static int dpa_ioctl_destroy_queue(struct dpa_process *p,
 
 DRM_IOCTL(destroy_queue)
 
-static int dpa_ioctl_set_memory_policy(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	/* we don't support any changes in coherency */
-	dev_warn(dpa->dev, "%s: doing nothing\n", __func__);
-	return 0;
-}
-
-DRM_IOCTL(set_memory_policy)
-
-static int dpa_ioctl_get_clock_counters(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_get_clock_counters *ctr_args = data;
-
-	dev_warn(dpa->dev, "%s: gpu_id %d\n", __func__, ctr_args->gpu_id);
-
-	/* XXX when we have a common clock with DPA use it here */
-	ctr_args->gpu_clock_counter = ktime_get_raw_ns();
-	ctr_args->cpu_clock_counter = ktime_get_raw_ns();
-
-	/* using ns, so freq is 1Ghz*/
-	ctr_args->system_clock_freq = 1000000;
-	return 0;
-}
-
-DRM_IOCTL(get_clock_counters)
-
-
-static int dpa_ioctl_get_process_apertures(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_get_process_apertures *args = data;
-	struct drm_dpa_process_device_apertures *aperture =
-		&args->process_apertures[0];
-
-	dev_warn(dpa->dev, "%s: Call to get_process_apertures\n", __func__);
-
-	aperture->gpu_id = DPA_GPU_ID;
-	aperture->lds_base = 0;
-	aperture->lds_limit = 0;
-	// gpuvm is the main one
-	aperture->gpuvm_base = PAGE_SIZE;  // don't allow NULL ptrs
-	aperture->gpuvm_limit = DPA_GPUVM_ADDR_LIMIT; // allow everything up to 48b
-	aperture->scratch_base = 0;
-	aperture->scratch_limit = 0;
-	args->num_of_nodes = 1;
-
-	return 0;
-}
-
-DRM_IOCTL(get_process_apertures)
-
 static int dpa_ioctl_update_queue(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
@@ -737,62 +666,6 @@ static int dpa_ioctl_update_queue(struct dpa_process *p,
 }
 
 DRM_IOCTL(update_queue)
-
-static int dpa_ioctl_get_process_apertures_new(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_get_process_apertures_new *args = data;
-	struct drm_dpa_process_device_apertures ap; // just one for now
-	int ret;
-
-	if (args->num_of_nodes < 1) {
-		/* we have to return the number of nodes so that
-		 * userspace call allocate enough space
-		 */
-		args->num_of_nodes = 1;
-		return 0;
-	}
-
-	memset(&ap, 0, sizeof(ap));
-	args->num_of_nodes = 1;
-	ap.gpu_id = DPA_GPU_ID;
-	ap.gpuvm_base = PAGE_SIZE;
-	ap.gpuvm_limit = DPA_GPUVM_ADDR_LIMIT;
-	ret = copy_to_user((void __user *)
-		args->drm_dpa_process_device_apertures_ptr, &ap, sizeof(ap));
-	return ret;
-}
-
-DRM_IOCTL(get_process_apertures_new)
-
-static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
-						 void *data, struct drm_file *file)
-{
-	struct dpa_process *p = file->driver_priv;
-	struct file *drm_file;
-	int ret;
-
-	if (!p)
-		return -EINVAL;
-	drm_file = file->filp;
-	if (!drm_file)
-		return -EINVAL;
-
-	mutex_lock(&p->lock);
-	if (p->drm_file) {
-		ret = p->drm_file == drm_file ? 0 : -EBUSY;
-		goto err_drm_file;
-	}
-	p->drm_file = drm_file;
-	p->drm_priv = drm_file->private_data;
-
-	mutex_unlock(&p->lock);
-	return 0;
-
-err_drm_file:
-	mutex_unlock(&p->lock);
-	return ret;
-}
 
 static struct dpa_drm_buffer *dpa_find_buffer(struct dpa_process *p, u64 id)
 {
@@ -909,51 +782,6 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_process *p,
 }
 
 DRM_IOCTL(alloc_memory_of_gpu)
-
-static int dpa_ioctl_map_memory_to_gpu(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_map_memory_to_gpu *args = data;
-
-	// XXX loop over gpu id verify ID passed in matches
-	// XXX check gpu id
-	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
-
-	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
-		 __func__, args->handle, (u64)buf);
-	if (buf) {
-		// XXX do mapping here?
-		//if (buf->dma_addr)
-		args->n_success = 1;
-	} else {
-		dev_warn(p->dev->dev, "%s: given buffer not found!\n", __func__);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-DRM_IOCTL(map_memory_to_gpu)
-
-static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
-{
-	struct drm_dpa_unmap_memory_from_gpu *args = data;
-
-	// XXX loop over gpu id verify ID passed in matches
-	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
-
-	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
-		 __func__, args->handle, (u64)buf);
-	if (buf) {
-		// XXX unmap it
-		args->n_success = 1;
-	}
-
-	return 0;
-}
-
-DRM_IOCTL(unmap_memory_from_gpu)
 
 static int dpa_ioctl_get_info(struct dpa_process *p,
 			      struct dpa_device *dpa, void *data)
@@ -1135,20 +963,12 @@ static int dpa_ioctl_free_memory_of_gpu(struct dpa_process *p,
 DRM_IOCTL(free_memory_of_gpu)
 
 static const struct drm_ioctl_desc dpadrm_ioctls[] = {
-	DRM_IOCTL_DEF_DRV(DPA_GET_VERSION, dpa_drm_ioctl_get_version, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_GET_INFO, dpa_drm_ioctl_get_info, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_CREATE_QUEUE, dpa_drm_ioctl_create_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_DESTROY_QUEUE, dpa_drm_ioctl_destroy_queue, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_SET_MEMORY_POLICY, dpa_drm_ioctl_set_memory_policy, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_GET_CLOCK_COUNTERS, dpa_drm_ioctl_get_clock_counters, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_GET_PROCESS_APERTURES, dpa_drm_ioctl_get_process_apertures, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_UPDATE_QUEUE, dpa_drm_ioctl_update_queue, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_GET_PROCESS_APERTURES_NEW, dpa_drm_ioctl_get_process_apertures_new, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_ACQUIRE_VM, dpa_drm_ioctl_acquire_vm, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_ALLOC_MEMORY_OF_GPU, dpa_drm_ioctl_alloc_memory_of_gpu, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_FREE_MEMORY_OF_GPU, dpa_drm_ioctl_free_memory_of_gpu, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_MAP_MEMORY_TO_GPU, dpa_drm_ioctl_map_memory_to_gpu, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_UNMAP_MEMORY_FROM_GPU, dpa_drm_ioctl_unmap_memory_from_gpu, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_GET_INFO, dpa_drm_ioctl_get_info, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_CREATE_SIGNAL_PAGES, dpa_drm_ioctl_create_signal_pages, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
 };

@@ -210,12 +210,4 @@ irqreturn_t handle_daffy(int irq, void *dpa_dev);
 // temporary until DRM/GEM
 #define DRM_MMAP_TYPE_VRAM (0x0ULL)
 
-#define DRM_GPU_ID_HASH_WIDTH (4)
-#define DRM_MMAP_GPU_ID_SHIFT (48)
-#define DRM_MMAP_GPU_ID_MASK (((1ULL << DRM_GPU_ID_HASH_WIDTH) - 1) \
-				<< DRM_MMAP_GPU_ID_SHIFT)
-
-#define DRM_MMAP_GET_GPU_ID(offset) (((offset) >> DRM_MMAP_GPU_ID_SHIFT) & \
-				     (DRM_GPU_ID_HASH_WIDTH - 1))
-
 #endif /* _DPA_DRM_H_ */
