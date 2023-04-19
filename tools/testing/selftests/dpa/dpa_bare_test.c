@@ -12,7 +12,6 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <linux/kfd_ioctl.h>
 #include <drm_dpa.h>
 
 #define LITTLEENDIAN_CPU
@@ -50,7 +49,7 @@ struct Doorbell {
 static int drm_fd;
 
 #define NUM_DEV_APERTURES NUM_OF_SUPPORTED_GPUS
-struct kfd_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
+struct drm_dpa_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
 
 // keep read and write indices one CL apart
 #define CACHELINE_SIZE (64)
@@ -110,29 +109,29 @@ typedef enum {
 static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_mem_type,
 				uint64_t *mmap_offset, uint64_t *handle)
 {
-	struct kfd_ioctl_alloc_memory_of_gpu_args args;
+	struct drm_dpa_alloc_memory_of_gpu args;
 	int ret;
 
 	args.va_addr = (uint64_t)user_ptr;
 	args.size = size;
 	args.mmap_offset = (uint64_t)user_ptr;
 	args.flags =
-		KFD_IOC_ALLOC_MEM_FLAGS_COHERENT |
-		KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
-		KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE;
+		DPA_IOC_ALLOC_MEM_FLAGS_COHERENT |
+		DPA_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+		DPA_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE;
 
 	if (gpu_mem_type == MMIO) {
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP;
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP;
 		args.mmap_offset = 0;
 	} else if (gpu_mem_type == USER) {
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE; // needs to for the queue
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_USERPTR;
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_EXECUTABLE; // needs to for the queue
 	} else if (gpu_mem_type == DEVICE) {
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_VRAM;
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_VRAM;
 		// allow host access
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_PUBLIC;
 	} else if (gpu_mem_type == DOORBELL) {
-		args.flags |= KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL;
+		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_DOORBELL;
 	} else {
 		fprintf(stderr, "%s: Invalid memory type\n", __func__);
 		exit(1);
@@ -216,7 +215,7 @@ static int wait_signal(uint32_t index, uint32_t timeout)
 
 static void destroy_queue(uint32_t q_id)
 {
-	struct kfd_ioctl_destroy_queue_args args;
+	struct drm_dpa_destroy_queue args;
 	int ret;
 
 	fprintf(stderr, "%s: id %u\n", __func__, q_id);
@@ -239,9 +238,9 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 
 	args.ring_base_address = (uint64_t)ring_base;
 	args.ring_size = (uint32_t)ring_size;
-	args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
-	args.queue_percentage = KFD_MAX_QUEUE_PERCENTAGE;
-	args.queue_priority = KFD_MAX_QUEUE_PRIORITY;
+	args.queue_type = DPA_IOC_QUEUE_TYPE_COMPUTE_AQL;
+	args.queue_percentage = DPA_MAX_QUEUE_PERCENTAGE;
+	args.queue_priority = DPA_MAX_QUEUE_PRIORITY;
 	args.write_pointer_address = (uint64_t)write_ptr;
 	args.read_pointer_address = (uint64_t)read_ptr;
 

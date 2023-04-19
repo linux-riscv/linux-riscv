@@ -1,6 +1,9 @@
 #ifndef __DRM_DPA_H__
 #define __DRM_DPA_H__
 
+#include <drm/drm.h>
+#include <linux/ioctl.h>
+
 #define DRM_DPA_GET_VERSION 				0x1
 #define DRM_DPA_CREATE_QUEUE 				0x2
 #define DRM_DPA_DESTROY_QUEUE 				0x3
@@ -24,6 +27,8 @@
 #define DRM_DPA_GET_INFO 				0x1a
 #define DRM_DPA_CREATE_SIGNAL_PAGES 			0x1b
 #define DRM_DPA_WAIT_SIGNAL 				0x1c
+
+#define NUM_OF_SUPPORTED_GPUS 7
 
 #define DPA_IOCTL(dir, name, str) \
 DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
@@ -87,8 +92,19 @@ struct drm_dpa_get_clock_counters {
 	__u32 pad;
 };
 
+struct drm_dpa_process_device_apertures {
+	__u64 lds_base;		/* from KFD */
+	__u64 lds_limit;		/* from KFD */
+	__u64 scratch_base;		/* from KFD */
+	__u64 scratch_limit;		/* from KFD */
+	__u64 gpuvm_base;		/* from KFD */
+	__u64 gpuvm_limit;		/* from KFD */
+	__u32 gpu_id;		/* from KFD */
+	__u32 pad;
+};
+
 struct drm_dpa_get_process_apertures {
-	struct kfd_process_device_apertures
+	struct drm_dpa_process_device_apertures
 			process_apertures[NUM_OF_SUPPORTED_GPUS];/* from KFD */
 
 	/* from KFD, should be in the range [1 - NUM_OF_SUPPORTED_GPUS] */
@@ -100,7 +116,7 @@ struct drm_dpa_get_process_apertures_new {
 	/* User allocated. Pointer to struct kfd_process_device_apertures
 	 * filled in by Kernel
 	 */
-	__u64 kfd_process_device_apertures_ptr;
+	__u64 drm_dpa_process_device_apertures_ptr;
 	/* to KFD - indicates amount of memory present in
 	 *  kfd_process_device_apertures_ptr
 	 * from KFD - Number of entries filled by KFD.
@@ -206,5 +222,27 @@ struct drm_dpa_unmap_memory_from_gpu {
 	DPA_IOCTL(IOWR, CREATE_SIGNAL_PAGES, create_signal_pages)
 #define DRM_IOCTL_DPA_WAIT_SIGNAL \
 	DPA_IOCTL(IOWR, WAIT_SIGNAL, wait_signal)
+
+/* Allocation flags: memory types */
+#define DPA_IOC_ALLOC_MEM_FLAGS_VRAM		(1 << 0)
+#define DPA_IOC_ALLOC_MEM_FLAGS_GTT		(1 << 1)
+#define DPA_IOC_ALLOC_MEM_FLAGS_USERPTR		(1 << 2)
+#define DPA_IOC_ALLOC_MEM_FLAGS_DOORBELL	(1 << 3)
+#define DPA_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP	(1 << 4)
+/* Allocation flags: attributes/access options */
+#define DPA_IOC_ALLOC_MEM_FLAGS_WRITABLE	(1 << 31)
+#define DPA_IOC_ALLOC_MEM_FLAGS_EXECUTABLE	(1 << 30)
+#define DPA_IOC_ALLOC_MEM_FLAGS_PUBLIC		(1 << 29)
+#define DPA_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE	(1 << 28)
+#define DPA_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM	(1 << 27)
+#define DPA_IOC_ALLOC_MEM_FLAGS_COHERENT	(1 << 26)
+
+#define DPA_IOC_QUEUE_TYPE_COMPUTE		0x0
+#define DPA_IOC_QUEUE_TYPE_SDMA			0x1
+#define DPA_IOC_QUEUE_TYPE_COMPUTE_AQL		0x2
+#define DPA_IOC_QUEUE_TYPE_SDMA_XGMI		0x3
+
+#define DPA_MAX_QUEUE_PERCENTAGE	100
+#define DPA_MAX_QUEUE_PRIORITY		15
 
 #endif

@@ -5,6 +5,7 @@
 #include <linux/pci.h>
 #include <linux/iommu.h>
 #include <linux/wait.h>
+#include <drm/drm.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
@@ -42,7 +43,7 @@
 
 #define DPA_PROCESS_MAX (16)
 
-#define DRM_KFD_IOCTL(name)						        \
+#define DRM_IOCTL(name)						        \
 static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
 	void *data, struct drm_file *file)				\
 {									\
@@ -50,12 +51,6 @@ static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
 	struct dpa_device* dpa = drm_to_dpa_dev(dev);			\
 	if (!p)								\
 		return -EINVAL;						\
-	return dpa_ioctl_##name(p, dpa, data);				\
-}									\
-static int dpa_kfd_ioctl_##name(struct file *filep,			\
-				struct dpa_kfd_process *p, void *data)	\
-{									\
-	struct dpa_device* dpa = p->dev;				\
 	return dpa_ioctl_##name(p, dpa, data);				\
 }									\
 
@@ -148,8 +143,6 @@ struct dpa_kfd_process {
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
-
-	bool is_kfd;
 };
 
 // tracks buffers -- especially vram allocations

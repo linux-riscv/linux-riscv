@@ -2,7 +2,6 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
-#include <uapi/linux/kfd_ioctl.h>
 
 #include "dpa_daffy.h"
 
@@ -113,7 +112,7 @@ irqreturn_t handle_daffy(int irq, void *dpa_dev)
 	void __iomem *addr;
 	int vec = irq - dpa->base_irq;
 
-	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, irq);
+	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, vec);
 	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq * sizeof(u64);
 	// XXX Parse cause
 	writeq(readq(addr), addr);
