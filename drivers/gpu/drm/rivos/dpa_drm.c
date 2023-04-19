@@ -1,9 +1,3 @@
-/*
- * Rivos DPA KFD interface
- *
- * Author: Sonny Rao <sonny@rivosinc.com>
- *
- */
 #include <linux/kernel.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
@@ -22,12 +16,12 @@
 #include <linux/pm_runtime.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
-#include "dpa_kfd.h"
+#include "dpa_drm.h"
 #include "dpa_daffy.h"
 
 #define dpa_class_name "dpa_drm"
 
-static void dpa_kfd_release_process(struct kref *ref);
+static void dpa_release_process(struct kref *ref);
 static const struct drm_driver dpa_drm_driver;
 
 /* device related stuff */
@@ -38,12 +32,12 @@ static struct list_head dpa_processes;
 static struct mutex dpa_processes_lock;
 static unsigned int dpa_process_count;
 
-static struct dpa_kfd_process *get_current_process(void) {
+static struct dpa_process *get_current_process(void) {
 	struct list_head *cur;
-	struct dpa_kfd_process *dpa_app;
+	struct dpa_process *dpa_app;
 	list_for_each(cur, &dpa_processes) {
-		struct dpa_kfd_process *cur_process =
-			container_of(cur, struct dpa_kfd_process,
+		struct dpa_process *cur_process =
+			container_of(cur, struct dpa_process,
 				     dpa_process_list);
 		if (cur_process->mm == current->mm) {
 			dpa_app = cur_process;
@@ -68,10 +62,10 @@ static void dpa_setup_queue(struct dpa_device *dpa) {
 
 static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 {
-	struct dpa_kfd_process *p;
+	struct dpa_process *p;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
-	unsigned int gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
-	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
+	unsigned int gpu_id = DRM_MMAP_GET_GPU_ID(mmap_offset);
+	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long pfn;
 	int ret = -EFAULT;
@@ -84,7 +78,7 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 			__func__, mmap_offset, size, gpu_id, type, (u64)vma->vm_start);
 	switch (type) {
 
-	case KFD_MMAP_TYPE_DOORBELL:
+	case DRM_MMAP_TYPE_DOORBELL:
 		if (size != DPA_DOORBELL_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
 					__func__);
@@ -115,7 +109,7 @@ static int dpa_non_vram_mmap(struct file *filep, struct vm_area_struct *vma)
 
 static int dpa_gem_object_mmap(struct drm_gem_object *gobj, struct vm_area_struct *vma) {
 
-	struct dpa_kfd_buffer *buf = gem_to_dpa_buf(gobj);
+	struct dpa_drm_buffer *buf = gem_to_dpa_buf(gobj);
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long start = vma->vm_start;
 	unsigned long chunk_size;
@@ -190,8 +184,8 @@ out:
 static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
-	u64 type = mmap_offset >> KFD_MMAP_TYPE_SHIFT;
-	if (type == KFD_MMAP_TYPE_VRAM) {
+	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
+	if (type == DRM_MMAP_TYPE_VRAM) {
 		return drm_gem_mmap(filp, vma);
 	} else {
 		return dpa_non_vram_mmap(filp, vma);
@@ -210,15 +204,15 @@ static const struct file_operations dpa_driver_kms_fops = {
 
 static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
-	struct dpa_kfd_process *p = file_priv->driver_priv;
+	struct dpa_process *p = file_priv->driver_priv;
 	if (p)
-		kref_put(&p->ref, dpa_kfd_release_process);
+		kref_put(&p->ref, dpa_release_process);
 	pci_set_drvdata(dpa->pdev, NULL);
 }
 
 static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
-	struct dpa_kfd_process *dpa_app = NULL;
+	struct dpa_process *dpa_app = NULL;
 	struct device *dpa_dev;
 
 	// big lock for this
@@ -229,8 +223,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	if (dpa_app) {
 		kref_get(&dpa_app->ref);
 		mutex_unlock(&dpa_processes_lock);
-		// using existing dpa_kfd_process
-		dev_warn(dpa->dev, "%s: using existing kfd process\n", __func__);
+		// using existing dpa_process
+		dev_warn(dpa->dev, "%s: using existing dpa process\n", __func__);
 		return 0;
 	}
 	// new process
@@ -303,7 +297,7 @@ static int dpa_gem_object_create(unsigned long size,
 			     u64 flags,
 			     struct drm_gem_object **obj)
 {
-	struct dpa_kfd_buffer * buf;
+	struct dpa_drm_buffer * buf;
 	struct device * dev = dpa->dev;
 	struct drm_buddy * mm = &dpa->mm;
 	struct drm_buddy_block *block, *on;
@@ -313,7 +307,7 @@ static int dpa_gem_object_create(unsigned long size,
 	/* Memory should be aligned at least to a page size. */
 	size = ALIGN(size, PAGE_SIZE);
 
-	buf = devm_kzalloc(dev, sizeof(struct dpa_kfd_buffer), GFP_KERNEL);
+	buf = devm_kzalloc(dev, sizeof(struct dpa_drm_buffer), GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
 	drm_gem_private_object_init(&dpa->ddev, &buf->gobj, size);
@@ -503,12 +497,12 @@ static int dpa_alloc_vram(
 		struct dpa_device *dpa,
 		uint64_t size,
 		void *drm_priv,
-		struct dpa_kfd_buffer** bo,
+		struct dpa_drm_buffer** bo,
 		uint64_t *offset, uint32_t flags) //, bool criu_resume)
 {
 
 	struct drm_gem_object *gobj = NULL;
-	struct dpa_kfd_buffer* buf;
+	struct dpa_drm_buffer* buf;
 	int ret;
 
 	ret = dpa_reserve_mem_limit(dpa, size, flags);
@@ -534,7 +528,7 @@ err:
 	return ret;
 }
 /* Ioctl handlers */
-static int dpa_ioctl_get_version(struct dpa_kfd_process *p,
+static int dpa_ioctl_get_version(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_version *args = data;
@@ -551,7 +545,7 @@ static int dpa_ioctl_get_version(struct dpa_kfd_process *p,
 
 DRM_IOCTL(get_version)
 
-static int dpa_add_aql_queue(struct dpa_kfd_process *p, u32 queue_id,
+static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 			     u32 doorbell_offset)
 {
 	struct dpa_aql_queue *q = devm_kzalloc(p->dev->dev, sizeof(*q),
@@ -570,7 +564,7 @@ static int dpa_add_aql_queue(struct dpa_kfd_process *p, u32 queue_id,
 	return 0;
 }
 
-static int dpa_del_aql_queue(struct dpa_kfd_process *p, u32 queue_id)
+static int dpa_del_aql_queue(struct dpa_process *p, u32 queue_id)
 {
 	struct dpa_aql_queue *q, *tmp;
 	bool found = false;
@@ -590,7 +584,7 @@ static int dpa_del_aql_queue(struct dpa_kfd_process *p, u32 queue_id)
 	return !found;
 }
 
-static void dpa_del_all_queues(struct dpa_kfd_process *p)
+static void dpa_del_all_queues(struct dpa_process *p)
 {
 	struct dpa_aql_queue *q;
 	int ret;
@@ -609,7 +603,7 @@ static void dpa_del_all_queues(struct dpa_kfd_process *p)
 	mutex_unlock(&p->lock);
 }
 
-static int dpa_ioctl_create_queue(struct dpa_kfd_process *p,
+static int dpa_ioctl_create_queue(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_create_queue *args = data;
@@ -620,7 +614,7 @@ static int dpa_ioctl_create_queue(struct dpa_kfd_process *p,
 		return ret;
 
 	// we need to convert the page offset from daffy to an offset mmap can recognize
-	doorbell_mmap_offset = KFD_MMAP_TYPE_DOORBELL << KFD_MMAP_TYPE_SHIFT;
+	doorbell_mmap_offset = DRM_MMAP_TYPE_DOORBELL << DRM_MMAP_TYPE_SHIFT;
 	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
 	if (ret) {
 		dev_warn(p->dev->dev, "%s: unable to add aql queue to process,"
@@ -632,7 +626,7 @@ static int dpa_ioctl_create_queue(struct dpa_kfd_process *p,
 }
 DRM_IOCTL(create_queue)
 
-static int dpa_ioctl_destroy_queue(struct dpa_kfd_process *p,
+static int dpa_ioctl_destroy_queue(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_destroy_queue *args = data;
@@ -652,7 +646,7 @@ static int dpa_ioctl_destroy_queue(struct dpa_kfd_process *p,
 
 DRM_IOCTL(destroy_queue)
 
-static int dpa_ioctl_set_memory_policy(struct dpa_kfd_process *p,
+static int dpa_ioctl_set_memory_policy(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	/* we don't support any changes in coherency */
@@ -662,7 +656,7 @@ static int dpa_ioctl_set_memory_policy(struct dpa_kfd_process *p,
 
 DRM_IOCTL(set_memory_policy)
 
-static int dpa_ioctl_get_clock_counters(struct dpa_kfd_process *p,
+static int dpa_ioctl_get_clock_counters(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_clock_counters *ctr_args = data;
@@ -681,7 +675,7 @@ static int dpa_ioctl_get_clock_counters(struct dpa_kfd_process *p,
 DRM_IOCTL(get_clock_counters)
 
 
-static int dpa_ioctl_get_process_apertures(struct dpa_kfd_process *p,
+static int dpa_ioctl_get_process_apertures(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_process_apertures *args = data;
@@ -704,7 +698,7 @@ static int dpa_ioctl_get_process_apertures(struct dpa_kfd_process *p,
 
 DRM_IOCTL(get_process_apertures)
 
-static int dpa_ioctl_update_queue(struct dpa_kfd_process *p,
+static int dpa_ioctl_update_queue(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	return -ENOSYS;
@@ -712,7 +706,7 @@ static int dpa_ioctl_update_queue(struct dpa_kfd_process *p,
 
 DRM_IOCTL(update_queue)
 
-static int dpa_ioctl_get_process_apertures_new(struct dpa_kfd_process *p,
+static int dpa_ioctl_get_process_apertures_new(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_process_apertures_new *args = data;
@@ -742,7 +736,7 @@ DRM_IOCTL(get_process_apertures_new)
 static int dpa_drm_ioctl_acquire_vm(struct drm_device *dev,
 						 void *data, struct drm_file *file)
 {
-	struct dpa_kfd_process *p = file->driver_priv;
+	struct dpa_process *p = file->driver_priv;
 	struct file *drm_file;
 	int ret;
 
@@ -768,9 +762,9 @@ err_drm_file:
 	return ret;
 }
 
-static struct dpa_kfd_buffer *dpa_find_buffer(struct dpa_kfd_process *p, u64 id)
+static struct dpa_drm_buffer *dpa_find_buffer(struct dpa_process *p, u64 id)
 {
-	struct dpa_kfd_buffer *buf, *tmp;
+	struct dpa_drm_buffer *buf, *tmp;
 
 	mutex_lock(&p->dev->lock);
 	list_for_each_entry_safe(buf, tmp, &p->buffers, process_alloc_list) {
@@ -784,12 +778,12 @@ static struct dpa_kfd_buffer *dpa_find_buffer(struct dpa_kfd_process *p, u64 id)
 	return NULL;
 }
 
-static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_kfd_process *p,
+static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_alloc_memory_of_gpu *args = data;
 	struct device *dev = p->dev->dev;
-	struct dpa_kfd_buffer *buf;
+	struct dpa_drm_buffer *buf;
 	uint64_t offset = 0;
 	int r = 0;
 
@@ -884,14 +878,14 @@ static int dpa_ioctl_alloc_memory_of_gpu(struct dpa_kfd_process *p,
 
 DRM_IOCTL(alloc_memory_of_gpu)
 
-static int dpa_ioctl_map_memory_to_gpu(struct dpa_kfd_process *p,
+static int dpa_ioctl_map_memory_to_gpu(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_map_memory_to_gpu *args = data;
 
 	// XXX loop over gpu id verify ID passed in matches
 	// XXX check gpu id
-	struct dpa_kfd_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
+	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
 
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
@@ -909,13 +903,13 @@ static int dpa_ioctl_map_memory_to_gpu(struct dpa_kfd_process *p,
 
 DRM_IOCTL(map_memory_to_gpu)
 
-static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_kfd_process *p,
+static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_unmap_memory_from_gpu *args = data;
 
 	// XXX loop over gpu id verify ID passed in matches
-	struct dpa_kfd_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
+	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
@@ -928,7 +922,7 @@ static int dpa_ioctl_unmap_memory_from_gpu(struct dpa_kfd_process *p,
 
 DRM_IOCTL(unmap_memory_from_gpu)
 
-static int dpa_ioctl_get_info(struct dpa_kfd_process *p,
+static int dpa_ioctl_get_info(struct dpa_process *p,
 			      struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_get_info *args = data;
@@ -946,7 +940,7 @@ DRM_IOCTL(get_info);
 static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 					     struct drm_file *file)
 {
-	struct dpa_kfd_process *p = file->driver_priv;
+	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_create_signal_pages *args = data;
 	unsigned num_pages = args->size / PAGE_SIZE;
 	int ret = 0;
@@ -1000,7 +994,7 @@ out_unlock:
 	return ret;
 }
 
-static int dpa_check_signal(struct dpa_kfd_process *p, u32 signal_index)
+static int dpa_check_signal(struct dpa_process *p, u32 signal_index)
 {
 	u64 signal_va = p->signal_pages_va +
 		(signal_index * sizeof(struct drm_dpa_signal));
@@ -1022,7 +1016,7 @@ static int dpa_check_signal(struct dpa_kfd_process *p, u32 signal_index)
 static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 				     struct drm_file *file)
 {
-	struct dpa_kfd_process *p = file->driver_priv;
+	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_wait_signal *args = data;
 	u64 total_usleep = 0;
 	int ret = 0;
@@ -1061,7 +1055,7 @@ out_unlock:
 	return ret;
 }
 
-static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
+static void dpa_drm_free_buffer(struct dpa_drm_buffer *buf)
 {
 	struct device *dev = buf->p->dev->dev;
 	dev_warn(dev, "%s: freeing buf id %u\n",
@@ -1087,18 +1081,18 @@ static void dpa_kfd_free_buffer(struct dpa_kfd_buffer *buf)
 
 }
 
-static int dpa_ioctl_free_memory_of_gpu(struct dpa_kfd_process *p,
+static int dpa_ioctl_free_memory_of_gpu(struct dpa_process *p,
 	struct dpa_device *dpa, void *data)
 {
 	struct drm_dpa_free_memory_of_gpu *args = data;
-	struct dpa_kfd_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
+	struct dpa_drm_buffer *buf = dpa_find_buffer(p, args->handle & 0xFFFFFFFF);
 	dev_warn(p->dev->dev, "%s: handle 0x%llx buf 0x%llx\n",
 		 __func__, args->handle, (u64)buf);
 	if (buf) {
 		mutex_lock(&p->dev->lock);
 		list_del(&buf->process_alloc_list);
 		mutex_unlock(&p->dev->lock);
-		dpa_kfd_free_buffer(buf);
+		dpa_drm_free_buffer(buf);
 	}
 
 	return 0;
@@ -1141,14 +1135,14 @@ static const struct drm_driver dpa_drm_driver = {
 
 static const struct drm_driver dpa_drm_driver;
 
-static void dpa_kfd_release_process_buffers(struct dpa_kfd_process *p)
+static void dpa_drm_release_process_buffers(struct dpa_process *p)
 {
-	struct dpa_kfd_buffer *buf, *tmp;
+	struct dpa_drm_buffer *buf, *tmp;
 	mutex_lock(&p->dev->lock);
 	list_for_each_entry_safe(buf, tmp, &p->buffers, process_alloc_list) {
 		if (buf->p == p) {
 			list_del(&buf->process_alloc_list);
-			dpa_kfd_free_buffer(buf);
+			dpa_drm_free_buffer(buf);
 		} else {
 			dev_warn(p->dev->dev, "%s: mismatched buffer?", __func__);
 		}
@@ -1156,9 +1150,9 @@ static void dpa_kfd_release_process_buffers(struct dpa_kfd_process *p)
 	mutex_unlock(&p->dev->lock);
 }
 
-static void dpa_kfd_release_process(struct kref *ref)
+static void dpa_release_process(struct kref *ref)
 {
-	struct dpa_kfd_process *p = container_of(ref, struct dpa_kfd_process,
+	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);
 	int i;
 
@@ -1166,7 +1160,7 @@ static void dpa_kfd_release_process(struct kref *ref)
 	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 	// XXX mutex lock on process lock ?
-	dpa_kfd_release_process_buffers(p);
+	dpa_drm_release_process_buffers(p);
 
 	for (i = 0; i < p->signal_pages_count; i++)
 		unpin_user_page(p->signal_pages[i]);

@@ -1,5 +1,5 @@
-#ifndef _DPA_KFD_H_
-#define _DPA_KFD_H_
+#ifndef _DPA_DRM_H_
+#define _DPA_DRM_H_
 
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -47,7 +47,7 @@
 static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
 	void *data, struct drm_file *file)				\
 {									\
-	struct dpa_kfd_process *p = file->driver_priv;			\
+	struct dpa_process *p = file->driver_priv;			\
 	struct dpa_device* dpa = drm_to_dpa_dev(dev);			\
 	if (!p)								\
 		return -EINVAL;						\
@@ -103,7 +103,7 @@ struct dpa_aql_queue {
 	u32 mmap_offset;
 };
 
-struct dpa_kfd_process {
+struct dpa_process {
 	// list_head for list of processes using dpa
 	struct list_head dpa_process_list;
 
@@ -146,7 +146,7 @@ struct dpa_kfd_process {
 };
 
 // tracks buffers -- especially vram allocations
-struct dpa_kfd_buffer {
+struct dpa_drm_buffer {
 	struct list_head process_alloc_list;
 
 	struct drm_gem_object gobj;
@@ -160,26 +160,15 @@ struct dpa_kfd_buffer {
 
 	struct list_head blocks;
 
-	struct dpa_kfd_process *p;
+	struct dpa_process *p;
 };
 
-#define gem_to_dpa_buf(gobj) container_of((gobj), struct dpa_kfd_buffer, gobj)
+#define gem_to_dpa_buf(gobj) container_of((gobj), struct dpa_drm_buffer, gobj)
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 {
 	return container_of(ddev, struct dpa_device, ddev);
 }
-
-typedef int kfd_ioctl_t(struct file *filep, struct dpa_kfd_process *process,
-			void *data);
-
-struct kfd_ioctl_desc {
-	unsigned int cmd;
-	int flags;
-	kfd_ioctl_t *func;
-	unsigned int cmd_drv;
-	const char *name;
-};
 
 /* some random number for now */
 #define DPA_GPU_ID (1234)
@@ -196,18 +185,18 @@ struct kfd_ioctl_desc {
 irqreturn_t handle_daffy(int irq, void *dpa_dev);
 
 /* offsets to MMAP calls for different things */
-#define KFD_MMAP_TYPE_SHIFT (60)
-#define KFD_MMAP_TYPE_DOORBELL (0x1ULL)
+#define DRM_MMAP_TYPE_SHIFT (60)
+#define DRM_MMAP_TYPE_DOORBELL (0x1ULL)
 
 // temporary until DRM/GEM
-#define KFD_MMAP_TYPE_VRAM (0x0ULL)
+#define DRM_MMAP_TYPE_VRAM (0x0ULL)
 
-#define KFD_GPU_ID_HASH_WIDTH (4)
-#define KFD_MMAP_GPU_ID_SHIFT (48)
-#define KFD_MMAP_GPU_ID_MASK ((1ULL << KFD_GPU_ID_HASH_WIDTH) - 1) \
-				<< KFD_MMAP_GPU_ID_SHIFT)
+#define DRM_GPU_ID_HASH_WIDTH (4)
+#define DRM_MMAP_GPU_ID_SHIFT (48)
+#define DRM_MMAP_GPU_ID_MASK ((1ULL << DRM_GPU_ID_HASH_WIDTH) - 1) \
+				<< DRM_MMAP_GPU_ID_SHIFT)
 
-#define KFD_MMAP_GET_GPU_ID(offset) (((offset) >> KFD_MMAP_GPU_ID_SHIFT) & \
-				     (KFD_GPU_ID_HASH_WIDTH - 1))
+#define DRM_MMAP_GET_GPU_ID(offset) (((offset) >> DRM_MMAP_GPU_ID_SHIFT) & \
+				     (DRM_GPU_ID_HASH_WIDTH - 1))
 
-#endif /* _DPA_KFD_H_ */
+#endif /* _DPA_DRM_H_ */

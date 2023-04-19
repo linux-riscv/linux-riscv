@@ -39,103 +39,103 @@ struct drm_dpa_get_version {
 };
 
 struct drm_dpa_create_queue {
-	__u64 ring_base_address;	/* to KFD */
-	__u64 write_pointer_address;	/* from KFD */
-	__u64 read_pointer_address;	/* from KFD */
-	__u64 doorbell_offset;	/* from KFD */
+	__u64 ring_base_address;	/* to DPA */
+	__u64 write_pointer_address;	/* from DPA */
+	__u64 read_pointer_address;	/* from DPA */
+	__u64 doorbell_offset;	/* from DPA */
 
-	__u32 ring_size;		/* to KFD */
-	__u32 gpu_id;		/* to KFD */
-	__u32 queue_type;		/* to KFD */
-	__u32 queue_percentage;	/* to KFD */
-	__u32 queue_priority;	/* to KFD */
-	__u32 queue_id;		/* from KFD */
+	__u32 ring_size;		/* to DPA */
+	__u32 gpu_id;		/* to DPA */
+	__u32 queue_type;		/* to DPA */
+	__u32 queue_percentage;	/* to DPA */
+	__u32 queue_priority;	/* to DPA */
+	__u32 queue_id;		/* from DPA */
 
-	__u64 eop_buffer_address;	/* to KFD */
-	__u64 eop_buffer_size;	/* to KFD */
-	__u64 ctx_save_restore_address; /* to KFD */
-	__u32 ctx_save_restore_size;	/* to KFD */
-	__u32 ctl_stack_size;		/* to KFD */
+	__u64 eop_buffer_address;	/* to DPA */
+	__u64 eop_buffer_size;	/* to DPA */
+	__u64 ctx_save_restore_address; /* to DPA */
+	__u32 ctx_save_restore_size;	/* to DPA */
+	__u32 ctl_stack_size;		/* to DPA */
 };
 
 struct drm_dpa_destroy_queue {
-	__u32 queue_id;		/* to KFD */
+	__u32 queue_id;		/* to DPA */
 	__u32 pad;
 };
 
 struct drm_dpa_update_queue {
-	__u64 ring_base_address;	/* to KFD */
+	__u64 ring_base_address;	/* to DPA */
 
-	__u32 queue_id;		/* to KFD */
-	__u32 ring_size;		/* to KFD */
-	__u32 queue_percentage;	/* to KFD */
-	__u32 queue_priority;	/* to KFD */
+	__u32 queue_id;		/* to DPA */
+	__u32 ring_size;		/* to DPA */
+	__u32 queue_percentage;	/* to DPA */
+	__u32 queue_priority;	/* to DPA */
 };
 
 struct drm_dpa_set_memory_policy {
-	__u64 alternate_aperture_base;	/* to KFD */
-	__u64 alternate_aperture_size;	/* to KFD */
+	__u64 alternate_aperture_base;	/* to DPA */
+	__u64 alternate_aperture_size;	/* to DPA */
 
-	__u32 gpu_id;			/* to KFD */
-	__u32 default_policy;		/* to KFD */
-	__u32 alternate_policy;		/* to KFD */
+	__u32 gpu_id;			/* to DPA */
+	__u32 default_policy;		/* to DPA */
+	__u32 alternate_policy;		/* to DPA */
 	__u32 pad;
 };
 
 struct drm_dpa_get_clock_counters {
-	__u64 gpu_clock_counter;	/* from KFD */
-	__u64 cpu_clock_counter;	/* from KFD */
-	__u64 system_clock_counter;	/* from KFD */
-	__u64 system_clock_freq;	/* from KFD */
+	__u64 gpu_clock_counter;	/* from DPA */
+	__u64 cpu_clock_counter;	/* from DPA */
+	__u64 system_clock_counter;	/* from DPA */
+	__u64 system_clock_freq;	/* from DPA */
 
-	__u32 gpu_id;		/* to KFD */
+	__u32 gpu_id;		/* to DPA */
 	__u32 pad;
 };
 
 struct drm_dpa_process_device_apertures {
-	__u64 lds_base;		/* from KFD */
-	__u64 lds_limit;		/* from KFD */
-	__u64 scratch_base;		/* from KFD */
-	__u64 scratch_limit;		/* from KFD */
-	__u64 gpuvm_base;		/* from KFD */
-	__u64 gpuvm_limit;		/* from KFD */
-	__u32 gpu_id;		/* from KFD */
+	__u64 lds_base;		/* from DPA */
+	__u64 lds_limit;		/* from DPA */
+	__u64 scratch_base;		/* from DPA */
+	__u64 scratch_limit;		/* from DPA */
+	__u64 gpuvm_base;		/* from DPA */
+	__u64 gpuvm_limit;		/* from DPA */
+	__u32 gpu_id;		/* from DPA */
 	__u32 pad;
 };
 
 struct drm_dpa_get_process_apertures {
 	struct drm_dpa_process_device_apertures
-			process_apertures[NUM_OF_SUPPORTED_GPUS];/* from KFD */
+			process_apertures[NUM_OF_SUPPORTED_GPUS];/* from DPA */
 
-	/* from KFD, should be in the range [1 - NUM_OF_SUPPORTED_GPUS] */
+	/* from DPA, should be in the range [1 - NUM_OF_SUPPORTED_GPUS] */
 	__u32 num_of_nodes;
 	__u32 pad;
 };
 
 struct drm_dpa_get_process_apertures_new {
-	/* User allocated. Pointer to struct kfd_process_device_apertures
+	/* User allocated. Pointer to struct DPA_process_device_apertures
 	 * filled in by Kernel
 	 */
 	__u64 drm_dpa_process_device_apertures_ptr;
-	/* to KFD - indicates amount of memory present in
-	 *  kfd_process_device_apertures_ptr
-	 * from KFD - Number of entries filled by KFD.
+	/* to DPA - indicates amount of memory present in
+	 *  DPA_process_device_apertures_ptr
+	 * from DPA - Number of entries filled by DPA.
 	 */
 	__u32 num_of_nodes;
 	__u32 pad;
 };
 
 struct drm_dpa_acquire_vm {
-	__u32 drm_fd;	/* to KFD */
-	__u32 gpu_id;	/* to KFD */
+	__u32 drm_fd;	/* to DPA */
+	__u32 gpu_id;	/* to DPA */
 };
 
 struct drm_dpa_alloc_memory_of_gpu {
-	__u64 va_addr;		/* to KFD */
-	__u64 size;		/* to KFD */
-	__u64 handle;		/* from KFD */
-	__u64 mmap_offset;	/* to KFD (userptr), from KFD (mmap offset) */
-	__u32 gpu_id;		/* to KFD */
+	__u64 va_addr;		/* to DPA */
+	__u64 size;		/* to DPA */
+	__u64 handle;		/* from DPA */
+	__u64 mmap_offset;	/* to DPA (userptr), from DPA (mmap offset) */
+	__u32 gpu_id;		/* to DPA */
 	__u32 flags;
 };
 
@@ -144,14 +144,14 @@ struct drm_dpa_alloc_memory_of_gpu {
  * @handle: memory handle returned by alloc
  */
 struct drm_dpa_free_memory_of_gpu {
-	__u64 handle;		/* to KFD */
+	__u64 handle;		/* to DPA */
 };
 
 struct drm_dpa_map_memory_to_gpu {
-	__u64 handle;			/* to KFD */
-	__u64 device_ids_array_ptr;	/* to KFD */
-	__u32 n_devices;		/* to KFD */
-	__u32 n_success;		/* to/from KFD */
+	__u64 handle;			/* to DPA */
+	__u64 device_ids_array_ptr;	/* to DPA */
+	__u32 n_devices;		/* to DPA */
+	__u32 n_success;		/* to/from DPA */
 };
 
 struct drm_dpa_get_info {
@@ -184,10 +184,10 @@ struct drm_dpa_wait_signal {
  * same arguments as for mapping
  */
 struct drm_dpa_unmap_memory_from_gpu {
-	__u64 handle;			/* to KFD */
-	__u64 device_ids_array_ptr;	/* to KFD */
-	__u32 n_devices;		/* to KFD */
-	__u32 n_success;		/* to/from KFD */
+	__u64 handle;			/* to DPA */
+	__u64 device_ids_array_ptr;	/* to DPA */
+	__u32 n_devices;		/* to DPA */
+	__u32 n_success;		/* to/from DPA */
 };
 
 #define DRM_IOCTL_DPA_GET_VERSION \

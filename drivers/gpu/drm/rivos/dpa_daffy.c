@@ -153,7 +153,7 @@ out:
 }
 
 int daffy_get_info_cmd(struct dpa_device *dev,
-					struct dpa_kfd_process *p,
+					struct dpa_process *p,
 					struct drm_dpa_get_info *args)
 {
 	struct dpa_fw_queue_pkt pkt;
@@ -187,7 +187,7 @@ out:
 }
 
 int daffy_destroy_queue_cmd(struct dpa_device *dev,
-			    struct dpa_kfd_process *p, u32 queue_id)
+			    struct dpa_process *p, u32 queue_id)
 {
 	struct dpa_fw_queue_pkt pkt, *qpkt;
 	struct daffy_destroy_queue_cmd *cmd;
@@ -221,7 +221,7 @@ out:
 
 
 int daffy_create_queue_cmd(struct dpa_device *dev,
-			   struct dpa_kfd_process *p,
+			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args)
 {
 	struct dpa_fw_queue_pkt pkt, *qpkt;

@@ -1,7 +1,7 @@
-#ifndef _DPA_KFD_DAFFY_H_
-#define _DPA_KFD_DAFFY_H_
+#ifndef _DPA_DRM_DAFFY_H_
+#define _DPA_DRM_DAFFY_H_
 
-#include "dpa_kfd.h"
+#include "dpa_drm.h"
 
 // don't assume the value of PAGE_SIZE
 #define DPA_FW_QUEUE_PAGE_SIZE (4 * 1024)
@@ -109,20 +109,20 @@ struct dpa_fw_queue_pkt {
 };
 
 struct dpa_device;
-struct dpa_kfd_process;
+struct dpa_process;
 
 int daffy_alloc_fw_queue(struct dpa_device *dpa_dev);
 void daffy_free_fw_queue(struct dpa_device *dpa_dev);
 int daffy_get_version_cmd(struct dpa_device *dev, u32 *version);
 int daffy_get_info_cmd(struct dpa_device *dev,
-					struct dpa_kfd_process *p,
+					struct dpa_process *p,
 					struct drm_dpa_get_info *args);
 int daffy_create_queue_cmd(struct dpa_device *dev,
-			   struct dpa_kfd_process *p,
+			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args);
 int daffy_destroy_queue_cmd(struct dpa_device *dev,
-			    struct dpa_kfd_process *p, u32 queue_id);
+			    struct dpa_process *p, u32 queue_id);
 
 
 
-#endif
+#endif /* _DPA_DRM_DAFFY_H_ */
