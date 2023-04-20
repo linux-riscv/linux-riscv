@@ -48,24 +48,8 @@ struct Doorbell {
 #define DRM_DEV "/dev/dri/renderD128"
 static int drm_fd;
 
-#define NUM_DEV_APERTURES NUM_OF_SUPPORTED_GPUS
-struct drm_dpa_process_device_apertures dev_apertures[NUM_DEV_APERTURES];
-
 // keep read and write indices one CL apart
 #define CACHELINE_SIZE (64)
-
-static void get_version(void)
-{
-	struct drm_dpa_get_version args;
-	int ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_VERSION, &args);
-
-	if (ret) {
-		perror("ioctl get version");
-		exit(1);
-	}
-	fprintf(stderr, "version: major %d minor %d\n",
-		args.major_version, args.minor_version);
-}
 
 static void get_info(void)
 {
@@ -379,7 +363,6 @@ int main(int argc, char *argv[])
 	}
 
 	open_render_fd();
-	get_version();
 	get_info();
 	signal_page = get_signal_page();
 	signal = &signal_page[0];
