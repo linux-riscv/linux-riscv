@@ -102,17 +102,6 @@ struct drm_dpa_wait_signal {
 	__u64 timeout_ns;	/* in timeout in nano seconds */
 };
 
-/* Unmap memory from one or more GPUs
- *
- * same arguments as for mapping
- */
-struct drm_dpa_unmap_memory_from_gpu {
-	__u64 handle;			/* to DPA */
-	__u64 device_ids_array_ptr;	/* to DPA */
-	__u32 n_devices;		/* to DPA */
-	__u32 n_success;		/* to/from DPA */
-};
-
 #define DRM_IOCTL_DPA_GET_INFO \
 	DPA_IOCTL(IOWR, GET_INFO, get_info)
 #define DRM_IOCTL_DPA_CREATE_QUEUE \
@@ -140,27 +129,10 @@ struct drm_dpa_signal {
 #define DPA_DRM_MAX_SIGNAL_PAGES (4)
 #define DPA_DRM_SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct drm_dpa_signal))
 
-
 /* Allocation flags: memory types */
 #define DPA_IOC_ALLOC_MEM_FLAGS_VRAM		(1 << 0)
-#define DPA_IOC_ALLOC_MEM_FLAGS_GTT		(1 << 1)
-#define DPA_IOC_ALLOC_MEM_FLAGS_USERPTR		(1 << 2)
-#define DPA_IOC_ALLOC_MEM_FLAGS_DOORBELL	(1 << 3)
-#define DPA_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP	(1 << 4)
-/* Allocation flags: attributes/access options */
-#define DPA_IOC_ALLOC_MEM_FLAGS_WRITABLE	(1 << 31)
-#define DPA_IOC_ALLOC_MEM_FLAGS_EXECUTABLE	(1 << 30)
-#define DPA_IOC_ALLOC_MEM_FLAGS_PUBLIC		(1 << 29)
-#define DPA_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE	(1 << 28)
-#define DPA_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM	(1 << 27)
-#define DPA_IOC_ALLOC_MEM_FLAGS_COHERENT	(1 << 26)
+#define DPA_IOC_ALLOC_MEM_FLAGS_USERPTR		(1 << 1)
 
-#define DPA_IOC_QUEUE_TYPE_COMPUTE		0x0
-#define DPA_IOC_QUEUE_TYPE_SDMA			0x1
-#define DPA_IOC_QUEUE_TYPE_COMPUTE_AQL		0x2
-#define DPA_IOC_QUEUE_TYPE_SDMA_XGMI		0x3
-
-#define DPA_MAX_QUEUE_PERCENTAGE	100
 #define DPA_MAX_QUEUE_PRIORITY		15
 
 #endif /* __DRM_DPA_H__ */
