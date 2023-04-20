@@ -99,23 +99,11 @@ static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_me
 	args.va_addr = (uint64_t)user_ptr;
 	args.size = size;
 	args.mmap_offset = (uint64_t)user_ptr;
-	args.flags =
-		DPA_IOC_ALLOC_MEM_FLAGS_COHERENT |
-		DPA_IOC_ALLOC_MEM_FLAGS_WRITABLE |
-		DPA_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE;
 
-	if (gpu_mem_type == MMIO) {
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP;
-		args.mmap_offset = 0;
-	} else if (gpu_mem_type == USER) {
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_USERPTR;
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_EXECUTABLE; // needs to for the queue
+	if (gpu_mem_type == USER) {
+		args.flags = DPA_IOC_ALLOC_MEM_FLAGS_USERPTR;
 	} else if (gpu_mem_type == DEVICE) {
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_VRAM;
-		// allow host access
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_PUBLIC;
-	} else if (gpu_mem_type == DOORBELL) {
-		args.flags |= DPA_IOC_ALLOC_MEM_FLAGS_DOORBELL;
+		args.flags = DPA_IOC_ALLOC_MEM_FLAGS_VRAM;
 	} else {
 		fprintf(stderr, "%s: Invalid memory type\n", __func__);
 		exit(1);
@@ -222,8 +210,6 @@ static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
 
 	args.ring_base_address = (uint64_t)ring_base;
 	args.ring_size = (uint32_t)ring_size;
-	args.queue_type = DPA_IOC_QUEUE_TYPE_COMPUTE_AQL;
-	args.queue_percentage = DPA_MAX_QUEUE_PERCENTAGE;
 	args.queue_priority = DPA_MAX_QUEUE_PRIORITY;
 	args.write_pointer_address = (uint64_t)write_ptr;
 	args.read_pointer_address = (uint64_t)read_ptr;
