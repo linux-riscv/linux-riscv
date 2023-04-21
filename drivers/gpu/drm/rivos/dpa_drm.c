@@ -407,37 +407,31 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-	pci_write_config_byte(pdev, PCI_COMMAND, PCI_COMMAND_IO |
-			      PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X\n", vendor, device);
 
-	err = pci_enable_device_mem(pdev);
+	err = pcim_enable_device(pdev);
 	if (err)
-		goto disable_device;
+		return err;
+	pci_set_master(pdev);
 
-	err = pci_request_mem_regions(pdev, dpa_class_name);
+	err = pcim_iomap_regions(pdev, 1 << 0, dpa_class_name);
 	if (err)
-		goto disable_device;
+		return err;
 
 	// Enable PASID support
-	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
+	if (err) {
 		dev_warn(dev, "%s: Unable to turn on SVA feature\n", __func__);
-		goto disable_device;
-	} else {
-		dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
+		return err;
 	}
+	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
 
-	dpa->regs = ioremap(pci_resource_start(pdev, 0), DUC_MMIO_SIZE);
-	if (!dpa->regs) {
-		dev_warn(dev, "%s: unable to remap registers\n", __func__);
-		err = -EIO;
-		goto disable_device;
-	}
+	dpa->regs = pcim_iomap_table(pdev)[0];
 
 	err = daffy_alloc_fw_queue(dpa);
 	if (err) {
 		dev_warn(dev, "%s: unable to allocate memory\n", __func__);
-		goto unmap;
+		goto disable_sva;
 	}
 	// Write Daffy information to FW queue regs
 	dpa_setup_queue(dpa);
@@ -448,35 +442,40 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	version = ioread64(dpa->regs + DUC_REGS_FW_VER);
 	dev_warn(dev, "%s: got version %u\n", __func__, version);
 
-	// init drm
-	err = drm_dev_register(ddev, id->driver_data);
-	if (err)
-		goto disable_device;
-
 	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
-	dev_warn(dev, "np is %p\n", np);
+	if (!np) {
+		dev_err(dev, "No HBM node\n");
+		err = -ENODEV;
+		goto free_daffy;
+	}
 	err = of_address_to_resource(np, 0, &r);
-	if (err)
+	if (err) {
 		dev_err(dev, "No memory address assigned to the region\n");
+		goto free_daffy;
+	}
 
 	dpa->hbm_base = r.start;
 	dpa->hbm_size = resource_size(&r);
-	dpa->hbm_va = (void *) ((u64) devm_memremap(dev, dpa->hbm_base,
-		dpa->hbm_size, MEMREMAP_WB));
+	dpa->hbm_va = devm_memremap(dev, dpa->hbm_base,
+				    dpa->hbm_size, MEMREMAP_WB);
 	if (IS_ERR(dpa->hbm_va)) {
 		err = PTR_ERR(dpa->hbm_va);
-		goto disable_device;
+		goto free_daffy;
 	}
 
 	dev_info(dev, "HBM base: 0x%llx, HBM size: 0x%llx\n",
 		dpa->hbm_base, dpa->hbm_size);
 
 	err = drm_buddy_init(&dpa->mm, dpa->hbm_size, PAGE_SIZE);
+	if (err < 0)
+		goto free_daffy;
 	mutex_init(&dpa->mm_lock);
 
 	err = pci_alloc_irq_vectors(pdev, 1, DUC_NUM_MSIX_INTERRUPTS, PCI_IRQ_MSIX);
-	if (err < 0)
+	if (err < 0) {
 		dev_err(dev, "Failed setting up IRQ\n");
+		goto free_daffy;
+	}
 
 	dev_info(dev,
 		"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
@@ -489,21 +488,27 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		/* auto frees on device detach, nice */
 		err = devm_request_threaded_irq(dev, vec, handle_daffy, NULL,
 			IRQF_ONESHOT, "dpa-drm", dpa);
-		if (err < 0)
+		if (err < 0) {
 			dev_err(dev, "Failed setting up IRQ\n");
+			goto free_irqs;
+		}
 	}
 
 	init_waitqueue_head(&dpa->wq);
 
+	// init drm
+	err = drm_dev_register(ddev, id->driver_data);
+	if (err)
+		goto free_irqs;
+
 	return 0;
 
-unmap:
-	iounmap(dpa->regs);
-
-disable_device:
-	dev_warn(dpa->dev, "%s: Disabling device\n", __func__);
-	pci_disable_device(pdev);
-	devm_kfree(dev, dpa);
+free_irqs:
+	pci_free_irq_vectors(pdev);
+free_daffy:
+	daffy_free_fw_queue(dpa);
+disable_sva:
+	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
 
 	return err;
 }
