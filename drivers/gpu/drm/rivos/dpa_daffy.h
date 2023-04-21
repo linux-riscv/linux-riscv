@@ -53,23 +53,18 @@ struct dpa_fw_queue_desc {
 
 enum daffy_command {
 	INVALID = 1,
-	GET_VERSION,
+	GET_INFO,
 	CREATE_QUEUE,
 	MODIFY_QUEUE,
 	PAUSE_QUEUE,
 	QUIESCE_QUEUE,
 	DESTROY_QUEUE,
-	GET_INFO,
 };
 
 struct daffy_pkt_header {
 	u64 id;
 	u16 command;
 	u16 response;
-};
-
-struct daffy_get_version_cmd {
-	u32 version; // from DPA
 };
 
 struct daffy_get_info_cmd {
@@ -116,7 +111,6 @@ struct daffy_destroy_queue_cmd {
 struct dpa_fw_queue_pkt {
 	struct daffy_pkt_header hdr;
 	union {
-		struct daffy_get_version_cmd dgvc;
 		struct daffy_get_info_cmd dgic;
 		struct daffy_create_queue_cmd dcqc;
 		struct daffy_modify_queue_cmd dmqc;
@@ -132,7 +126,6 @@ struct dpa_process;
 
 int daffy_alloc_fw_queue(struct dpa_device *dpa_dev);
 void daffy_free_fw_queue(struct dpa_device *dpa_dev);
-int daffy_get_version_cmd(struct dpa_device *dev, u32 *version);
 int daffy_get_info_cmd(struct dpa_device *dev,
 					struct dpa_process *p,
 					struct drm_dpa_get_info *args);
