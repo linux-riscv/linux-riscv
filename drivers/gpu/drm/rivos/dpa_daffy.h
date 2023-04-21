@@ -61,6 +61,8 @@ enum daffy_command {
 	DESTROY_QUEUE = 7,
 	REGISTER_SIGNAL_PAGES = 8,
 	UNREGISTER_SIGNAL_PAGES = 9,
+	SUBSCRIBE_SIGNAL = 10,
+	UPDATE_SIGNAL = 11,
 };
 
 // Unused for now
@@ -72,6 +74,7 @@ enum signal_type {
 enum daffy_response {
 	SUCCESS = 1,
 	ERROR = 2,
+	ALREADY_SIGNALED = 3,
 };
 
 struct daffy_pkt_header {
@@ -131,6 +134,16 @@ struct daffy_unregister_signal_pages_cmd {
 	u32 pasid;
 };
 
+struct daffy_subscribe_signal_cmd {
+	u64 signal_idx;
+	u32 pasid;
+};
+
+struct daffy_update_signal_cmd {
+	u64 signal_idx;
+	u32 pasid;
+};
+
 // placeholder for the packet to calculate max size
 struct dpa_fw_queue_pkt {
 	struct daffy_pkt_header hdr;
@@ -143,6 +156,8 @@ struct dpa_fw_queue_pkt {
 		struct daffy_destroy_queue_cmd ddqc;
 		struct daffy_register_signal_pages_cmd drspc;
 		struct daffy_unregister_signal_pages_cmd durspc;
+		struct daffy_subscribe_signal_cmd dssc;
+		struct daffy_update_signal_cmd dusc;
 		u8 buf[DPA_FWQ_PKT_SIZE - sizeof(struct daffy_pkt_header)];
 	} u;
 };
@@ -166,6 +181,8 @@ int daffy_register_signal_pages_cmd(struct dpa_device *dpa_dev,
 				u32 num_pages);
 int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa_dev,
 				struct dpa_process *p);
+int daffy_subscribe_signal_cmd(struct dpa_device *dpa_dev,
+				struct dpa_process *p, u64 event_id);
 
 
 

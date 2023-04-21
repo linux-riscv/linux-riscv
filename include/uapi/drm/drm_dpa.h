@@ -91,6 +91,8 @@ struct drm_dpa_signal {
 
 #define DPA_DRM_MAX_SIGNAL_PAGES (4)
 #define DPA_DRM_SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct drm_dpa_signal))
+#define DPA_DRM_MAX_SIGNALS_PER_PASID (DPA_DRM_MAX_SIGNAL_PAGES * \
+	DPA_DRM_SIGNALS_PER_PAGE)
 
 #define DPA_MAX_QUEUE_PRIORITY		15
 

@@ -22,6 +22,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
 
+#include "dpa_drm.h"
 #include "dpa_daffy.h"
 
 static int daffy_queue_has_space(struct dpa_fwq_info *qinfo)
@@ -134,18 +135,117 @@ void daffy_free_fw_queue(struct dpa_device *dpa_dev)
 	kfree(q->fw_queue);
 }
 
-irqreturn_t handle_daffy(int irq, void *dpa_dev)
+irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev)
+{
+	struct dpa_device *dpa = dpa_dev;
+	struct dpa_process *p;
+	struct dpa_fw_queue_desc *fw_queue;
+	struct dpa_signal_waiter *waiter;
+	u64 read_index, write_index;
+	u32 d_qsize;
+	u64 signal_idx;
+	u32 pasid;
+	unsigned long flags;
+
+	mutex_lock(&dpa->daffy_lock);
+
+	fw_queue = dpa->qinfo.fw_queue;
+	d_qsize = fw_queue->d_qsize;
+	read_index = fw_queue->d_read_index;
+	write_index = fw_queue->d_write_index;
+
+	dma_rmb();
+
+	while (read_index != write_index) {
+		unsigned int read_offset = read_index & (d_qsize - 1);
+		struct dpa_fw_queue_pkt *read_pkt = (struct dpa_fw_queue_pkt *)
+			dpa->qinfo.d_ring;
+
+		read_pkt += read_offset;
+		dev_warn(dpa->dev, "%s: Daffy d_read_index: 0x%llx, write_index: 0x%llx\n",
+			__func__, read_index, write_index);
+
+		if (read_pkt->hdr.id != read_index) {
+			dev_warn(dpa->dev, "%s: Daffy packet at 0x%llx had ID %llx, expected %llx\n",
+				__func__, (uint64_t) read_pkt, read_pkt->hdr.id, read_index);
+			break;
+		}
+
+		switch (read_pkt->hdr.command) {
+		case INVALID:
+			dev_warn(dpa->dev, "%s: Processing invalid Daffy packet\n",
+				__func__);
+			read_pkt->hdr.response = ERROR;
+			break;
+		case UPDATE_SIGNAL:
+			dev_warn(dpa->dev, "%s: Processing update_signal Daffy packet\n",
+				__func__);
+			signal_idx = read_pkt->u.dusc.signal_idx;
+			pasid = read_pkt->u.dusc.pasid;
+
+			p = dpa_get_process_by_pasid(pasid);
+			if (!p) {
+				dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
+					__func__, pasid);
+				read_pkt->hdr.response = ERROR;
+				break;
+			}
+
+			spin_lock_irqsave(&p->signal_waiters_lock, flags);
+			list_for_each_entry(waiter, &p->signal_waiters, list) {
+				if (waiter->signal_idx == signal_idx) {
+					complete(&waiter->signal_done);
+					break;
+				}
+			}
+			spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+			kref_put(&p->ref, dpa_release_process);
+			read_pkt->hdr.response = SUCCESS;
+			break;
+		default:
+			dev_warn(dpa->dev, "%s: Received unexpected Daffy command %x\n",
+				__func__, read_pkt->hdr.command);
+			read_pkt->hdr.response = ERROR;
+			break;
+		}
+
+		read_pkt->hdr.command = INVALID;
+		read_index++;
+
+		dma_wmb();
+		fw_queue->d_read_index = read_index;
+	}
+	dev_warn(dpa->dev, "%s: Daffy final d_read_index: 0x%llx, d_write_index: 0x%llx\n",
+		__func__, read_index, write_index);
+
+	mutex_unlock(&dpa->daffy_lock);
+	return IRQ_HANDLED;
+}
+
+irqreturn_t daffy_handle_irq(int irq, void *dpa_dev)
 {
 	struct dpa_device *dpa = dpa_dev;
 	void __iomem *addr;
 	int vec = irq - dpa->base_irq;
+	struct dpa_fw_queue_desc *fw_queue;
+	u64 dq_read_index, dq_write_index;
+	irqreturn_t irq_ret = IRQ_HANDLED;
 
 	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, vec);
 	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq * sizeof(u64);
 	// XXX Parse cause
 	writeq(readq(addr), addr);
 	wake_up_interruptible(&dpa->wq);
-	return IRQ_HANDLED;
+
+	fw_queue = dpa->qinfo.fw_queue;
+	dq_read_index = fw_queue->d_read_index;
+	dq_write_index = fw_queue->d_write_index;
+
+	/* Check if our bottom-half needs to process incoming Daffy packets */
+	if (dq_read_index != dq_write_index)
+		irq_ret = IRQ_WAKE_THREAD;
+
+	return irq_ret;
 }
 
 int daffy_get_info_cmd(struct dpa_device *dev,
@@ -361,6 +461,49 @@ int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa_dev,
 		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
 			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
 		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+int daffy_subscribe_signal_cmd(struct dpa_device *dpa_dev,
+				struct dpa_process *p, u64 signal_idx)
+{
+	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct daffy_subscribe_signal_cmd *cmd;
+	unsigned int index;
+	int ret = 0;
+
+	if (!daffy_queue_has_space(&dpa_dev->qinfo)) {
+		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
+		return -EBUSY;
+	}
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = SUBSCRIBE_SIGNAL;
+
+	cmd = &pkt.u.dssc;
+	cmd->signal_idx = signal_idx;
+	cmd->pasid = p->pasid;
+
+	index = daffy_add_to_queue(dpa_dev, &pkt);
+	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
+		 __func__, index, pkt.hdr.command);
+	if (index == -1) {
+		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
+		ret = -EINVAL;
+	}
+	qpkt = dpa_dev->qinfo.h_ring + index;
+	ret = wait_event_interruptible(dpa_dev->wq, qpkt->hdr.response > 0);
+
+	if (qpkt->hdr.response == ERROR) {
+		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+	} else if (qpkt->hdr.response == ALREADY_SIGNALED) {
+		dev_warn(dpa_dev->dev, "%s: DUC did not process the subscription, signal is already complete\n",
+			__func__);
+		ret = 1;
 	}
 
 	return ret;

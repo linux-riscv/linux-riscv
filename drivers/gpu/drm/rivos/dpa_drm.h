@@ -24,6 +24,7 @@
 #include <linux/pci.h>
 #include <linux/iommu.h>
 #include <linux/wait.h>
+#include <linux/completion.h>
 #include <drm/drm.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
@@ -108,6 +109,7 @@ struct dpa_device {
 	struct list_head dpa_processes;
 	unsigned int dpa_process_count;
 
+	/* Daffy structures */
 	struct mutex daffy_lock;
 	wait_queue_head_t wq;
 	struct dpa_fwq_info qinfo;
@@ -155,8 +157,20 @@ struct dpa_process {
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int signal_pages_count;
 
+	/* Signal waiters */
+	spinlock_t signal_waiters_lock;
+	struct list_head signal_waiters;
+
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
+};
+
+struct dpa_signal_waiter {
+	struct list_head list;
+
+	u64 signal_idx;
+	int error;
+	struct completion signal_done;
 };
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
@@ -178,7 +192,8 @@ static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 
 struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm);
 struct dpa_process *dpa_get_process_by_pasid(u32 pasid);
-irqreturn_t handle_daffy(int irq, void *dpa_dev);
+irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
+irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev);
 void dpa_release_process(struct kref *ref);
 
 /* offsets to MMAP calls for different things */

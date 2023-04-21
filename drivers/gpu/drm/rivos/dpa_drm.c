@@ -262,6 +262,10 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 		return -EIO;
 	}
 
+	// Init dpa_signal_waiter queue
+	INIT_LIST_HEAD(&dpa_app->signal_waiters);
+	spin_lock_init(&dpa_app->signal_waiters_lock);
+
 	dpa->dpa_process_count++;
 	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
 	list_add_tail(&dpa_app->dpa_process_list, &dpa->dpa_processes);
@@ -358,8 +362,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	for (int i = 0; i < DUC_NUM_MSIX_INTERRUPTS; i++) {
 		vec = pci_irq_vector(pdev, i);
 		/* auto frees on device detach, nice */
-		err = devm_request_threaded_irq(dev, vec, handle_daffy, NULL,
-			IRQF_ONESHOT, "dpa-drm", dpa);
+		err = devm_request_threaded_irq(dev, vec, daffy_handle_irq,
+			daffy_process_device_queue, IRQF_ONESHOT, "dpa-drm", dpa);
 		if (err < 0) {
 			dev_err(dev, "Failed setting up IRQ\n");
 			goto free_irqs;
@@ -578,6 +582,8 @@ out_unlock:
 
 static void dpa_remove_signal_pages(struct dpa_process *p)
 {
+	struct dpa_signal_waiter *waiter;
+	unsigned long flags;
 	int ret = 0;
 
 	mutex_lock(&p->lock);
@@ -587,36 +593,31 @@ static void dpa_remove_signal_pages(struct dpa_process *p)
 		dev_warn(p->dev->dev, "%s: DUC failed to unmap signal page(s) for pasid %u\n",
 			__func__, p->pasid);
 	}
+
 	unpin_user_pages(p->signal_pages, p->signal_pages_count);
+
+	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	list_for_each_entry(waiter, &p->signal_waiters, list) {
+		waiter->error = -EINVAL;
+		complete(&waiter->signal_done);
+	}
+	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
 
 	mutex_unlock(&p->lock);
 }
 
-static int dpa_check_signal(struct dpa_process *p, u32 signal_index)
-{
-	u64 signal_va = p->signal_pages_va +
-		(signal_index * sizeof(struct drm_dpa_signal));
-	u64 signal_value;
-
-	int ret = copy_from_user(&signal_value, (void __user *)signal_va,
-				 sizeof(signal_value));
-	if (ret < 0) {
-		dev_warn(p->dev->dev, "%s: error checking signal %u at %llx\n",
-			 __func__, signal_index, signal_va);
-		return ret;
-	}
-
-	if (signal_value == 0)
-		return 0;
-	return 1;
-}
-
 static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
-				     struct drm_file *file)
+				    struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
+	struct dpa_signal_waiter waiter;
 	struct drm_dpa_wait_signal *args = data;
-	u64 total_usleep = 0;
+	u64 signal_idx = args->signal_idx;
+	u64 timeout_ns = nsecs_to_jiffies64(args->timeout_ns);
+	struct drm_dpa_signal *signal;
+	u64 page_index;
+	void *signal_page_buf;
+	unsigned long flags;
 	int ret = 0;
 
 	if (!p)
@@ -624,30 +625,69 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 
 	mutex_lock(&p->lock);
 
-	/* verify signal index is in bounds */
-	if ((args->signal_idx * sizeof(struct drm_dpa_signal)) >=
+	/* Verify signal index is in bounds. */
+	if ((signal_idx * sizeof(struct drm_dpa_signal)) >=
 	    (p->signal_pages_count * PAGE_SIZE)) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}
 
-	// XXX implement this using a daffy packet and event waiters
-	do {
-		ret = dpa_check_signal(p, args->signal_idx);
-		if (ret) {
-			mutex_unlock(&p->lock);
-			usleep_range(10000, 10000);
-			total_usleep  += 10000;
-			mutex_lock(&p->lock);
-		}
-	} while ((ret == 1) &&
-		 ((args->timeout_ns == 0) || (total_usleep * 1000) < args->timeout_ns));
+	page_index = signal_idx * sizeof(struct drm_dpa_signal) / PAGE_SIZE;
+	signal_page_buf = page_to_virt(p->signal_pages[page_index]);
+	if (!signal_page_buf) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
 
-	dev_warn(p->dev->dev, "%s: idx %llu ret = %d timeout = %lu\n", __func__,
-		 args->signal_idx, ret, args->timeout_ns);
+	signal = (struct drm_dpa_signal *) (signal_page_buf + ((signal_idx -
+		page_index * DPA_DRM_SIGNALS_PER_PAGE) *
+		sizeof(struct drm_dpa_signal)));
 
-	if (ret == 1)
-		ret = -EBUSY;
+	/* Check if the signal has already been reset by firmware. */
+	if (!READ_ONCE(signal->signal_value))
+		goto out_unlock;
+
+	INIT_LIST_HEAD(&waiter.list);
+	waiter.signal_idx = signal_idx;
+	init_completion(&waiter.signal_done);
+
+	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	list_add_tail(&waiter.list, &p->signal_waiters);
+	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+
+	/*
+	 * Firmware will reject a subscription if the specified signal has already
+	 * been satisfied when it processes the subscription request.
+	 */
+	ret = daffy_subscribe_signal_cmd(p->dev, p, signal_idx);
+	if (ret)
+		goto out_remove_waiter;
+
+	/* Wait for the signal, timeout value of 0 means 'no timeout' */
+	mutex_unlock(&p->lock);
+	if (timeout_ns == 0)
+		wait_for_completion_interruptible(&waiter.signal_done);
+	else
+		wait_for_completion_interruptible_timeout(&waiter.signal_done, timeout_ns);
+	mutex_lock(&p->lock);
+
+	if (waiter.error == -EINVAL) {
+		dev_warn(p->dev->dev, "%s: Signal page for PASID %d unregistered while waiting on signal %lld\n",
+			__func__, p->pasid, signal_idx);
+		ret = -EINVAL;
+	} else if (signal->signal_value) {
+		dev_warn(p->dev->dev, "%s: Timeout waiting for signal %lld\n", __func__, signal_idx);
+		ret = -ETIMEDOUT;
+	}
+
+	dev_warn(p->dev->dev, "%s: signal idx = %llu, value = %lld\n", __func__,
+		 args->signal_idx, signal->signal_value);
+
+out_remove_waiter:
+	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	list_del(&waiter.list);
+	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+
 out_unlock:
 	mutex_unlock(&p->lock);
 
