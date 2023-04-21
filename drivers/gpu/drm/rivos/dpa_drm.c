@@ -520,7 +520,7 @@ static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_create_signal_pages *args = data;
-	unsigned int num_pages = args->size / PAGE_SIZE;
+	u32 num_pages = args->size / PAGE_SIZE;
 	int ret = 0;
 	long count;
 
@@ -565,10 +565,31 @@ static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 	p->signal_pages_va = args->va;
 	p->signal_pages_count = num_pages;
 
+	// Tell the DUC we've allocated a new range of signal pages
+	ret = daffy_register_signal_pages_cmd(dpa, p, args, num_pages);
+	if (ret)
+		unpin_user_pages(p->signal_pages, count);
+
 out_unlock:
 	mutex_unlock(&p->lock);
 
 	return ret;
+}
+
+static void dpa_remove_signal_pages(struct dpa_process *p)
+{
+	int ret = 0;
+
+	mutex_lock(&p->lock);
+
+	ret = daffy_unregister_signal_pages_cmd(p->dev, p);
+	if (ret) {
+		dev_warn(p->dev->dev, "%s: DUC failed to unmap signal page(s) for pasid %u\n",
+			__func__, p->pasid);
+	}
+	unpin_user_pages(p->signal_pages, p->signal_pages_count);
+
+	mutex_unlock(&p->lock);
 }
 
 static int dpa_check_signal(struct dpa_process *p, u32 signal_index)
@@ -662,14 +683,13 @@ void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);
-	int i;
 	mutex_lock(&dpa->dpa_processes_lock);
 
 	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
-	for (i = 0; i < p->signal_pages_count; i++)
-		unpin_user_page(p->signal_pages[i]);
+	// Unpin signal pages and inform the DUC
+	dpa_remove_signal_pages(p);
 
 	if (p->drm_file)
 		fput(p->drm_file);

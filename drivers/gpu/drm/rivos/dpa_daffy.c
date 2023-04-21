@@ -284,3 +284,84 @@ int daffy_create_queue_cmd(struct dpa_device *dev,
 out:
 	return ret;
 }
+
+int daffy_register_signal_pages_cmd(struct dpa_device *dpa_dev,
+				struct dpa_process *p,
+				struct drm_dpa_create_signal_pages *args,
+				u32 num_pages)
+{
+	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct daffy_register_signal_pages_cmd *cmd;
+	unsigned int index;
+	int ret = 0;
+
+	if (!daffy_queue_has_space(&dpa_dev->qinfo)) {
+		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
+		return -EBUSY;
+	}
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = REGISTER_SIGNAL_PAGES;
+
+	cmd = &pkt.u.drspc;
+	cmd->base_address = args->va;
+	cmd->num_pages = num_pages;
+	cmd->type = SIGNAL;	// Only support default signal type for now
+	cmd->pasid = p->pasid;
+
+	index = daffy_add_to_queue(dpa_dev, &pkt);
+	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
+		 __func__, index, pkt.hdr.command);
+	if (index == -1) {
+		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
+		ret = -EINVAL;
+	}
+	qpkt = dpa_dev->qinfo.h_ring + index;
+	ret = wait_event_interruptible(dpa_dev->wq, qpkt->hdr.response > 0);
+
+	if (qpkt->hdr.response != SUCCESS) {
+		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa_dev,
+				struct dpa_process *p)
+{
+	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct daffy_unregister_signal_pages_cmd *cmd;
+	unsigned int index;
+	int ret = 0;
+
+	if (!daffy_queue_has_space(&dpa_dev->qinfo)) {
+		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
+		return -EBUSY;
+	}
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = UNREGISTER_SIGNAL_PAGES;
+
+	cmd = &pkt.u.durspc;
+	cmd->pasid = p->pasid;
+
+	index = daffy_add_to_queue(dpa_dev, &pkt);
+	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
+		 __func__, index, pkt.hdr.command);
+	if (index == -1) {
+		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
+		ret = -EINVAL;
+	}
+	qpkt = dpa_dev->qinfo.h_ring + index;
+	ret = wait_event_interruptible(dpa_dev->wq, qpkt->hdr.response > 0);
+
+	if (qpkt->hdr.response != SUCCESS) {
+		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
+			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
