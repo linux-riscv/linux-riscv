@@ -40,31 +40,53 @@
 
 #define dpa_class_name "dpa_drm"
 
-static void dpa_release_process(struct kref *ref);
 static const struct drm_driver dpa_drm_driver;
 
 /* device related stuff */
 static struct class *dpa_class;
 struct dpa_device *dpa;
 
-static struct list_head dpa_processes;
-static struct mutex dpa_processes_lock;
-static unsigned int dpa_process_count;
-
-static struct dpa_process *dpa_get_current_process(void)
+struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm)
 {
 	struct list_head *cur;
 	struct dpa_process *dpa_app;
 
-	list_for_each(cur, &dpa_processes) {
+	mutex_lock(&dpa->dpa_processes_lock);
+
+	list_for_each(cur, &dpa->dpa_processes) {
 		struct dpa_process *cur_process =
 			container_of(cur, struct dpa_process,
 				     dpa_process_list);
-		if (cur_process->mm == current->mm) {
+		if (cur_process->mm == mm) {
 			dpa_app = cur_process;
+			kref_get(&dpa_app->ref);
 			break;
 		}
 	}
+	mutex_unlock(&dpa->dpa_processes_lock);
+
+	return dpa_app;
+}
+
+struct dpa_process *dpa_get_process_by_pasid(u32 pasid)
+{
+	struct list_head *cur;
+	struct dpa_process *dpa_app;
+
+	mutex_lock(&dpa->dpa_processes_lock);
+
+	list_for_each(cur, &dpa->dpa_processes) {
+		struct dpa_process *cur_process =
+			container_of(cur, struct dpa_process,
+				     dpa_process_list);
+		if (cur_process->pasid == pasid) {
+			dpa_app = cur_process;
+			kref_get(&dpa_app->ref);
+			break;
+		}
+	}
+	mutex_unlock(&dpa->dpa_processes_lock);
+
 	return dpa_app;
 }
 
@@ -92,9 +114,9 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 	unsigned long pfn;
 	int ret = -EFAULT;
 
-	mutex_lock(&dpa_processes_lock);
-	p = dpa_get_current_process();
-	mutex_unlock(&dpa_processes_lock);
+	p = dpa_get_process_by_mm(current->mm);
+	if (!p)
+		return -EINVAL;
 
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
 			__func__, mmap_offset, size, type, (u64)vma->vm_start);
@@ -104,6 +126,7 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 		if (size != DPA_DOORBELL_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
 					__func__);
+			kref_put(&p->ref, dpa_release_process);
 			return -EINVAL;
 		}
 
@@ -128,6 +151,7 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
 	}
 
+	kref_put(&p->ref, dpa_release_process);
 	return ret;
 }
 
@@ -176,34 +200,31 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	struct device *dpa_dev;
 	int ret = 0;
 
-	// big lock for this
-	mutex_lock(&dpa_processes_lock);
-	// look for process in a list
-	dpa_app = dpa_get_current_process();
+	/* Look for existing DPA process in a list */
+	dpa_app = dpa_get_process_by_mm(current->mm);
 
 	if (dpa_app) {
-		kref_get(&dpa_app->ref);
-		mutex_unlock(&dpa_processes_lock);
-		// using existing dpa_process
+		/* Using existing dpa_process */
 		dev_warn(dpa->dev, "%s: using existing dpa process\n", __func__);
 		return 0;
 	}
-	// new process
-	if (dpa_process_count >= DPA_PROCESS_MAX) {
+
+	mutex_lock(&dpa->dpa_processes_lock);
+
+	/* Allocate a new DPA process */
+	if (dpa->dpa_process_count >= DPA_PROCESS_MAX) {
 		dev_warn(dpa->dev, "%s: max number of processes reached\n",
 			 __func__);
-		mutex_unlock(&dpa_processes_lock);
+		mutex_unlock(&dpa->dpa_processes_lock);
 		return -EBUSY;
-		}
+	}
+
 	dpa_app = devm_kzalloc(dpa->dev, sizeof(*dpa_app), GFP_KERNEL);
 	if (!dpa_app) {
-		mutex_unlock(&dpa_processes_lock);
+		mutex_unlock(&dpa->dpa_processes_lock);
 		return -ENOMEM;
 	}
 	file_priv->driver_priv = dpa_app;
-	dpa_process_count++;
-	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
-	list_add_tail(&dpa_app->dpa_process_list, &dpa_processes);
 
 	dev_warn(dpa->dev, "%s: associated with pid %d\n", __func__, current->tgid);
 	dpa_app->mm = current->mm;
@@ -220,20 +241,16 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	if (IS_ERR(dpa_app->sva)) {
 		ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
-		list_del(&dpa_app->dpa_process_list);
-		dpa_process_count--;
 		kfree(dpa_app);
-		mutex_unlock(&dpa_processes_lock);
+		mutex_unlock(&dpa->dpa_processes_lock);
 		return -ENODEV;
 	}
 	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
 	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
 		dev_err(dpa_dev, "PASID allocation failed\n");
 		iommu_sva_unbind_device(dpa_app->sva);
-		list_del(&dpa_app->dpa_process_list);
-		dpa_process_count--;
 		kfree(dpa_app);
-		mutex_unlock(&dpa_processes_lock);
+		mutex_unlock(&dpa->dpa_processes_lock);
 		return -ENODEV;
 	}
 	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
@@ -245,9 +262,13 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 		return -EIO;
 	}
 
+	dpa->dpa_process_count++;
+	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
+	list_add_tail(&dpa_app->dpa_process_list, &dpa->dpa_processes);
+
 	dpa_app->drm_priv = file_priv;
 
-	mutex_unlock(&dpa_processes_lock);
+	mutex_unlock(&dpa->dpa_processes_lock);
 	return 0;
 }
 
@@ -346,6 +367,9 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	init_waitqueue_head(&dpa->wq);
+
+	INIT_LIST_HEAD(&dpa->dpa_processes);
+	mutex_init(&dpa->dpa_processes_lock);
 
 	// init drm
 	err = drm_dev_register(ddev, id->driver_data);
@@ -633,13 +657,13 @@ static const struct drm_driver dpa_drm_driver = {
 
 static const struct drm_driver dpa_drm_driver;
 
-static void dpa_release_process(struct kref *ref)
+void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);
 	int i;
+	mutex_lock(&dpa->dpa_processes_lock);
 
-	mutex_lock(&dpa_processes_lock);
 	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
@@ -653,9 +677,9 @@ static void dpa_release_process(struct kref *ref)
 	if (p->sva)
 		iommu_sva_unbind_device(p->sva);
 	list_del(&p->dpa_process_list);
-	dpa_process_count--;
+	dpa->dpa_process_count--;
 	devm_kfree(p->dev->dev, p);
-	mutex_unlock(&dpa_processes_lock);
+	mutex_unlock(&dpa->dpa_processes_lock);
 }
 
 static void dpa_pci_remove(struct pci_dev *pdev)
@@ -693,8 +717,6 @@ static int __init dpa_init(void)
 		pr_err("Error creating DPA class: %d\n", ret);
 		return ret;
 	}
-	INIT_LIST_HEAD(&dpa_processes);
-	mutex_init(&dpa_processes_lock);
 
 	return pci_register_driver(&dpa_pci_driver);
 }

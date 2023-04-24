@@ -102,8 +102,13 @@ struct dpa_device {
 	void __iomem *regs;
 
 	int base_irq;
-	wait_queue_head_t wq;
 
+	/* List of active DPA processes */
+	struct mutex dpa_processes_lock;
+	struct list_head dpa_processes;
+	unsigned int dpa_process_count;
+
+	wait_queue_head_t wq;
 	struct dpa_fwq_info qinfo;
 };
 
@@ -170,7 +175,10 @@ static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 /* Size of a doorbell page */
 #define DPA_DOORBELL_PAGE_SIZE (PAGE_SIZE)
 
+struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm);
+struct dpa_process *dpa_get_process_by_pasid(u32 pasid);
 irqreturn_t handle_daffy(int irq, void *dpa_dev);
+void dpa_release_process(struct kref *ref);
 
 /* offsets to MMAP calls for different things */
 #define DRM_MMAP_TYPE_SHIFT (60)
