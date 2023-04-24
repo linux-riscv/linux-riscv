@@ -7,20 +7,19 @@
 #ifndef __DRM_DPA_H__
 #define __DRM_DPA_H__
 
-#include <drm/drm.h>
-#include <linux/ioctl.h>
+#include "drm.h"
 
-#define DRM_DPA_GET_INFO						0x1
+#define DRM_DPA_GET_INFO					0x1
 #define DRM_DPA_CREATE_QUEUE					0x2
 #define DRM_DPA_DESTROY_QUEUE					0x3
 #define DRM_DPA_UPDATE_QUEUE					0x4
 #define DRM_DPA_ALLOC_MEMORY_OF_GPU				0x5
 #define DRM_DPA_FREE_MEMORY_OF_GPU				0x6
 #define DRM_DPA_CREATE_SIGNAL_PAGES				0x7
-#define DRM_DPA_WAIT_SIGNAL						0x8
+#define DRM_DPA_WAIT_SIGNAL					0x8
 
 #define DPA_IOCTL(dir, name, str) \
-DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
+	DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
 
 struct drm_dpa_get_info {
 	__u32 pe_grid_dim_x;
