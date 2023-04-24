@@ -153,9 +153,6 @@ package-deb:
     # clean up pre-built binaries from the rivos-sdk
     - rm -rf "${INSTALL_PATH}"
     - if [[ -z "$TEST_ONLY" ]]; then tar -C/ -xzf linux_defconfig.tar.gz; fi
-    - tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
-    - if [[ "$TEST_KASAN" == "yes" ]]; then tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz; fi
-    - if [[ "$TEST_KASAN" == "yes" ]]; then tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz; fi
 
 sdk-linux-ubuntu-test:
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
