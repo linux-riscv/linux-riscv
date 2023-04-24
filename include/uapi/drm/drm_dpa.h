@@ -30,17 +30,17 @@ struct drm_dpa_create_queue {
 	__u64 ring_base_address;	/* to DPA */
 	__u64 write_pointer_address;	/* from DPA */
 	__u64 read_pointer_address;	/* from DPA */
-	__u64 doorbell_offset;	/* from DPA */
+	__u64 doorbell_offset;		/* from DPA */
 
 	__u32 ring_size;		/* to DPA */
-	__u32 gpu_id;		/* to DPA */
+	__u32 gpu_id;			/* to DPA */
 	__u32 queue_type;		/* to DPA */
-	__u32 queue_percentage;	/* to DPA */
-	__u32 queue_priority;	/* to DPA */
-	__u32 queue_id;		/* from DPA */
+	__u32 queue_percentage;		/* to DPA */
+	__u32 queue_priority;		/* to DPA */
+	__u32 queue_id;			/* from DPA */
 
 	__u64 eop_buffer_address;	/* to DPA */
-	__u64 eop_buffer_size;	/* to DPA */
+	__u64 eop_buffer_size;		/* to DPA */
 	__u64 ctx_save_restore_address; /* to DPA */
 	__u32 ctx_save_restore_size;	/* to DPA */
 	__u32 ctl_stack_size;		/* to DPA */
@@ -54,10 +54,10 @@ struct drm_dpa_destroy_queue {
 struct drm_dpa_update_queue {
 	__u64 ring_base_address;	/* to DPA */
 
-	__u32 queue_id;		/* to DPA */
+	__u32 queue_id;			/* to DPA */
 	__u32 ring_size;		/* to DPA */
-	__u32 queue_percentage;	/* to DPA */
-	__u32 queue_priority;	/* to DPA */
+	__u32 queue_percentage;		/* to DPA */
+	__u32 queue_priority;		/* to DPA */
 };
 
 struct drm_dpa_alloc_memory_of_gpu {
