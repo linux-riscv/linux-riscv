@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/property.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 
 #include "base.h"
 
@@ -21,6 +22,7 @@ struct swnode {
 
 	/* hierarchy */
 	struct ida child_ids;
+	struct list_head early;
 	struct list_head entry;
 	struct list_head children;
 	struct swnode *parent;
@@ -31,6 +33,9 @@ struct swnode {
 
 static DEFINE_IDA(swnode_root_ids);
 static struct kset *swnode_kset;
+
+static DEFINE_SPINLOCK(swnode_early_lock);
+static LIST_HEAD(swnode_early_list);
 
 #define kobj_to_swnode(_kobj_) container_of(_kobj_, struct swnode, kobj)
 
@@ -72,6 +77,17 @@ software_node_to_swnode(const struct software_node *node)
 
 	if (!node)
 		return NULL;
+
+	spin_lock(&swnode_early_lock);
+
+	list_for_each_entry(swnode, &swnode_early_list, early) {
+		if (swnode->node == node) {
+			spin_unlock(&swnode_early_lock);
+			return swnode;
+		}
+	}
+
+	spin_unlock(&swnode_early_lock);
 
 	spin_lock(&swnode_kset->list_lock);
 
@@ -698,6 +714,19 @@ software_node_find_by_name(const struct software_node *parent, const char *name)
 	if (!name)
 		return NULL;
 
+	spin_lock(&swnode_early_lock);
+
+	list_for_each_entry(swnode, &swnode_early_list, early) {
+		if (parent == swnode->node->parent && swnode->node->name &&
+		    !strcmp(name, swnode->node->name)) {
+			kobject_get(&swnode->kobj);
+			spin_unlock(&swnode_early_lock);
+			return swnode->node;
+		}
+	}
+
+	spin_unlock(&swnode_early_lock);
+
 	spin_lock(&swnode_kset->list_lock);
 
 	list_for_each_entry(k, &swnode_kset->list, entry) {
@@ -760,6 +789,10 @@ static void software_node_release(struct kobject *kobj)
 	kfree(swnode);
 }
 
+static const struct kobj_type software_node_type_early = {
+	.release = software_node_release
+};
+
 static const struct kobj_type software_node_type = {
 	.release = software_node_release,
 	.sysfs_ops = &kobj_sysfs_ops,
@@ -767,7 +800,7 @@ static const struct kobj_type software_node_type = {
 
 static struct fwnode_handle *
 swnode_register(const struct software_node *node, struct swnode *parent,
-		unsigned int allocated)
+		unsigned int allocated, unsigned int early)
 {
 	struct swnode *swnode;
 	int ret;
@@ -786,21 +819,36 @@ swnode_register(const struct software_node *node, struct swnode *parent,
 	swnode->id = ret;
 	swnode->node = node;
 	swnode->parent = parent;
-	swnode->kobj.kset = swnode_kset;
+	swnode->kobj.kset = (!early) ? swnode_kset : NULL;
 	fwnode_init(&swnode->fwnode, &software_node_ops);
 
 	ida_init(&swnode->child_ids);
+	INIT_LIST_HEAD(&swnode->early);
 	INIT_LIST_HEAD(&swnode->entry);
 	INIT_LIST_HEAD(&swnode->children);
 
-	if (node->name)
-		ret = kobject_init_and_add(&swnode->kobj, &software_node_type,
-					   parent ? &parent->kobj : NULL,
-					   "%s", node->name);
-	else
-		ret = kobject_init_and_add(&swnode->kobj, &software_node_type,
-					   parent ? &parent->kobj : NULL,
-					   "node%d", swnode->id);
+	if (early) {
+		ret = 0;
+		kobject_init(&swnode->kobj, &software_node_type_early);
+		swnode->kobj.parent = parent ? &parent->kobj : NULL;
+		if (node->name)
+			ret = kobject_set_name(&swnode->kobj,
+						"%s", node->name);
+		else
+			ret = kobject_set_name(&swnode->kobj,
+						"node%d", swnode->id);
+		if (!ret)
+			list_add_tail(&swnode->early, &swnode_early_list);
+	} else {
+		if (node->name)
+			ret = kobject_init_and_add(&swnode->kobj, &software_node_type,
+						   parent ? &parent->kobj : NULL,
+						   "%s", node->name);
+		else
+			ret = kobject_init_and_add(&swnode->kobj, &software_node_type,
+						   parent ? &parent->kobj : NULL,
+						   "node%d", swnode->id);
+	}
 	if (ret) {
 		kobject_put(&swnode->kobj);
 		return ERR_PTR(ret);
@@ -815,7 +863,8 @@ swnode_register(const struct software_node *node, struct swnode *parent,
 	if (parent)
 		list_add_tail(&swnode->entry, &parent->children);
 
-	kobject_uevent(&swnode->kobj, KOBJ_ADD);
+	if (!early)
+		kobject_uevent(&swnode->kobj, KOBJ_ADD);
 	return &swnode->fwnode;
 }
 
@@ -892,7 +941,7 @@ int software_node_register(const struct software_node *node)
 	if (node->parent && !parent)
 		return -EINVAL;
 
-	return PTR_ERR_OR_ZERO(swnode_register(node, parent, 0));
+	return PTR_ERR_OR_ZERO(swnode_register(node, parent, 0, 0));
 }
 EXPORT_SYMBOL_GPL(software_node_register);
 
@@ -910,9 +959,10 @@ void software_node_unregister(const struct software_node *node)
 }
 EXPORT_SYMBOL_GPL(software_node_unregister);
 
-struct fwnode_handle *
-fwnode_create_software_node(const struct property_entry *properties,
-			    const struct fwnode_handle *parent)
+static struct fwnode_handle *
+fwnode_create_software_node_common(const struct property_entry *properties,
+				   const struct fwnode_handle *parent,
+				   bool early)
 {
 	struct fwnode_handle *fwnode;
 	struct software_node *node;
@@ -931,11 +981,25 @@ fwnode_create_software_node(const struct property_entry *properties,
 
 	node->parent = p ? p->node : NULL;
 
-	fwnode = swnode_register(node, p, 1);
+	fwnode = swnode_register(node, p, 1, early);
 	if (IS_ERR(fwnode))
 		software_node_free(node);
 
 	return fwnode;
+}
+
+struct fwnode_handle *
+fwnode_create_software_node_early(const struct property_entry *properties,
+				  const struct fwnode_handle *parent)
+{
+	return fwnode_create_software_node_common(properties, parent, true);
+}
+
+struct fwnode_handle *
+fwnode_create_software_node(const struct property_entry *properties,
+			    const struct fwnode_handle *parent)
+{
+	return fwnode_create_software_node_common(properties, parent, false);
 }
 EXPORT_SYMBOL_GPL(fwnode_create_software_node);
 
