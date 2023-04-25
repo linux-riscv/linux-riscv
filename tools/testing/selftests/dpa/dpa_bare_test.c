@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <drm/drm.h>
 #include <drm_dpa.h>
 
 #define LITTLEENDIAN_CPU
