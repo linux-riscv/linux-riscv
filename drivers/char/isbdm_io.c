@@ -227,6 +227,11 @@ ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size)
 	size_t this_size;
 
 	mutex_lock(&ii->tx_ring.lock);
+	if (ii->link_status == ISBDM_LINK_DOWN) {
+		rc = -ENOTCONN;
+		goto out;
+	}
+
 	/* The first iteration has a header on it. */
 	buf = get_buf(ii, &ii->tx_ring);
 	if (!buf) {
@@ -517,8 +522,8 @@ static enum isbdm_wc_status isbdm_map_hw_status(uint32_t status)
 }
 
 /* Called when a completed command descriptor is reaped out of the hw table. */
-void isbdm_complete_cmd(struct isbdm *ii, struct isbdm_command *command,
-			uint32_t status)
+void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
+			     uint32_t status)
 {
 	enum isbdm_wc_status wc_status = isbdm_map_hw_status(status);
 	struct isbdm_qp *qp = command->qp;
@@ -866,7 +871,9 @@ next_wqe:
 		case ISBDM_OP_READ_LOCAL_INV:
 		case ISBDM_OP_COMP_AND_SWAP:
 		case ISBDM_OP_FETCH_AND_ADD:
-			/* Dereferencing happens in isbdm_complete_cmd(). */
+			/*
+			 * Dereferencing happens in isbdm_complete_rdma_cmd().
+			 */
 			break;
 
 		case ISBDM_OP_READ_RESPONSE:
