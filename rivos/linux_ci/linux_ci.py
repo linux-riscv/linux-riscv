@@ -35,6 +35,9 @@ def parse_args():
     parser.add_argument("--versions", default = "",
             help = 'Comma-separated list of kernel versions to test (ubuntu_defconfig, ubuntu_kasan_inline_defconfig, ubuntu_kasan_outline_defconfig)')
 
+    parser.add_argument("--satp-valid", action = 'store_true',
+            help = 'Launch the tests on all satp modes (sv39, sv48, sv57)')
+
     parser.add_argument("--long-valid", action = 'store_true',
             help = 'Launch the long validation (LTP and other long testsuites): by default, only a short validation is done')
 
@@ -205,7 +208,7 @@ if __name__ == "__main__":
             if not args.no_kernel_install:
                 launch_vm_and_execute_userspace_fn(userspace_install_kernel, version)
 
-            if args.long_valid:
+            if args.satp_valid:
                 for satp_mode in satp_mode_list:
                     launch_vm_and_execute_userspace_fn(validate_fn[version], version, satp_mode)
             else:

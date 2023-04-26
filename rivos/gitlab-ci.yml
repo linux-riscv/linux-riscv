@@ -174,7 +174,13 @@ sdk-linux-ubuntu-test:
     - apt update
     - pip install fabric
     - cd rivos/linux_ci
-    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_defconfig 2>&1 | tee -a -i ubuntu_output
+    - |
+        if [[ "$TEST_SATP" == "yes" ]]; then
+          qemu_valid_option=" --satp-valid"
+        else
+          qemu_valid_option=""
+        fi
+        timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_defconfig $qemu_valid_option 2>&1 | tee -a -i ubuntu_output
   timeout: 60min
   artifacts:
     when: always
@@ -198,7 +204,13 @@ sdk-linux-ubuntu-kasan-inline-test:
     - apt update
     - pip install fabric
     - cd rivos/linux_ci
-    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_inline_defconfig 2>&1 | tee -a -i ubuntu_kasan_inline_output
+    - |
+        if [[ "$TEST_SATP" == "yes" ]]; then
+          qemu_valid_option=" --satp-valid"
+        else
+          qemu_valid_option=""
+        fi
+        timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_inline_defconfig $qemu_valid_option 2>&1 | tee -a -i ubuntu_kasan_inline_output
   timeout: 60min
   artifacts:
     when: always
@@ -221,7 +233,13 @@ sdk-linux-ubuntu-kasan-outline-test:
     - apt update
     - pip install fabric
     - cd rivos/linux_ci
-    - timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_outline_defconfig 2>&1 | tee -a -i ubuntu_kasan_outline_output
+    - |
+        if [[ "$TEST_SATP" == "yes" ]]; then
+          qemu_valid_option=" --satp-valid"
+        else
+          qemu_valid_option=""
+        fi
+        timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_outline_defconfig $qemu_valid_option 2>&1 | tee -a -i ubuntu_kasan_outline_output
   timeout: 60min
   artifacts:
     when: always
