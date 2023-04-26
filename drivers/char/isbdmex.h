@@ -324,6 +324,38 @@ struct isbdm_packet_header {
  */
 #define ISBDM_DESC_SW_POISON 0x10000000
 
+/* Offsets within the DVSEC */
+#define ISBDM_DVSEC_VENLENREV_OFFSET 0x4
+#define ISBDM_DVSEC_ID_OFFSET 0x8
+#define ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET 0x94
+
+/* DVSEC Vendor ID, length, and revision fields. */
+#define ISBDM_DVSEC_LENGTH 0x1A4
+#define ISBDM_DVSEC_REV 1
+#define ISBDM_DVSEC_VENDOR 0x1EFD
+
+/* DVSEC Identifier */
+#define ISBDM_DVSEC_ID 0x7
+
+/* PCI Link Control 2 and Link Status 2 offset */
+#define ISBDM_DVSEC_LINK_CONTROL_STATUS2 \
+    (ISBDM_DVSEC_OFFSET + ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET)
+
+/* Define the PCIe control/status 2 register bits, proxied through via DVSEC. */
+/* Crosslink Resolution */
+#define PCIE_CTRL_STS2_CROSSLINK_MASK (0x3 << 24)
+#define PCIE_CTRL_STS2_CROSSLINK_UPSTREAM (0x1 << 24)
+#define PCIE_CTRL_STS2_CROSSLINK_DOWNSTREAM (0x2 << 24)
+#define PCIE_CTRL_STS2_CROSSLINK_NOT_COMPLETED (0x3 << 24)
+
+/* Downstream Component Presence */
+#define PCIE_CTRL_STS2_DWNSTRM_PRS_MASK (0x7 << 28)
+#define PCIE_CTRL_STS2_DWNSTRM_DOWN_UNDETERMINED (0x0 << 28)
+#define PCIE_CTRL_STS2_DWNSTRM_DOWN_NOT_PRESENT (0x1 << 28)
+#define PCIE_CTRL_STS2_DWNSTRM_DOWN_PRESENT (0x2 << 28)
+#define PCIE_CTRL_STS2_DWNSTRM_UP_PRESENT (0x4 << 28)
+#define PCIE_CTRL_STS2_DWNSTRM_UP_PRESENT_DRS (0x5 << 28)
+
 /* ioctls for the isbdmex device */
 #define IOCTL_SET_IPMR		_IO('3', 1)	/* ORs in IPMR bits. */
 #define IOCTL_CLEAR_IPMR	_IO('3', 2)	/* ANDs out IPMR bits. */
@@ -427,6 +459,12 @@ struct isbdm_command {
 
 struct isbdm_device;
 
+enum isbdm_link_status {
+	ISBDM_LINK_DOWN,
+	ISBDM_LINK_UPSTREAM,
+	ISBDM_LINK_DOWNSTREAM
+};
+
 /* Per-instance hardware info */
 struct isbdm {
 	struct pci_dev 		*pdev;
@@ -475,6 +513,10 @@ struct isbdm {
 
 	/* Pointer to the device structure tracking all the rdma entries. */
 	struct isbdm_device *ib_device;
+
+	/* Offset of the ISBDM DVSEC capability. */
+	u16 dvsec_cap;
+	enum isbdm_link_status link_status;
 };
 
 /* Drivers support routines */
@@ -493,7 +535,6 @@ void isbdm_reap_tx(struct isbdm *ii);
 void isbdm_reap_cmds(struct isbdm *ii);
 int isbdm_init_hw(struct isbdm *ii);
 void isbdm_deinit_hw(struct isbdm *ii);
-void isbdm_enable(struct isbdm *ii);
 void isbdm_disable(struct isbdm *ii);
 void isbdm_hw_reset(struct isbdm *ii);
 ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size);
@@ -512,6 +553,8 @@ void isbdm_process_rx_done(struct isbdm *ii);
 void isbdm_rx_overflow(struct isbdm *ii);
 ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size);
 void isbdm_rx_threshold(struct isbdm *ii);
+void isbdm_start(struct isbdm *ii);
+void isbdm_process_link_status_change(struct isbdm *ii);
 
 /* Hardware routines for test. */
 u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
@@ -519,8 +562,8 @@ u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
 
-void isbdm_complete_cmd(struct isbdm *ii, struct isbdm_command *command,
-			uint32_t status);
+void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
+			     uint32_t status);
 
 void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 			     struct isbdm_buf *end);
