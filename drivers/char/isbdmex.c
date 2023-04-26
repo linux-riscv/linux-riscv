@@ -102,12 +102,16 @@ static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 	u64 pending = atomic64_xchg(&ii->pending_irqs, 0);
 	u64 handled = ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ | ISBDM_TXDONE_IRQ |
 		      ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXDONE_IRQ |
-		      ISBDM_IPSR_IIP | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
+		      ISBDM_IPSR_IIP | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ |
+		      ISBDM_LNKSTS_IRQ;
 
 	if (pending & (ISBDM_TXMF_IRQ | ISBDM_RXMF_IRQ)) {
 		dev_err(&ii->pdev->dev, "memory fault %llx\n", pending);
 		/* TODO: Actually do something about TXMF (flush ring?) */
 	}
+
+	if (pending & ISBDM_LNKSTS_IRQ)
+		isbdm_process_link_status_change(ii);
 
 	if (pending & ISBDM_RXOVF_IRQ)
 		isbdm_rx_overflow(ii);
@@ -324,7 +328,9 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 
 	do {
 		done = wait_event_interruptible_timeout(ii->read_wait_queue,
-					!list_empty(&ii->rx_ring.wait_list), 5 * HZ);
+					!list_empty(&ii->rx_ring.wait_list) ||
+					(ii->link_status == ISBDM_LINK_DOWN),
+					5 * HZ);
 
 		// if (done)
 		// 	break;
@@ -405,9 +411,17 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ii->base = pcim_iomap_table(pdev)[BAR_0];
+	ii->dvsec_cap = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_RIVOS,
+						  ISBDM_DVSEC_ID);
+
+	if (!ii->dvsec_cap) {
+		ret = -ENODEV;
+		dev_err_probe(dev, ret, "Failed to find ISBDM DVSEC\n");
+		return ret;
+	}
 
 	isbdm_hw_reset(ii);
-	ii->irq_mask = -1ULL;
+	ii->irq_mask = ~ISBDM_IPSR_IIP;
 	init_waitqueue_head(&ii->read_wait_queue);
 	ret = isbdm_init_hw(ii);
 	if (ret) {
@@ -448,7 +462,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev_info(dev, "isbdm%d at %px, irq %d\n", ii->instance, ii->base, ii->irq);
 
 	/* Get the hardware running! */
-	isbdm_enable(ii);
+	isbdm_start(ii);
 
 	/* Register a misc device */
 	ii->misc.minor = MISC_DYNAMIC_MINOR;
