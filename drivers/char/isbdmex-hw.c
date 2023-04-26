@@ -234,6 +234,7 @@ static void isbdm_rx_refill(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->rx_ring;
 	u32 mask = ring->size - 1;
+	u32 count = 0;
 
 	WARN_ON_ONCE(!mutex_is_locked(&ring->lock));
 	WARN_ON_ONCE(ring->cons_idx & ~mask);
@@ -254,8 +255,10 @@ static void isbdm_rx_refill(struct isbdm *ii)
 		desc->length = 0;
 		list_add_tail(&buf->node, &ring->inflight_list);
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
+		count++;
 	}
 
+	dev_dbg(&ii->pdev->dev, "%s: Added %u descriptors\n", __func__, count);
 	/* Let hardware know about all the yummy buffers. */
 	ISBDM_WRITEL(ii, ISBDM_RX_RING_TAIL, ring->prod_idx);
 	return;
@@ -391,9 +394,6 @@ static int init_rx_ring(struct isbdm *ii)
 	if (rc)
 		return rc;
 
-	mutex_lock(&ii->rx_ring.lock);
-	isbdm_rx_refill(ii);
-	mutex_unlock(&ii->rx_ring.lock);
 	/* Set up the size of all RX buffers. */
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_BASE, base);
 	ctrl = ISBDM_READQ(ii, ISBDM_RX_RING_CTRL);
@@ -456,7 +456,12 @@ static void enable_tx_ring(struct isbdm *ii)
 {
 	u64 ctrl = ISBDM_READQ(ii, ISBDM_TX_RING_CTRL);
 
+	/* HW only does a head/tail reset on a rising edge of ENABLE. */
+	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
+
 	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ii->tx_ring.prod_idx = 0;
+	ii->tx_ring.cons_idx = 0;
 	ISBDM_WRITEQ(ii, ISBDM_TX_RING_CTRL, ctrl);
 	return;
 }
@@ -465,7 +470,12 @@ static void enable_rx_ring(struct isbdm *ii)
 {
 	u64 ctrl = ISBDM_READQ(ii, ISBDM_RX_RING_CTRL);
 
+	/* HW only does a head/tail reset on a rising edge of ENABLE. */
+	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
+
 	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ii->rx_ring.cons_idx = 0;
+	ii->rx_ring.prod_idx = 0;
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_CTRL, ctrl);
 	return;
 }
@@ -474,9 +484,17 @@ static void enable_cmd_ring(struct isbdm *ii)
 {
 	u64 ctrl = ISBDM_READQ(ii, ISBDM_CMD_RING_CTRL);
 
+	/* HW only does a head/tail reset on a rising edge of ENABLE. */
+	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
+
 	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ii->cmd_ring.cons_idx = 0;
+	ii->cmd_ring.prod_idx = 0;
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_CTRL, ctrl);
 	ctrl = ISBDM_READQ(ii, ISBDM_RMBA_CTRL);
+
+	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
+
 	ctrl |= ISBDM_RING_CTRL_ENABLE;
 	ISBDM_WRITEQ(ii, ISBDM_RMBA_CTRL, ctrl);
 	return;
@@ -520,15 +538,25 @@ static void disable_cmd_ring(struct isbdm *ii)
 
 static void enable_interrupt(struct isbdm *ii, u64 mask)
 {
-	ii->irq_mask &= ~mask;
-	ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	u64 new_mask = ii->irq_mask & ~mask;
+
+	if (ii->irq_mask != new_mask) {
+		ii->irq_mask &= ~mask;
+		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	}
+
 	return;
 }
 
 static void disable_interrupt(struct isbdm *ii, u64 mask)
 {
-	ii->irq_mask |= mask;
-	ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	u64 new_mask = ii->irq_mask | mask;
+
+	if (ii->irq_mask != new_mask) {
+		ii->irq_mask |= mask;
+		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	}
+
 	return;
 }
 
@@ -668,6 +696,39 @@ void isbdm_reap_tx(struct isbdm *ii)
 	return;
 }
 
+/* Handle a single completed command. */
+static void isbdm_complete_cmd(struct isbdm *ii, struct isbdm_command *command,
+			       u32 status)
+{
+	struct isbdm_user_ctx *user_ctx = command->user_ctx;
+
+	if (user_ctx) {
+		/* Shuttle the notify result back to the file context. */
+		if ((status != ISBDM_STATUS_SUCCESS) &&
+		    (user_ctx->last_error.error == ISBDM_STATUS_SUCCESS)) {
+
+			user_ctx->last_error.error = status;
+
+			/*
+			 * Ensure the error gets out before decrementing
+			 * inflight command count.
+			 */
+			smp_wmb();
+		}
+
+		WARN_ON_ONCE(!user_ctx->last_error.inflight_commands);
+
+		user_ctx->last_error.inflight_commands--;
+		kref_put(&user_ctx->ref, isbdmex_user_ctx_release);
+		command->user_ctx = NULL;
+
+	} else {
+		isbdm_complete_rdma_cmd(ii, command, status);
+	}
+
+	list_add(&command->node, &ii->cmd_ring.free_list);
+}
+
 /* Process and release commands that the hardware has completed. */
 void isbdm_reap_cmds(struct isbdm *ii)
 {
@@ -689,7 +750,6 @@ void isbdm_reap_cmds(struct isbdm *ii)
 
 	while (ring->cons_idx != hw_next) {
 		struct isbdm_command *command;
-		struct isbdm_user_ctx *user_ctx;
 		u64 size_pasid_flags;
 		u32 status = ISBDM_STATUS_SUCCESS;
 
@@ -715,35 +775,7 @@ void isbdm_reap_cmds(struct isbdm *ii)
 		if (size_pasid_flags & ISBDM_RDMA_NV)
 			status = ii->notify_area[command->desc_idx];
 
-		user_ctx = command->user_ctx;
-		if (user_ctx) {
-			/*
-			 * Shuttle the notify result back to the file context.
-			 */
-			if ((status != ISBDM_STATUS_SUCCESS) &&
-			    (user_ctx->last_error.error ==
-			     ISBDM_STATUS_SUCCESS)) {
-
-				user_ctx->last_error.error = status;
-
-				/*
-				 * Ensure the error gets out before decrementing
-				 * inflight command count.
-				 */
-				smp_wmb();
-			}
-
-			WARN_ON_ONCE(!user_ctx->last_error.inflight_commands);
-
-			user_ctx->last_error.inflight_commands--;
-			kref_put(&user_ctx->ref, isbdmex_user_ctx_release);
-			command->user_ctx = NULL;
-
-		} else {
-			isbdm_complete_cmd(ii, command, status);
-		}
-
-		list_add(&command->node, &ring->free_list);
+		isbdm_complete_cmd(ii, command, status);
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
 	}
 
@@ -785,23 +817,25 @@ void isbdm_deinit_hw(struct isbdm *ii)
 	return;
 }
 
-void isbdm_enable(struct isbdm *ii)
+static void isbdm_enable(struct isbdm *ii)
 {
 	u64 mask = ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
 		   ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXMF_IRQ |
 		   ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
 
-	enable_interrupt(ii, ISBDM_LNKSTS_IRQ);
+	/* Clear out any old interrupts (except LNKSTS, we want that). */
+	ISBDM_WRITEQ(ii, ISBDM_IPSR, mask);
 	enable_tx_ring(ii);
 	enable_cmd_ring(ii);
 	enable_rx_ring(ii);
-	enable_interrupt(ii, mask);
+	enable_interrupt(ii, mask | ISBDM_LNKSTS_IRQ);
 	return;
 }
 
 void isbdm_disable(struct isbdm *ii)
 {
-	disable_interrupt(ii, ISBDM_ALL_IRQ_MASK);
+	/* Disable all interrupts except LNKSTS. */
+	disable_interrupt(ii, (ISBDM_ALL_IRQ_MASK & ~ISBDM_LNKSTS_IRQ));
 	disable_rx_ring(ii);
 	disable_cmd_ring(ii);
 	disable_tx_ring(ii);
@@ -836,6 +870,11 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 	}
 
 	mutex_lock(&ii->cmd_ring.lock);
+	if (ii->link_status == ISBDM_LINK_DOWN) {
+		rc = -ENOTCONN;
+		goto out;
+	}
+
 	command = get_cmd(ii, &ii->cmd_ring);
 	if (!command) {
 		rc = -ENOMEM;
@@ -1137,6 +1176,281 @@ void isbdm_rx_threshold(struct isbdm *ii)
 	mutex_unlock(&ii->rx_ring.lock);
 }
 
+/* Attempt to bring up the ISBDM link. */
+static void isbdm_connect(struct isbdm *ii)
+{
+	isbdm_enable(ii);
+	/* Refill RX since it was drained on disconnect. */
+	isbdm_rx_threshold(ii);
+}
+
+/* Cancel and flush all pending TX transfers. */
+static void isbdm_abort_tx(struct isbdm *ii)
+{
+	struct isbdm_ring *ring = &ii->tx_ring;
+	u32 mask = ring->size - 1;
+	struct isbdm_buf *buf, *tmp;
+	u32 end_idx;
+	u32 count = 0;
+
+	mutex_lock(&ring->lock);
+	end_idx = ring->prod_idx;
+
+	WARN_ON_ONCE((ring->cons_idx | ring->prod_idx) & ~mask);
+
+	while (ring->cons_idx != end_idx) {
+		if (list_empty(&ring->inflight_list)) {
+			dev_err(&ii->pdev->dev, "TX inflight underflow");
+			break;
+		}
+
+		buf = list_first_entry(&ring->inflight_list,
+				       struct isbdm_buf, node);
+
+		if (buf->desc_idx != ring->cons_idx) {
+			dev_err(&ii->pdev->dev,
+				"Reaping wrong TX descriptor: %u != list %u\n",
+				ring->cons_idx,
+				buf->desc_idx);
+		}
+
+		list_del(&buf->node);
+		list_add(&buf->node, &ring->free_list);
+		ring->cons_idx = (ring->cons_idx + 1) & mask;
+		count++;
+	}
+
+	if (!list_empty(&ring->inflight_list)) {
+		dev_err(&ii->pdev->dev,
+			"Reaped %u TX descriptors, but inflight list leaked.\n",
+			count);
+
+		INIT_LIST_HEAD(&ring->inflight_list);
+	}
+
+	/* Also discard any TX packets that didn't make it into hardware. */
+	list_for_each_entry_safe(buf, tmp, &ring->wait_list, node) {
+		put_buf(ii, ring, buf);
+		count++;
+	}
+
+	if (count)
+		dev_info(&ii->pdev->dev, "Dropped %u TX packets\n", count);
+
+	mutex_unlock(&ring->lock);
+	return;
+}
+
+/* Remove all RX descriptors from the ring */
+static void isbdm_abort_rx(struct isbdm *ii)
+{
+	struct isbdm_ring *ring = &ii->rx_ring;
+	struct isbdm_buf *buf, *tmp;
+	u32 end_idx;
+	u32 count = 0;
+	u32 mask = ring->size - 1;
+
+	mutex_lock(&ring->lock);
+	end_idx = ring->prod_idx;
+
+	WARN_ON_ONCE((ring->cons_idx | ring->prod_idx) & ~mask);
+
+	while (ring->cons_idx != end_idx) {
+		struct isbdm_descriptor *desc = &ring->descs[ring->cons_idx];
+
+		if (list_empty(&ring->inflight_list)) {
+			dev_err(&ii->pdev->dev, "RX inflight underflow");
+			break;
+		}
+
+		buf = list_first_entry(&ring->inflight_list,
+				       struct isbdm_buf, node);
+
+		if ((buf->desc_idx != ring->cons_idx) ||
+		    (buf->physical != le64_to_cpu(desc->iova))) {
+			dev_err(&ii->pdev->dev,
+				"Reaping wrong RX descriptor: %u %llx != list %u %llx\n",
+				ring->cons_idx,
+				le64_to_cpu(desc->iova),
+				buf->desc_idx,
+				buf->physical);
+		}
+
+		list_del(&buf->node);
+		put_buf(ii, ring, buf);
+		ring->cons_idx = (ring->cons_idx + 1) & mask;
+		count++;
+	}
+
+	ii->packet_start = NULL;
+	if (!list_empty(&ring->inflight_list)) {
+		dev_err(&ii->pdev->dev,
+			"Reaped %u RX descriptors, but inflight list leaked.\n",
+			count);
+
+		INIT_LIST_HEAD(&ring->inflight_list);
+	}
+
+	/* Also discard any completed RX packets waiting to be read. */
+	list_for_each_entry_safe(buf, tmp, &ring->wait_list, node) {
+		put_buf(ii, ring, buf);
+		count++;
+	}
+
+	dev_dbg(&ii->pdev->dev, "Reaped %u RX descriptors\n", count);
+	mutex_unlock(&ring->lock);
+
+	/* Let anybody blocked know there's now nothing to get. */
+	wake_up(&ii->read_wait_queue);
+	return;
+}
+
+/* Abort and completing any in-flight or queued RDMA commands. */
+static void isbdm_abort_cmds(struct isbdm *ii)
+{
+	struct isbdm_ring *ring = &ii->cmd_ring;
+	struct isbdm_command *command, *tmp;
+	u32 mask = ring->size - 1;
+	u32 count = 0;
+	u32 end_idx;
+
+	mutex_lock(&ring->lock);
+	end_idx = ring->prod_idx;
+
+	WARN_ON_ONCE((ring->cons_idx | ring->prod_idx) & ~mask);
+
+	while (ring->cons_idx != end_idx) {
+		if (list_empty(&ring->inflight_list)) {
+			dev_err(&ii->pdev->dev, "command inflight underflow");
+			break;
+		}
+
+		command = list_first_entry(&ring->inflight_list,
+					   struct isbdm_command, node);
+
+		if (command->desc_idx != ring->cons_idx) {
+			dev_err(&ii->pdev->dev,
+				"Reaping wrong cmd descriptor: %u != list %u\n",
+				ring->cons_idx,
+				command->desc_idx);
+		}
+
+		list_del(&command->node);
+		isbdm_complete_cmd(ii, command, ISBDM_STATUS_ABORTED);
+		ring->cons_idx = (ring->cons_idx + 1) & mask;
+		count++;
+	}
+
+	if (!list_empty(&ring->inflight_list)) {
+		dev_err(&ii->pdev->dev,
+			"Reaped %u RDMA commands, but inflight list leaked.\n",
+			count);
+
+		INIT_LIST_HEAD(&ring->inflight_list);
+	}
+
+	/* Also discard any commands waiting to make it into the hardware. */
+	list_for_each_entry_safe(command, tmp, &ring->wait_list, node) {
+		isbdm_complete_cmd(ii, command, ISBDM_STATUS_ABORTED);
+		count++;
+	}
+
+	if (count)
+		dev_info(&ii->pdev->dev, "Dropped %u RDMA commands\n", count);
+
+	mutex_unlock(&ring->lock);
+	return;
+}
+
+/*
+ * Tear down the ISBDM communcation channel. Must result in link_status being
+ * set to ISBDM_LINK_DOWN.
+ */
+static void isbdm_disconnect(struct isbdm *ii)
+{
+	if (ii->link_status == ISBDM_LINK_DOWN)
+		return;
+
+	/* Set link down first to keep new things from piling in. */
+	ii->link_status = ISBDM_LINK_DOWN;
+
+	/* Stop the hardware. */
+	isbdm_disable(ii);
+
+	/* Clean up resources for all the in-flight and pending I/O. */
+	isbdm_abort_tx(ii);
+	isbdm_abort_rx(ii);
+	isbdm_abort_cmds(ii);
+}
+
+/* Query the status of the physical link. */
+static enum isbdm_link_status isbdm_query_link(struct isbdm *ii)
+{
+	u32 crosslink;
+	u32 presence;
+	u32 ctrlsts2;
+	int rc;
+
+	rc = pci_read_config_dword(ii->pdev,
+		ii->dvsec_cap + ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET,
+		&ctrlsts2);
+
+	if (rc) {
+		dev_err(&ii->pdev->dev, "Failed to read link status: %d\n", rc);
+		return ISBDM_LINK_DOWN;
+	}
+
+	crosslink = ctrlsts2 & PCIE_CTRL_STS2_CROSSLINK_MASK;
+	if (crosslink == PCIE_CTRL_STS2_CROSSLINK_DOWNSTREAM) {
+		return ISBDM_LINK_DOWNSTREAM;
+
+	} else if (crosslink == PCIE_CTRL_STS2_CROSSLINK_UPSTREAM) {
+		presence = ctrlsts2 & PCIE_CTRL_STS2_DWNSTRM_PRS_MASK;
+		if ((presence == PCIE_CTRL_STS2_DWNSTRM_UP_PRESENT) ||
+		    (presence == PCIE_CTRL_STS2_DWNSTRM_UP_PRESENT_DRS)) {
+
+			return ISBDM_LINK_UPSTREAM;
+		}
+	}
+
+	return ISBDM_LINK_DOWN;
+}
+
+/* Query the status of the physical link and do setup/teardown. */
+static void isbdm_check_link(struct isbdm *ii)
+{
+	enum isbdm_link_status link_status = isbdm_query_link(ii);
+
+	if (ii->link_status == link_status)
+		return;
+
+	WARN_ON_ONCE(link_status == ISBDM_LINK_DOWN);
+
+	ii->link_status = link_status;
+	isbdm_connect(ii);
+}
+
+void isbdm_start(struct isbdm *ii)
+{
+	/* Clear out old interrupts, including LNKSTS. */
+	ISBDM_WRITEQ(ii, ISBDM_IPSR, ISBDM_ALL_IRQ_MASK | ISBDM_IPSR_IIP);
+	/* Enable LNKSTS for connect/disconnects in the future. */
+	enable_interrupt(ii, ISBDM_LNKSTS_IRQ);
+	/* Explicitly check the link now to maybe bring it up. */
+	isbdm_check_link(ii);
+}
+
+/* Handle a link status change interrupt. */
+void isbdm_process_link_status_change(struct isbdm *ii)
+{
+	/*
+	 * Always disconnect things on a LNKSTS change, as even
+	 * connected->connected is treated as a brief disconnect.
+	 */
+	isbdm_disconnect(ii);
+	isbdm_check_link(ii);
+}
+
 /* Read one message from the wait list and into user mode. */
 ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 {
@@ -1147,6 +1461,11 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size)
 	size_t buf_off = sizeof(struct isbdm_packet_header);
 
 	mutex_lock(&ring->lock);
+	if (ii->link_status == ISBDM_LINK_DOWN) {
+		completed = -ENOTCONN;
+		goto out;
+	}
+
 	if (!isbdmex_dequeue_one(ii, &packet_list)) {
 		goto out;
 	}
