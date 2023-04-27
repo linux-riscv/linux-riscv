@@ -29,6 +29,7 @@ config KVM
 	select HAVE_KVM_VCPU_ASYNC_IOCTL
 	select HAVE_KVM_EVENTFD
 	select SRCU
+	select KVM_VFIO
 	help
 	  Support hosting virtualized guest machines.
 
