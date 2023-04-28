@@ -33,6 +33,7 @@ config KVM
 	select MMU_NOTIFIER
 	select PREEMPT_NOTIFIERS
 	select SRCU
+	select KVM_VFIO
 	help
 	  Support hosting virtualized guest machines.
 
