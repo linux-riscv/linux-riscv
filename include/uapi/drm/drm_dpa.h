@@ -86,7 +86,8 @@ struct drm_dpa_wait_signal {
 /* Each signal takes one 64B cacheline */
 struct drm_dpa_signal {
 	__u64 signal_value;
-	__u64 pad[7];
+	__u64 timestamp_us;
+	__u64 pad[6];
 };
 
 #define DPA_DRM_MAX_SIGNAL_PAGES (4)
