@@ -84,69 +84,10 @@ static void alloc_aligned_host_memory(void **ptr, size_t size)
 	memset(ret, 0xff, size);
 }
 
-typedef enum {
-	MMIO,
-	DEVICE,
-	USER,
-	DOORBELL,
-} gpu_memory_t;
-
-static void alloc_memory_of_gpu(void *user_ptr, size_t size, gpu_memory_t gpu_mem_type,
-				uint64_t *mmap_offset, uint64_t *handle)
+static void alloc_gpu_memory(void **ptr, size_t size)
 {
-	struct drm_dpa_alloc_memory_of_gpu args;
-	int ret;
-
-	args.va_addr = (uint64_t)user_ptr;
-	args.size = size;
-	args.mmap_offset = (uint64_t)user_ptr;
-
-	if (gpu_mem_type == USER) {
-		args.flags = DPA_IOC_ALLOC_MEM_FLAGS_USERPTR;
-	} else if (gpu_mem_type == DEVICE) {
-		args.flags = DPA_IOC_ALLOC_MEM_FLAGS_VRAM;
-	} else {
-		fprintf(stderr, "%s: Invalid memory type\n", __func__);
-		exit(1);
-	}
-
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_ALLOC_MEMORY_OF_GPU, &args);
-	if (ret) {
-		perror("ioctl alloc memory of gpu");
-		exit(1);
-	}
-	if (gpu_mem_type == USER)
-		fprintf(stderr, "%s: user_ptr 0x%" PRIx64 " mmap_offset 0x%" PRIx64
-			" handle 0x%" PRIx64 " va 0x%" PRIx64 "\n",
-			__func__, (uint64_t)user_ptr, (uint64_t)args.mmap_offset,
-			(uint64_t)args.handle, (uint64_t)args.va_addr);
-	else
-		fprintf(stderr, "%s: device 0x%" PRIx64 " mmap_offset 0x%" PRIx64
-		" handle 0x%" PRIx64 " va 0x%" PRIx64 "\n",
-		__func__, (uint64_t)user_ptr, (uint64_t)args.mmap_offset,
-		(uint64_t)args.handle, (uint64_t)args.va_addr);
-	if (mmap_offset)
-		*mmap_offset = args.mmap_offset;
-
-	*handle = args.handle;
-}
-
-static void mmap_gpu_obj(int fd, void *user_ptr, size_t size, uint64_t mmap_offset)
-{
-	// this set of flags is good for anything the host needs to access
-	// otherwise it would be PROT_NONE, MAP_PRIVATE | MAP_FIXED
-	void *ret = mmap(user_ptr, size, PROT_READ | PROT_WRITE,
-			 MAP_SHARED | MAP_FIXED, fd, mmap_offset);
-	if (ret == MAP_FAILED) {
-		perror("mmap gpu obj");
-		exit(1);
-	}
-}
-
-static void mmap_dev_mem(void *user_ptr, size_t size, uint64_t mmap_offset)
-{
-	// device memory is mapped through the DRM fd apparently
-	return mmap_gpu_obj(drm_fd, user_ptr, size, mmap_offset);
+	/* TODO: Find the NUMA node of the DPA device and mbind() to it. */
+	alloc_aligned_host_memory(ptr, size);
 }
 
 static struct drm_dpa_signal *get_signal_page()
@@ -323,11 +264,6 @@ int main(int argc, char *argv[])
 	size_t rwptr_size = getpagesize();
 	size_t kernel_size = 0;
 
-	uint64_t queue_mmap_offset = 0;
-	uint64_t queue_handle = 0;
-	uint64_t rwptr_mmap_offset = 0;
-	uint64_t rwptr_handle = 0;
-
 	uint64_t *q_read_ptr;
 	uint64_t *q_write_ptr;
 
@@ -358,16 +294,11 @@ int main(int argc, char *argv[])
 	signal->signal_value = 1;
 
 	// allocate a user buffer for the queue
-	alloc_aligned_host_memory(&queue_ptr, queue_size);
-	alloc_memory_of_gpu(queue_ptr, queue_size, DEVICE, &queue_mmap_offset, &queue_handle);
+	alloc_gpu_memory(&queue_ptr, queue_size);
 	fprintf(stderr, "queue_ptr: 0x%lx\n", (unsigned long)queue_ptr);
-	fprintf(stderr, "queue_mmap_offset: 0x%lx\n", queue_mmap_offset);
-	mmap_dev_mem(queue_ptr, queue_size, queue_mmap_offset);
 
-	alloc_aligned_host_memory(&rw_ptr, rwptr_size);
-	alloc_memory_of_gpu(rw_ptr, rwptr_size, USER, &rwptr_mmap_offset, &rwptr_handle);
+	alloc_gpu_memory(&rw_ptr, rwptr_size);
 	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
-	fprintf(stderr, "rwptr_mmap_offset: 0x%lx\n", rwptr_mmap_offset);
 
 	// set read and write pointers to memory inside the queue space
 	q_read_ptr = rw_ptr;
@@ -386,18 +317,9 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
 	if (kernel_size) {
 		int wait_count = 0;
-		uint64_t kern_mmap_offset = 0;
-		uint64_t kern_handle = 0;
-		uint64_t kd_mmap_offset = 0;
-		uint64_t kd_handle = 0;
 
-		alloc_memory_of_gpu(kern_ptr, kernel_size, USER, &kern_mmap_offset, &kern_handle);
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
-		fprintf(stderr, "kern_mmap_offset: 0x%lx\n", kern_mmap_offset);
-
-		alloc_memory_of_gpu(kd_ptr, getpagesize(), USER, &kd_mmap_offset, &kd_handle);
 		fprintf(stderr, "kern_desc_ptr: 0x%lx\n", (unsigned long)kd_ptr);
-		fprintf(stderr, "kern_desc_mmap_offset: 0x%lx\n", kd_mmap_offset);
 
 		// send an empty barrier packet first to test multiple packets
 		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;

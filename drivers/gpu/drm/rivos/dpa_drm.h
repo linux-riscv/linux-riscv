@@ -25,10 +25,8 @@
 #include <linux/iommu.h>
 #include <linux/wait.h>
 #include <drm/drm.h>
-#include <drm/drm_gem.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
-#include <drm/drm_buddy.h>
 
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
@@ -93,17 +91,11 @@ struct dpa_device {
 	/* big lock for device data structures */
 	struct mutex lock;
 
-	u64 hbm_size;
-	u64 hbm_base;
-	void *hbm_va;
 	/* list of processes using device */
 	//struct list *plist;
 	struct device *dev;
 	struct pci_dev			*pdev;
 	struct drm_device		ddev;
-
-	struct drm_buddy mm;
-	struct mutex mm_lock;
 
 	int drm_minor;
 
@@ -149,9 +141,6 @@ struct dpa_process {
 
 	unsigned int alloc_count;
 
-	// maintain a list of allocations in vram
-	struct list_head buffers;
-
 	// aql queues
 	struct list_head queue_list;
 
@@ -163,26 +152,6 @@ struct dpa_process {
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
 };
-
-// tracks buffers -- especially vram allocations
-struct dpa_drm_buffer {
-	struct list_head process_alloc_list;
-
-	struct drm_gem_object gobj;
-
-	unsigned int id;
-	unsigned int type;
-
-	u64 size;
-	unsigned int page_count;
-	struct page **pages;
-
-	struct list_head blocks;
-
-	struct dpa_process *p;
-};
-
-#define gem_to_dpa_buf(gobj) container_of((gobj), struct dpa_drm_buffer, gobj)
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 {
@@ -206,8 +175,5 @@ irqreturn_t handle_daffy(int irq, void *dpa_dev);
 /* offsets to MMAP calls for different things */
 #define DRM_MMAP_TYPE_SHIFT (60)
 #define DRM_MMAP_TYPE_DOORBELL (0x1ULL)
-
-// temporary until DRM/GEM
-#define DRM_MMAP_TYPE_VRAM (0x0ULL)
 
 #endif /* _DPA_DRM_H_ */

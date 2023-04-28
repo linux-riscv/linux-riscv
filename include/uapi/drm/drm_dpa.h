@@ -13,8 +13,6 @@
 #define DRM_DPA_CREATE_QUEUE					0x2
 #define DRM_DPA_DESTROY_QUEUE					0x3
 #define DRM_DPA_UPDATE_QUEUE					0x4
-#define DRM_DPA_ALLOC_MEMORY_OF_GPU				0x5
-#define DRM_DPA_FREE_MEMORY_OF_GPU				0x6
 #define DRM_DPA_CREATE_SIGNAL_PAGES				0x7
 #define DRM_DPA_WAIT_SIGNAL					0x8
 
@@ -60,23 +58,6 @@ struct drm_dpa_update_queue {
 	__u32 queue_priority;		/* to DPA */
 };
 
-struct drm_dpa_alloc_memory_of_gpu {
-	__u64 va_addr;		/* to DPA */
-	__u64 size;		/* to DPA */
-	__u64 handle;		/* from DPA */
-	__u64 mmap_offset;	/* to DPA (userptr), from DPA (mmap offset) */
-	__u32 gpu_id;		/* to DPA */
-	__u32 flags;
-};
-
-/* Free memory allocated with drm_dpa_alloc_memory_of_gpu
- *
- * @handle: memory handle returned by alloc
- */
-struct drm_dpa_free_memory_of_gpu {
-	__u64 handle;		/* to DPA */
-};
-
 struct drm_dpa_create_signal_pages {
 	__u64 va;	/* in to be passed to mmap, must be page aligned */
 	__u32 size;	/* in multiple of page size */
@@ -96,10 +77,6 @@ struct drm_dpa_wait_signal {
 	DPA_IOCTL(IOWR, DESTROY_QUEUE, destroy_queue)
 #define DRM_IOCTL_DPA_UPDATE_QUEUE \
 	DPA_IOCTL(IOWR, UPDATE_QUEUE, update_queue)
-#define DRM_IOCTL_DPA_ALLOC_MEMORY_OF_GPU \
-	DPA_IOCTL(IOWR, ALLOC_MEMORY_OF_GPU, alloc_memory_of_gpu)
-#define DRM_IOCTL_DPA_FREE_MEMORY_OF_GPU \
-	DPA_IOCTL(IOWR, FREE_MEMORY_OF_GPU, free_memory_of_gpu)
 #define DRM_IOCTL_DPA_CREATE_SIGNAL_PAGES \
 	DPA_IOCTL(IOWR, CREATE_SIGNAL_PAGES, create_signal_pages)
 #define DRM_IOCTL_DPA_WAIT_SIGNAL \
@@ -114,10 +91,6 @@ struct drm_dpa_signal {
 
 #define DPA_DRM_MAX_SIGNAL_PAGES (4)
 #define DPA_DRM_SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct drm_dpa_signal))
-
-/* Allocation flags: memory types */
-#define DPA_IOC_ALLOC_MEM_FLAGS_VRAM		(1 << 0)
-#define DPA_IOC_ALLOC_MEM_FLAGS_USERPTR		(1 << 1)
 
 #define DPA_MAX_QUEUE_PRIORITY		15
 
