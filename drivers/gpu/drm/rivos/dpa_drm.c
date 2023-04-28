@@ -391,7 +391,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device *dev = &pdev->dev;
 	struct device_node *np;
 	struct resource r;
-	int err, vec;
+	int err, vec, nid;
 	u16 vendor, device;
 	u32 version;
 
@@ -442,11 +442,21 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	version = ioread64(dpa->regs + DUC_REGS_FW_VER);
 	dev_warn(dev, "%s: got version %u\n", __func__, version);
 
+	/*
+	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
+	 * then set ourselves to be local to that node. Eventually this will
+	 * be done via ACPI.
+	 */
 	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
 	if (!np) {
 		dev_err(dev, "No HBM node\n");
 		err = -ENODEV;
 		goto free_daffy;
+	}
+	nid = of_node_to_nid(np);
+	if (nid != NUMA_NO_NODE) {
+		dev_info(dev, "HBM on node %d\n", nid);
+		set_dev_node(dev, nid);
 	}
 	err = of_address_to_resource(np, 0, &r);
 	if (err) {
