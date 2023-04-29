@@ -639,6 +639,7 @@ static void riscv_iommu_page_request(struct riscv_iommu_device *iommu,
 	struct iommu_fault_event event = { 0 };
 	struct iommu_fault_page_request *prm = &event.fault.prm;
 	struct riscv_iommu_endpoint *ep;
+	struct device *dev;
 
 	/* Ignore PGR Stop marker. */
 	if ((req->payload & RISCV_IOMMU_PREQ_PAYLOAD_M) == RISCV_IOMMU_PREQ_PAYLOAD_L)
@@ -648,9 +649,11 @@ static void riscv_iommu_page_request(struct riscv_iommu_device *iommu,
 
 	mutex_lock(&iommu->eps_mutex);
 	ep = riscv_iommu_find_ep(iommu, FIELD_GET(RISCV_IOMMU_PREQ_HDR_DID, req->hdr));
-	if (!ep) {
+	dev = ep ? get_device(ep->dev) : NULL;
+	mutex_unlock(&iommu->eps_mutex);
+
+	if (!dev) {
 		/* TODO: Handle invalid page request */
-		mutex_unlock(&iommu->eps_mutex);
 		return;
 	}
 
@@ -671,8 +674,8 @@ static void riscv_iommu_page_request(struct riscv_iommu_device *iommu,
 		prm->pasid = FIELD_GET(RISCV_IOMMU_PREQ_HDR_PID, req->hdr);
 	}
 
-	iommu_report_device_fault(ep->dev, &event);
-	mutex_unlock(&iommu->eps_mutex);
+	iommu_report_device_fault(dev, &event);
+	put_device(dev);
 }
 
 static int riscv_iommu_page_response(struct device *dev,
@@ -1035,6 +1038,10 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 		ep->domid = 0;
 	}
 
+	// probe should allocate DC and set as invalid.
+	// domain attach will only update DC data based on domain type.
+	// MSI IR should also be allocated at probe if MSI IR is supported ?
+
 	dev_info(iommu->dev, "adding device to iommu with devid %i in domain %i\n", ep->devid, ep->domid);
 
 	INIT_LIST_HEAD(&ep->regions);
@@ -1061,6 +1068,8 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 
 	dev_iommu_priv_set(dev, ep);
 
+	riscv_iommu_enable_pci_ep(dev);
+
 	return &iommu->iommu;
 }
 
@@ -1075,6 +1084,8 @@ static void riscv_iommu_release_device(struct device *dev)
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
 	struct riscv_iommu_device *iommu = ep->iommu;
 
+/* TJ: detach device from domain */
+
 	dev_info(dev, "device with devid %i released\n", ep->devid);
 
 	/* Device must be already removed from protection domain */
@@ -1082,7 +1093,8 @@ static void riscv_iommu_release_device(struct device *dev)
 
 	riscv_iommu_disable_pci_ep(dev);
 	ep->dc->tc = 0ULL;
-	// ep->dc->fsc = cpu_to_le64(virt_to_pfn(ep->iommu->zero) | SATP_MODE);
+	wmb();
+	ep->dc->fsc = 0ULL;
 	ep->dc->iohgatp = 0ULL;
 	wmb();
 	riscv_iommu_iodir_inv_devid(iommu, ep->devid);
@@ -1157,10 +1169,8 @@ static struct iommu_domain *riscv_iommu_domain_alloc(unsigned type)
 	if (!domain)
 		return NULL;
 
-	/* based on domain type ?? */
-	domain->domain.ops = &riscv_iommu_domain_ops;
-
 	mutex_init(&domain->lock);
+	domain->domain.ops = &riscv_iommu_domain_ops;
 
 	return &domain->domain;
 }
@@ -1229,6 +1239,10 @@ static int riscv_iommu_domain_finalize(struct riscv_iommu_domain *domain,
 	if (!domain->pgd_root)
 		return -ENOMEM;
 
+	/* TJ: set cfg data based on satp mode & RV32 */
+//	cfg->ias = 57;	// va mode, SvXX -> ias
+//	cfg->oas = 57;	// pa mode, or SvXX+4 -> oas
+
 	if (!alloc_io_pgtable_ops(RISCV_IOMMU, &domain->pgtbl.cfg, domain))
 		return -ENOMEM;
 
@@ -1260,7 +1274,6 @@ static int riscv_iommu_attach_dev(struct iommu_domain *iommu_domain,
 	if (!dc)
 		return -ENOMEM;
 
-	// TODO: add endpoint lock ?
 	mutex_lock(&domain->lock);
 
 	/* allocate root pages, initialize io-pgtable ops, etc. */
@@ -1279,22 +1292,38 @@ static int riscv_iommu_attach_dev(struct iommu_domain *iommu_domain,
 	   S-Stage : only if domain->s_stage. rely on OS not to update S-Stage while G-Stage valid.
 	 */
 	if (domain->g_stage) {
+		/*
+		 * Enable G-Stage translation with initial pass-through mode
+		 * for S-Stage. VMM is responsible for more restrictive
+		 * guest VA translation scheme configuration.
+		 */
 		dc->iohgatp = cpu_to_le64(riscv_iommu_domain_atp(domain));
-		// trace S-Stage
-		dev_info(dev, "IOMMU first-stage: %llx", dc->fsc);
-		dc->fsc = RISCV_IOMMU_DC_FSC_MODE_BARE;	// pass-through for now.
+		dc->fsc = 0ULL; /* RISCV_IOMMU_DC_FSC_MODE_BARE */;
 	} else {
+		/*
+		 * S-Stage translation table does not ammend G-Stage.
+		 */
 		val = FIELD_PREP(RISCV_IOMMU_DC_TA_PSCID, domain->id);
 		dc->ta = cpu_to_le64(val);
 		dc->fsc = cpu_to_le64(riscv_iommu_domain_atp(domain));
-		wmb();
 	}
+	wmb();
 
 	/* Initialize MSI remapping */
 	if (!(ep->iommu->cap & RISCV_IOMMU_CAP_MSI_FLAT))
 		goto skip_msiptp;
 
-	/* FIXME: implement remapping device */
+	/* FIXME: implement remapping device
+
+	this should be done once for endpoint, at first attachement to a domain and or at probe function
+	note for BARE/OFF translation irq_domain has no effect.
+	maybe initial irq_domain should be empty as well?
+	how to pre-allocate large enough MSI window ?
+	 */
+
+	if (domain->msi_root)
+		goto skip_msiptp;
+
 	val = get_zeroed_page(GFP_KERNEL);
 	if (!val) {
 		mutex_unlock(&domain->lock);
@@ -1325,18 +1354,19 @@ static int riscv_iommu_attach_dev(struct iommu_domain *iommu_domain,
 	dc->msi_addr_pattern = cpu_to_le64(RISCV_IMSIC_BASE >> 12);
 
  skip_msiptp:
-	/* Mark device context as valid */
-	wmb();
+	/*
+	 * Mark device context as valid, synchronise device context cache.
+	 */
+	val = RISCV_IOMMU_DC_TC_V;
 	if (ep->ats_enabled)
-		dc->tc = cpu_to_le64(RISCV_IOMMU_DC_TC_EN_ATS | RISCV_IOMMU_DC_TC_V);
-	else
-		dc->tc = cpu_to_le64(RISCV_IOMMU_DC_TC_V);
+		val |= RISCV_IOMMU_DC_TC_EN_ATS;
+	if (ep->pri_enabled)
+		val |= RISCV_IOMMU_DC_TC_EN_PRI;
+	dc->tc = cpu_to_le64(val);
+	wmb();
 	ep->dc = dc;
 	mutex_unlock(&domain->lock);
 	riscv_iommu_iodir_inv_devid(ep->iommu, ep->devid);
-
-	// enable PCI capabilities
-	riscv_iommu_enable_pci_ep(dev);
 
 	return 0;
 }
@@ -1436,45 +1466,6 @@ static int riscv_iommu_enable_nesting(struct iommu_domain *iommu_domain)
 	return domain->g_stage ? 0 : -EBUSY;
 }
 
-static int riscv_iommu_map_pages(struct iommu_domain *iommu_domain,
-				 unsigned long iova, phys_addr_t phys,
-				 size_t pgsize, size_t pgcount, int prot,
-				 gfp_t gfp, size_t *mapped)
-{
-	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
-
-	if (domain->domain.type == IOMMU_DOMAIN_BLOCKED)
-		return -ENODEV;
-
-	if (domain->domain.type == IOMMU_DOMAIN_IDENTITY) {
-		*mapped = pgsize * pgcount;
-		return 0;
-	}
-
-	if (!domain->pgtbl.ops.map_pages)
-		return -ENODEV;
-
-	return domain->pgtbl.ops.map_pages(&domain->pgtbl.ops, iova, phys,
-					   pgsize, pgcount, prot, gfp, mapped);
-}
-
-static size_t riscv_iommu_unmap_pages(struct iommu_domain *iommu_domain,
-				      unsigned long iova, size_t pgsize,
-				      size_t pgcount,
-				      struct iommu_iotlb_gather *gather)
-{
-	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
-
-	if (domain->domain.type == IOMMU_DOMAIN_IDENTITY)
-		return pgsize * pgcount;
-
-	if (!domain->pgtbl.ops.unmap_pages)
-		return 0;
-
-	return domain->pgtbl.ops.unmap_pages(&domain->pgtbl.ops, iova, pgsize,
-					     pgcount, gather);
-}
-
 static void riscv_iommu_flush_iotlb_all(struct iommu_domain *iommu_domain)
 {
 	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
@@ -1505,13 +1496,39 @@ static void riscv_iommu_iotlb_sync_map(struct iommu_domain *iommu_domain,
 	riscv_iommu_flush_iotlb_all(iommu_domain);
 }
 
+static int riscv_iommu_map_pages(struct iommu_domain *iommu_domain,
+				 unsigned long iova, phys_addr_t phys,
+				 size_t pgsize, size_t pgcount, int prot,
+				 gfp_t gfp, size_t *mapped)
+{
+	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
+	if (!domain->pgtbl.ops.map_pages)
+		return -ENODEV;
+
+	return domain->pgtbl.ops.map_pages(&domain->pgtbl.ops, iova, phys,
+					   pgsize, pgcount, prot, gfp, mapped);
+}
+
+static size_t riscv_iommu_unmap_pages(struct iommu_domain *iommu_domain,
+				      unsigned long iova, size_t pgsize,
+				      size_t pgcount,
+				      struct iommu_iotlb_gather *gather)
+{
+	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
+
+	if (!domain->pgtbl.ops.unmap_pages)
+		return 0;
+
+	return domain->pgtbl.ops.unmap_pages(&domain->pgtbl.ops, iova, pgsize,
+					     pgcount, gather);
+
+	/* TJ: update gather with unmapped IOVAs, remove from io_pgtable */
+}
+
 static phys_addr_t riscv_iommu_iova_to_phys(struct iommu_domain *iommu_domain,
 					    dma_addr_t iova)
 {
 	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
-
-	if (domain->domain.type == IOMMU_DOMAIN_IDENTITY)
-		return (phys_addr_t) iova;
 
 	if (!domain->pgtbl.ops.iova_to_phys)
 		return 0;
