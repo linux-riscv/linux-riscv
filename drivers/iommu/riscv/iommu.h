@@ -25,9 +25,9 @@
 
 #include "iommu-bits.h"
 
-#define IOMMU_PAGE_SIZE_4K		BIT_ULL(12)
-#define IOMMU_PAGE_SIZE_2M		BIT_ULL(21)
-#define IOMMU_PAGE_SIZE_1G		BIT_ULL(30)
+#define IOMMU_PAGE_SIZE_4K	BIT_ULL(12)
+#define IOMMU_PAGE_SIZE_2M	BIT_ULL(21)
+#define IOMMU_PAGE_SIZE_1G	BIT_ULL(30)
 #define IOMMU_PAGE_SIZE_512G	BIT_ULL(39)
 
 struct riscv_iommu_queue {
@@ -81,10 +81,9 @@ struct riscv_iommu_device {
 	/* global lock, to be removed */
 	spinlock_t cq_lock;
 
-	unsigned long zero;	/* shared zeroed page */
-	unsigned long sync;	/* Notification page */
-	unsigned long ddtp;	/* device directory table root pointer */
-	unsigned ddt_mode;	/* device directory table mode */
+	/* device directory table root pointer and mode */
+	unsigned long ddtp;
+	unsigned ddt_mode;
 	bool ddtp_in_iomem;
 
 	/* I/O page fault queue */
@@ -103,11 +102,7 @@ struct riscv_iommu_device {
 struct riscv_iommu_domain {
 	struct iommu_domain domain;
 	struct io_pgtable pgtbl;
-
-	struct list_head endpoints;
-	struct list_head notifiers;
 	struct mutex lock;
-
 	struct mmu_notifier mn;                 /* mmu_notifier handle */
 
 	/* remove: could be a list of iommus */
@@ -132,14 +127,12 @@ struct riscv_iommu_endpoint {
 
 	struct riscv_iommu_device *iommu;	/* -> iommu (virtual, collection of) */
 	struct riscv_iommu_domain *domain;	/* -> attached domain, only one at a time, nesting via domain->domain */
-	struct list_head domains;		/* -> collection of endpoints attached to the same domain */
 	struct rb_node node;    		/* -> iommu-device lookup by devid */
 
 	struct riscv_iommu_dc *dc;		/* -> device context pointer, can be tracked by iommu->dc(devid) */
 	struct riscv_iommu_pc *pc;		/* -> process context root, can be tracked by iommu->dc(devid)->pc(pasid) */
 
 	struct list_head regions;		// msi list
-	struct list_head bindings;		// sva list
 
 	/* end point info bits */
 	unsigned pasid_bits;
