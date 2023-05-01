@@ -172,7 +172,7 @@ sdk-linux-ubuntu-test:
       fi
       tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
     - apt update
-    - pip install fabric
+    - pip install fabric decorator
     - cd rivos/linux_ci
     - |
         if [[ "$TEST_SATP" == "yes" ]]; then
@@ -202,7 +202,7 @@ sdk-linux-ubuntu-kasan-inline-test:
     - rm -rf "${INSTALL_DIR}"
     - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
     - apt update
-    - pip install fabric
+    - pip install fabric decorator
     - cd rivos/linux_ci
     - |
         if [[ "$TEST_SATP" == "yes" ]]; then
@@ -231,7 +231,7 @@ sdk-linux-ubuntu-kasan-outline-test:
     - rm -rf "${INSTALL_DIR}"
     - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
     - apt update
-    - pip install fabric
+    - pip install fabric decorator
     - cd rivos/linux_ci
     - |
         if [[ "$TEST_SATP" == "yes" ]]; then
