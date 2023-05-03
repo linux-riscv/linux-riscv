@@ -125,7 +125,7 @@ struct riscv_iommu_endpoint {
 	unsigned devid;      			/* PCI bus:device:function number */
 	unsigned domid;    			/* PCI domain number, segment */
 
-	struct riscv_iommu_device *iommu;	/* -> iommu (virtual, collection of) */
+	struct riscv_iommu_device *iommu;	/* -> parent iommu device */
 	struct riscv_iommu_domain *domain;	/* -> attached domain, only one at a time, nesting via domain->domain */
 	struct rb_node node;    		/* -> iommu-device lookup by devid */
 
