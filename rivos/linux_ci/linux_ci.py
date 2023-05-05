@@ -128,6 +128,7 @@ def launch_vm_and_execute_userspace_fn(fn, kernel_version, satp_mode = "sv48"):
 
     with open("vm_output", "a") as f:
         complete_qemu_cmd = qemu_cmd.format(satp_mode, vm_path, os.path.join(os.getcwd(), "../.."))
+        print(complete_qemu_cmd)
         with subprocess.Popen(complete_qemu_cmd.split(" "), text = True, stdout = f, stderr = subprocess.STDOUT) as vm_proc:
             print("OK")
 
