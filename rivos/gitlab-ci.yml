@@ -24,7 +24,7 @@ docker-build-defconfig:
     - prepare-version
   extends: .build-caching
   script:
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod debhelper
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
     - sccache --show-stats
     - date
@@ -51,7 +51,7 @@ docker-build-ubuntu-defconfig:
     - prepare-version
   extends: .build-caching
   script:
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod debhelper
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
     - sccache --show-stats
     - date
@@ -87,7 +87,7 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - *kasan-conf-generic
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
     - sccache --show-stats
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod debhelper
     - date
     - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_outline_defconfig.txt
     - date
@@ -117,7 +117,7 @@ docker-build-ubuntu-kasan-inline-defconfig:
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
     - sccache --show-stats
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
-    - sudo apt update && sudo apt install -y kmod
+    - sudo apt update && sudo apt install -y kmod debhelper
     - date
     - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_inline_defconfig.txt
     - date
