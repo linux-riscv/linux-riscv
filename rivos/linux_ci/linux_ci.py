@@ -64,15 +64,18 @@ def host_finish_prepare_vm():
 def host_dl_prepared_vm():
     print("* Downloading prepared VM...", end = "")
     sys.stdout.flush()
-    launch_external_wait("wget --no-verbose --no-check-certificate {}".format(args.dl_prepared_vm).split(" "))
+    launch_external_wait("curl -O --header JOB-TOKEN:{} {}".format(os.environ["CI_JOB_TOKEN"], args.dl_prepared_vm).split(" "))
     launch_external_wait("xz -d {}".format(vm_path + ".xz").split(" "))
     print("OK")
 
 def host_dl_firmware():
     print("* Downloading firmware...", end = "")
     sys.stdout.flush()
-    launch_external_wait("wget http://launchpadlibrarian.net/636498883/u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb".split(" "))
-    launch_external_wait("dpkg-deb --extract u-boot-qemu_2022.07+dfsg-1ubuntu4.2_all.deb .".split(" "))
+    launch_external_wait("curl -O --header JOB-TOKEN:{} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/u-boot".format(os.environ["CI_JOB_TOKEN"]).split(" "))
+    launch_external_wait("mkdir -p usr/lib/u-boot/qemu-riscv64_smode/".split(" "))
+    launch_external_wait("mv u-boot usr/lib/u-boot/qemu-riscv64_smode/uboot.elf".split(" "))
+
+    launch_external_wait("curl -O --header JOB-TOKEN:{} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/fw_dynamic.elf".format(os.environ["CI_JOB_TOKEN"]).split(" "))
     print("OK")
 
 def userspace_prepare_vm(c, kernel_version):
