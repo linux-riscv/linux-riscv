@@ -83,7 +83,7 @@ struct isbdm_sge {
 /*
  * Inline data are kept within the work request itself occupying
  * the space of sge[1] .. sge[n]. Therefore, inline data cannot be
- * supported if SIW_MAX_SGE is below 2 elements.
+ * supported if ISBDM_MAX_SGE is below 2 elements.
  */
 #define ISBDM_MAX_INLINE (sizeof(struct isbdm_sge) * (ISBDM_MAX_SGE - 1))
 
@@ -101,18 +101,21 @@ enum isbdm_wqe_flags {
 	ISBDM_WQE_COMPLETED = (1 << 6)
 };
 
-// /* Send Queue Element */
+/* Send Queue Element */
 struct isbdm_sqe {
 	__aligned_u64 id;
 	__u16 flags;
 	__u8 num_sge;
-	/* Contains enum siw_opcode values */
+	/* Contains enum isbdm_opcode values */
 	__u8 opcode;
 	__u32 rkey;
 	union {
 		__aligned_u64 raddr;
 		__aligned_u64 base_mr;
-		__u32 remote_qpn;
+		struct {
+			__u32 remote_qpn;
+			__u16 dlid;
+		} ud;
 	};
 	union {
 		struct isbdm_sge sge[ISBDM_MAX_SGE];
@@ -139,7 +142,7 @@ struct isbdm_rqe {
 	struct isbdm_sge sge[ISBDM_MAX_SGE];
 };
 
-enum siw_notify_flags {
+enum isbdm_notify_flags {
 	ISBDM_NOTIFY_NOT = (0),
 	ISBDM_NOTIFY_SOLICITED = (1 << 0),
 	ISBDM_NOTIFY_NEXT_COMPLETION = (1 << 1),
