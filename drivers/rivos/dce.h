@@ -21,6 +21,7 @@
 #define RIVOS_DCE_H
 
 #include "linux/mutex.h"
+#include "linux/spinlock.h"
 #include "linux/eventfd.h"
 #include <linux/workqueue.h>
 
@@ -246,6 +247,7 @@ static const struct pci_device_id pci_use_msi[] = {
 
 struct work_queue {
 	enum wq_type type;
+	struct WQITE *wqite;
 
 	// eventfd structure
 	bool efd_ctx_valid;
@@ -254,13 +256,9 @@ struct work_queue {
 	/* The actual ring, used for kernel queues*/
 	struct DescriptorRing descriptor_ring;
 
-	struct mutex wq_tail_lock;
-	/*
-	 * Locks around modifications in the per WQ loop of clean_up_work
-	 * Probably unecessary if using atomic set of clean_up_index and
-	 * a single threaded kernel workqueue
-	 */
-	struct mutex wq_clean_lock;
+	spinlock_t lock;
+	/* Wait queue to wait on space being available for job submission */
+	wait_queue_head_t full_waiter;
 } work_queue;
 
 struct dce_driver_priv {
@@ -278,7 +276,7 @@ struct dce_driver_priv {
 	/* protect against concurrent access to this struct */
 	struct mutex lock;
 	/* protect against concurrent access to the IO space */
-	struct mutex dce_reg_lock;
+	spinlock_t reg_lock;
 
 	/* Kernel space memory area, read by HW */
 	struct WQITE *WQIT;

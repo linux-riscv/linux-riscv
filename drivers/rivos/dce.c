@@ -34,6 +34,8 @@
 #include <linux/pci_regs.h>
 #include <linux/of_device.h>
 #include <linux/mm.h>
+#include <linux/wait.h>
+#include <linux/mutex.h>
 
 #include "dce.h"
 
@@ -58,6 +60,7 @@ void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value)
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
 }
 
+/* Not sure this brings anything ...*/
 struct DescriptorRing *get_desc_ring(struct dce_driver_priv *priv, int wq_num)
 {
 	return &priv->wq[wq_num].descriptor_ring;
@@ -77,27 +80,33 @@ void clean_up_work(struct work_struct *work)
 	for (int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		struct work_queue *wq = dce_priv->wq + wq_num;
 		bool irqbit = irq_sts & BIT(wq_num);
-		bool flush = (wq->type == KERNEL_FLUSHING_WQ);
+		bool flush;
 
-		if (!flush && wq->type != KERNEL_WQ)
+		spin_lock(&wq->lock);
+		flush = (wq->type == KERNEL_FLUSHING_WQ);
+		irq_sts &= ~BIT(wq_num);
+
+		if (!flush && wq->type != KERNEL_WQ) {
+			spin_unlock(&wq->lock);
 			continue;
-		/* break early if we are done */
-		//if (!irq_sts) break;
+		}
+
 		if (flush || irqbit) {
 			struct DescriptorRing *ring;
 			uint64_t head, curr;
 
-			mutex_lock(&(wq->wq_clean_lock));
 			ring = get_desc_ring(dce_priv, wq_num);
 			if (!ring->hti) {
 				dev_err(&dce_priv->dev, "Invalid ring for wq %d", wq_num);
-				mutex_unlock(&(wq->wq_clean_lock));
+				spin_unlock(&wq->lock);
 				continue;
 			}
 
-			/* Atomic read ? */
 			head = ring->hti->head;
 			curr = ring->clean_up_index;
+			spin_unlock(&wq->lock);
+
+			/* Do the actual cleaning up, right now just eventfd */
 			dev_dbg(&dce_priv->dev,
 				"Cleanup on %d, %llu->%llu", wq_num, curr, head);
 
@@ -107,19 +116,29 @@ void clean_up_work(struct work_struct *work)
 				/* TODO: Find out an optimal policy for eventfd */
 				if (dce_priv->wq[wq_num].efd_ctx_valid) {
 					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
+					/* TODO: Check for very unlikely overflow */
 					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
 				}
 				curr++;
 			}
+
+			dev_dbg(&dce_priv->dev, "Cleanup done on %d updating clean index\n"
+					, wq_num);
+			spin_lock(&wq->lock);
 			ring->clean_up_index = curr;
-			irq_sts &= ~BIT(wq_num);
-			mutex_unlock(&(wq->wq_clean_lock));
+			spin_unlock(&wq->lock);
+			dev_dbg(&dce_priv->dev, "Cleanup really done\n");
+			wake_up_interruptible(&wq->full_waiter);
+		} else {
+			spin_unlock(&wq->lock);
 		}
 	}
 
 	/*
-	 * TODO: What if more events happened since the read
-	 * They are currently lost. Fix when updating IRQ semantics
+	 * Eagerly recheck for interrupt status, might not generate IRQ if
+	 * another queue asserted its status bit between read and clear
+	 * Could also eagerly check for head updates, but this would potentially
+	 * hide driver/IRQ bugs so leave as it is for now
 	 */
 	irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	if (irq_sts) {
@@ -183,6 +202,7 @@ error:
 	return err;
 }
 
+/* /!\ Function expect wq->lock locked on entry and returns it unlocked */
 static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 {
 	/* Policy: wait for jobs to execute */
@@ -197,13 +217,21 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 		uint64_t tail = ring->hti->tail; /* We hold the lock, this is not moving...*/
 		uint64_t clean = ring->clean_up_index;
 
+		if (wq->type != KERNEL_FLUSHING_WQ)
+			dev_err(&priv->dev, "Flushing a queue that is not in flush\n");
+		spin_unlock(&wq->lock);
+
 		if (clean >= tail)
 			break;
+
 		dev_dbg(&priv->dev,
 			"Waiting for queue %d flush - tail:%llu head:%llu, clean:%llu\n",
 			wq_num, tail, head, clean);
+		/* TODO: Change to event */
 		usleep_range(10000, 100000);
 		schedule_work(&priv->clean_up_worker);
+		usleep_range(10000, 100000);
+		spin_lock(&wq->lock);
 	}
 	/* Disable queue in HW */
 	/* TODO: Need to poll for completion? */
@@ -234,13 +262,18 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 	return 0;
 }
 
+/* /!\ Function expect wq->lock locked on entry and returns it unlocked */
 static int release_shared_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 {
 	/* Policy, wait for jobs for this context to execute */
 	/* TODO: Probably not always what we want */
+	struct work_queue *wq = priv->wq + wq_num;
+
+	spin_unlock(&wq->lock);
 	return 0;
 }
 
+/* /!\ Function expect wq->lock locked on entry and returns it unlocked */
 static int release_user_queue(struct dce_driver_priv *priv, int wq_num)
 {
 	// TODO: Policy, abort jobs in queue
@@ -253,6 +286,7 @@ static int release_user_queue(struct dce_driver_priv *priv, int wq_num)
 
 	memset(&priv->WQIT[wq_num], 0, sizeof(struct WQITE));
 	wq->type = DISABLED;
+	spin_unlock(&wq->lock);
 	return 0;
 }
 
@@ -275,12 +309,12 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		goto opencleanup;
 	}
 	wq = priv->wq + wq_num;
-	dev_info(&priv->dev, "Release on fd for queue %d\n", wq_num);
+	dev_info(&priv->dev, "Releasing fd for queue %d\n", wq_num);
 	/*
 	 * Lock the queue, this should make sure that not other operation happens on it
-	 * before it is marked as disabled
+	 * before it is marked as disabled. The release function should unlock it.
 	 */
-	mutex_lock(&(wq->wq_tail_lock));
+	spin_lock(&wq->lock);
 	switch (wq->type) {
 	case KERNEL_WQ:
 		err = release_kernel_queue(priv, wq_num);
@@ -298,15 +332,15 @@ int dce_ops_release(struct inode *inode, struct file *file)
 	default:
 		err = -EFAULT;
 		dev_err(&priv->dev, "Release on queue in unexpected state\n");
+		spin_unlock(&wq->lock);
 		break;
 	}
-	/* Do we need the dev level lock here ? */
-	mutex_unlock(&(wq->wq_tail_lock));
 
 opencleanup:
 	if (ctx->sva)
 		iommu_sva_unbind_device(ctx->sva);
 	kfree(ctx);
+	dev_info(&priv->dev, "Released fd for queue %d\n", wq_num);
 	return err;
 }
 
@@ -339,26 +373,78 @@ static int get_num_desc_for_wq(struct dce_driver_priv *priv, int wq_num)
 	return num_desc;
 }
 
+static inline uint64_t dce_wq_size(struct work_queue *wq)
+{
+	return DEFAULT_NUM_DSC_PER_WQ << wq->wqite->DSCSZ;
+}
+
 static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num);
 
-static void dce_push_descriptor(struct dce_driver_priv *priv,
-					struct DCEDescriptor *descriptor, int wq_num)
+static bool dce_wq_full(struct work_queue *wq)
+{
+	uint64_t wq_size = dce_wq_size(wq);
+	uint64_t tail  = wq->descriptor_ring.hti->tail;
+	uint64_t clean = wq->descriptor_ring.clean_up_index;
+	/* TODO: Should only be for kernel queues, check ?*/
+	/* always leave one slot free */
+	return tail == (clean + wq_size - 1);
+}
+
+static bool dce_wq_full_locked(struct work_queue *wq)
+{
+	bool ret;
+
+	spin_lock(&wq->lock);
+	ret = dce_wq_full(wq);
+	spin_unlock(&wq->lock);
+	return ret;
+}
+
+/* Push descriptor to kernel queue */
+static int dce_push_descriptor(struct dce_driver_priv *priv,
+					struct DCEDescriptor *descriptor, int wq_num, bool nonblock)
 {
 	struct DescriptorRing *ring;
-	u64 tail_idx, head_idx;
+	u64 tail_idx, clean_idx;
+	int ret = 0;
+	struct work_queue *wq = &priv->wq[wq_num];
 	struct DCEDescriptor *dest;
-	int queue_size = get_num_desc_for_wq(priv, wq_num);
+	int queue_size;
 
-	mutex_lock(&priv->wq[wq_num].wq_tail_lock);
+	/* Serializing push_descriptor, queue type update, clean index update */
+try_push:
+	spin_lock(&wq->lock); /* Guarantees tail and type do not change */
+	if (wq->type != KERNEL_WQ) {
+		/* FIXME: Actually, this path is also used on flush */
+		dev_warn(&priv->dev, "Pushing to invalid queue %d ?!?\n", wq_num);
+		spin_unlock(&wq->lock);
+		return -EFAULT;
+	}
+	queue_size = get_num_desc_for_wq(priv, wq_num);
 	ring = get_desc_ring(priv, wq_num);
 	tail_idx = ring->hti->tail;
-	head_idx = ring->hti->head;
-	/*always leave one slot free */
-	/*TODO: This needs to be clean_index not head */
-	if (tail_idx == (head_idx + queue_size - 1)) {
-		/* TODO: ring is full, handle it, with the right size even better*/
-		dev_err(&priv->dev, "Full queue, not handled yet\n");
+	clean_idx = ring->clean_up_index;
+	dev_dbg(&priv->dev, "Trying to push job %llu to wq %d (head=%llu)\n",
+			tail_idx, wq_num, ring->hti->head);
+
+	if (dce_wq_full(wq)) {
+		spin_unlock(&wq->lock);
+		if (nonblock) {
+			dev_dbg(&priv->dev, "Queue %d full, try again\n", wq_num);
+			return -EAGAIN;
+		}
+		/* Wait for event*/
+		dev_dbg(&priv->dev, "Queue %d full, waiting\n", wq_num);
+		ret = wait_event_interruptible(wq->full_waiter,
+					!dce_wq_full_locked(wq));
+		if (ret) {
+			dev_dbg(&priv->dev, "Queue %d was full, waiting interrupted\n", wq_num);
+			return ret;
+		}
+		dev_dbg(&priv->dev, "Queue %d was full, retrying\n", wq_num);
+		goto try_push;
 	}
+	/* If we got here, we can push!*/
 	dest = ring->descriptors + (tail_idx % queue_size);
 	/*copy descriptor to queue and make it observable */
 	*dest = *descriptor;
@@ -370,8 +456,10 @@ static void dce_push_descriptor(struct dce_driver_priv *priv,
 	 * /!\ may not wait for notify to check tail!
 	 */
 	ring->hti->tail++;
-	mutex_unlock(&priv->wq[wq_num].wq_tail_lock);
+	spin_unlock(&wq->lock);
+	/* Contains a wmb to make tail update observable before kicking the device */
 	notify_queue_update(priv, wq_num);
+	return 0; /* success */
 }
 
 static int parse_descriptor_based_on_opcode(
@@ -435,14 +523,14 @@ static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool e
 	 * TODO: This is the best we can do for now before HW offers a solution
 	 * for atomic clear/set of enable bits.
 	 */
-	mutex_lock(&dev_ctx->dce_reg_lock);
+	spin_lock(&dev_ctx->reg_lock);
 	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
 	if (enable)
 		wq_enable |= BIT(wq_num);
 	else
 		wq_enable &= (~BIT(wq_num));
 	dce_reg_write(dev_ctx, DCE_REG_WQENABLE, wq_enable);
-	mutex_unlock(&dev_ctx->dce_reg_lock);
+	spin_unlock(&dev_ctx->reg_lock);
 }
 
 static void notify_queue_update(struct dce_driver_priv *dev_ctx, int wq_num)
@@ -619,7 +707,7 @@ type_error:
 /*
  * set up default shared kernel submission queue 0
  * type of queue is set late, but it is ok because this is done
- * before device is published
+ * before device is exposed, so no need for normal locking
  */
 int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 {
@@ -628,6 +716,7 @@ int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 	mutex_lock(&dce_priv->lock);
 	if (wq->type != DISABLED) {
 		pr_err("Default queue already used\n");
+		mutex_unlock(&dce_priv->lock);
 		return -EFAULT;
 	}
 	wq->type = RESERVED_WQ;
@@ -675,8 +764,8 @@ static int request_kernel_wq(
 static void init_wq(struct work_queue *wq)
 {
 	wq->type = DISABLED;
-	mutex_init(&(wq->wq_tail_lock));
-	mutex_init(&(wq->wq_clean_lock));
+	spin_lock_init(&wq->lock);
+	init_waitqueue_head(&wq->full_waiter);
 }
 
 void free_resources(struct device *dev, struct dce_driver_priv *priv)
@@ -771,6 +860,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		case SUBMIT_DESCRIPTOR: {
 			struct DCEDescriptor __user *__descriptor_input;
 			struct DCEDescriptor descriptor_input;
+			bool nonblock = file->f_flags & O_NONBLOCK;
 
 			__descriptor_input = (struct DCEDescriptor __user *) arg;
 			if (copy_from_user(&descriptor_input, __descriptor_input, sizeof(descriptor_input)))
@@ -782,18 +872,6 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				ctx->wq_num = 0;
 			}
 
-			/* WQ should be enabled at this point */
-			if (priv->wq[ctx->wq_num].type == DISABLED) {
-				pr_warn("Submitting to disabled queue %d, ignored", ctx->wq_num);
-				return -EFAULT;
-			}
-
-			/* Make sure selected WQ is owned by Kernel */
-			if (priv->wq[ctx->wq_num].type == USER_OWNED_WQ) {
-				pr_warn("Submitting to user managed queue through iocctl. Ignored\n");
-				return -EFAULT;
-			}
-
 			if (parse_descriptor_based_on_opcode(&descriptor,
 				&descriptor_input, ctx->pasid) < 0) {
 				pr_warn("Failed to parse descriptor for submission\n");
@@ -803,7 +881,7 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			//printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
 			//	wq_num, descriptor.opcode);
 			//printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
-			dce_push_descriptor(priv, &descriptor, ctx->wq_num);
+			return dce_push_descriptor(priv, &descriptor, ctx->wq_num, nonblock);
 		}
 	}
 
@@ -883,6 +961,9 @@ int setup_memory_regions(struct dce_driver_priv *drv_priv)
 		dma_free_coherent(dev, 0x1000, drv_priv->WQIT, drv_priv->WQIT_dma);
 		return -EFAULT;
 	}
+	for (int w = 0; w < NUM_WQ; w++)
+		drv_priv->wq[w].wqite = drv_priv->WQIT + w;
+
 	dce_reg_write(drv_priv, DCE_REG_WQITBA, (uint64_t) drv_priv->WQIT_dma);
 	return 0;
 }
@@ -1034,7 +1115,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* init mutex */
 	mutex_init(&drv_priv->lock);
-	mutex_init(&drv_priv->dce_reg_lock);
+	spin_lock_init(&drv_priv->reg_lock);
 
 	for (int i = 0; i < NUM_WQ; i++)
 		init_wq(drv_priv->wq+i);
