@@ -75,6 +75,10 @@ struct isbdm_pd {
 	struct ib_pd base_pd;
 	/* Context handle returned from calling iommu_sva_bind_device(). */
 	struct iommu_sva *sva;
+	/* PASID of the owning task. */
+	uint64_t pasid;
+	/* MM of the owning task, used for loopback RDMAs. */
+	struct mm_struct *mm;
 };
 
 struct isbdm;
@@ -748,10 +752,10 @@ static inline struct isbdm_sqe *sq_get_next(struct isbdm_qp *qp)
 
 /* TODO: Flip these back to ibdev_dbg(). */
 #define isbdm_dbg(ibdev, fmt, ...)                                             \
-	ibdev_warn(ibdev, "%s: " fmt, __func__, ##__VA_ARGS__)
+	ibdev_dbg(ibdev, "%s: " fmt, __func__, ##__VA_ARGS__)
 
 #define isbdm_dbg_qp(qp, fmt, ...)                                             \
-	ibdev_warn(&qp->sdev->base_dev, "QP[%u] %s: " fmt, qp_id(qp), __func__, \
+	ibdev_dbg(&qp->sdev->base_dev, "QP[%u] %s: " fmt, qp_id(qp), __func__, \
 		  ##__VA_ARGS__)
 
 #define isbdm_dbg_cq(cq, fmt, ...)                                             \
@@ -759,11 +763,11 @@ static inline struct isbdm_sqe *sq_get_next(struct isbdm_qp *qp)
 		  ##__VA_ARGS__)
 
 #define isbdm_dbg_pd(pd, fmt, ...)                                             \
-	ibdev_warn(pd->device, "PD[%u] %s: " fmt, pd->res.id, __func__,         \
+	ibdev_dbg(pd->device, "PD[%u] %s: " fmt, pd->res.id, __func__,         \
 		  ##__VA_ARGS__)
 
 #define isbdm_dbg_mem(mem, fmt, ...)                                           \
-	ibdev_warn(&mem->sdev->base_dev,                                        \
+	ibdev_dbg(&mem->sdev->base_dev,                                        \
 		  "MEM[0x%08x] %s: " fmt, mem->stag, __func__, ##__VA_ARGS__)
 
 void isbdm_cq_flush(struct isbdm_cq *cq);
