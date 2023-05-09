@@ -568,4 +568,15 @@ void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 			     struct isbdm_buf *end);
 
+/* TODO: This doesn't work super well if the device is disconnected at startup. */
+static inline u64 isbdm_gid(struct isbdm *ii)
+{
+	u64 id = ii->instance + 0x10;
+
+	if (ii->link_status == ISBDM_LINK_DOWNSTREAM)
+		id += 0x100;
+
+	return id;
+}
+
 #endif
