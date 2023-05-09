@@ -52,7 +52,7 @@ prepare-version:
           timeout="57m"
           long_valid=""
       fi
-      timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
+      timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/ubuntu_images/1/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
 
 docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
