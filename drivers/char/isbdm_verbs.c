@@ -166,7 +166,7 @@ int isbdm_query_device(struct ib_device *base_dev, struct ib_device_attr *attr,
 	attr->masked_atomic_cap = IB_ATOMIC_NONE;
 
 	/* TODO: How is sysimage_guid different than node_guid? */
-	base_dev->node_guid = cpu_to_be64(sdev->ii->instance + 0x10);
+	base_dev->node_guid = cpu_to_be64(isbdm_gid(sdev->ii));
 	return 0;
 }
 
@@ -231,8 +231,7 @@ int isbdm_query_gid(struct ib_device *base_dev, u32 port, int idx,
 	struct isbdm_device *sdev = to_isbdm_dev(base_dev);
 
 	memset(gid, 0, sizeof(*gid));
-	/* TODO: Come up with a real global ID somehow. */
-	gid->global.interface_id = cpu_to_be64(sdev->ii->instance + 0x10);
+	gid->global.interface_id = cpu_to_be64(isbdm_gid(sdev->ii));
 	return 0;
 }
 
@@ -282,6 +281,11 @@ int isbdm_alloc_pd(struct ib_pd *pd, struct ib_udata *udata)
 
 			return rv;
 		}
+
+		ipd->mm = current->mm;
+		ipd->pasid = ipd->mm->pasid;
+
+		WARN_ON_ONCE(ipd->pasid == IOMMU_PASID_INVALID);
 	}
 
 	isbdm_dbg_pd(pd, "now %d PDs\n", atomic_read(&sdev->num_pd));
@@ -1024,6 +1028,8 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 
 			if (qp->base_qp.qp_type == IB_QPT_UD ||
 			    qp->base_qp.qp_type == IB_QPT_GSI) {
+				struct isbdm_ah *ah =
+					to_isbdm_ah(ud_wr(wr)->ah);
 
 				/*
 				 * rkey and remote_qpn need to be de-unioned if
@@ -1032,7 +1038,8 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 				WARN_ON_ONCE(sqe->opcode ==
 					     ISBDM_OP_SEND_REMOTE_INV);
 
-				sqe->remote_qpn = ud_wr(wr)->remote_qpn;
+				sqe->ud.remote_qpn = ud_wr(wr)->remote_qpn;
+				sqe->ud.dlid = ah->attr.ib.dlid;
 			}
 
 			break;

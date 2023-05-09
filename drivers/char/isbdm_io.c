@@ -195,13 +195,14 @@ out:
 	return rv;
 }
 
-static void isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
-				     u16 src_lid, u32 src_qp, u32 dest_qp)
+static struct isbdm_packet_header *
+isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
+			 u16 src_lid, u32 src_qp, u32 dest_qp)
 {
 	struct isbdm_packet_header *hdr = buf->buf + buf->size;
 
 	if (WARN_ON(buf->size + sizeof(*hdr) > buf->capacity)) {
-		return;
+		return NULL;
 	}
 
 	hdr->magic = cpu_to_le16(ISBDM_PACKET_MAGIC);
@@ -211,6 +212,7 @@ static void isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
 	hdr->src_qp = cpu_to_le32(src_qp);
 	hdr->dest_qp = cpu_to_le32(dest_qp);
 	buf->size += sizeof(*hdr);
+	return hdr;
 }
 
 /*
@@ -297,10 +299,34 @@ out:
 	return rc;
 }
 
+static bool is_loopback_packet(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
+{
+	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
+
+	if ((qp->base_qp.qp_type == IB_QPT_RC ||
+	     qp->base_qp.qp_type == IB_QPT_UC) &&
+	    (rdma_ah_get_dlid(&qp->remote_ah_attr) &
+	     ~((1 << sdev->lmc) - 1)) == sdev->lid)
+		return true;
+
+
+	if ((qp->base_qp.qp_type == IB_QPT_UD) &&
+	    ((wqe->sqe.ud.dlid & ~((1 << sdev->lmc) - 1)) == sdev->lid))
+		return true;
+
+	return false;
+}
+
+static void isbdm_process_ib_recv(struct isbdm *ii,
+				  struct isbdm_packet_header *hdr,
+				  struct list_head *packet_list,
+				  bool is_loopback);
+
 static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
+	bool is_loopback = is_loopback_packet(qp, wqe);
+	struct isbdm_packet_header *hdr;
 	struct isbdm_buf *buf, *tmp;
-	u16 slid = qp->sdev->lid;
 	void *dst;
 	u32 dest_qp;
 	struct isbdm *ii = qp->sdev->ii;
@@ -330,17 +356,24 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	if ((qp->base_qp.qp_type == IB_QPT_UD) ||
 	    (qp->base_qp.qp_type == IB_QPT_GSI)) {
 
-		dest_qp = wqe->sqe.remote_qpn;
+		dest_qp = wqe->sqe.ud.remote_qpn;
 
 	} else {
 		dest_qp = qp->attrs.dest_qp_num;
 	}
 
-	isbdm_fill_packet_header(buf,
-				 ISBDM_PACKET_IB_SEND,
-				 slid,
-				 qp->base_qp.qp_num,
-				 dest_qp);
+	dev_info(&ii->pdev->dev,
+		 "Send %slength 0x%x to QP%d->%d\n",
+		 is_loopback ? "loopback " : "",
+		 wqe->bytes,
+		 qp->base_qp.qp_num,
+		 dest_qp);
+
+	hdr = isbdm_fill_packet_header(buf,
+				       ISBDM_PACKET_IB_SEND,
+				       qp->sdev->lid,
+				       qp->base_qp.qp_num,
+				       dest_qp);
 
 	while (wqe->processed < wqe->bytes) {
 		size_t size_this_round;
@@ -408,13 +441,23 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	if (buf)
 		buf->flags |= ISBDM_DESC_LS;
 
-	/*
-	 * Now that all the buffers are set up, enqueue them onto the waitlist,
-	 * then stick as many as possible into the hardware.
-	 */
-	list_splice_tail_init(&local_list, &ii->tx_ring.wait_list);
-	isbdm_tx_enqueue(ii);
-	mutex_unlock(&ii->tx_ring.lock);
+	if (is_loopback) {
+		mutex_unlock(&ii->tx_ring.lock);
+		mutex_lock(&ii->rx_ring.lock);
+		isbdm_process_ib_recv(ii, hdr, &local_list, true);
+		mutex_unlock(&ii->rx_ring.lock);
+
+	} else {
+
+		/*
+		 * Now that all the buffers are set up, enqueue them onto the
+		 * waitlist, then stick as many as possible into the hardware.
+		 */
+		list_splice_tail_init(&local_list, &ii->tx_ring.wait_list);
+		isbdm_tx_enqueue(ii);
+		mutex_unlock(&ii->tx_ring.lock);
+	}
+
 	return 0;
 
 out:
@@ -551,15 +594,210 @@ void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 	isbdm_qp_put(qp);
 }
 
+/*
+ * Do a copy like the hardware would. If mm is non-null then then addr is a
+ * usermode address, otherwise it's a physical address.
+ */
+static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
+			  char *mapped_addr, char *kmem, int size,
+			  int direction)
+{
+
+	int done;
+	unsigned long not_done;
+	int flags = direction ? 0 : FOLL_WRITE;
+
+	/* If there's already a kernel mapping, use it directly. */
+	if (mapped_addr) {
+		if (direction)
+			memcpy(kmem, mapped_addr, size);
+		else
+			memcpy(mapped_addr, kmem, size);
+
+		return size;
+	}
+
+	if (mm) {
+		if (mm == current->mm) {
+			if (direction)
+				not_done = copy_from_user(
+					kmem, (void *)(unsigned long)addr,
+					size);
+
+			else
+				not_done = copy_to_user(
+					(void *)(unsigned long)addr, kmem,
+					size);
+
+
+			done = size - not_done;
+
+		} else {
+			done = access_remote_vm(mm, addr, kmem, size, flags);
+			if (done < 0) {
+				dev_warn(&ii->pdev->dev,
+					"Loopback failed to access memory: %d",
+					done);
+			}
+		}
+
+		return done;
+	}
+
+	/* TODO: get mappings, copy. */
+	dev_warn(&ii->pdev->dev, "TODO: Copy to/from kernel buf\n");
+	return -1;
+}
+
+/* Do a silly loopback RDMA operation */
+static void isbdm_do_loopback_rdma(struct isbdm *ii,
+				   struct isbdm_command *command)
+{
+	u64 size_pasid_flags = le64_to_cpu(command->cmd.size_pasid_flags);
+	u64 rmbi_command = le64_to_cpu(command->cmd.rmbi_command);
+	u64 op = (rmbi_command >> ISBDM_RDMA_COMMAND_SHIFT) &
+		 ISBDM_RDMA_COMMAND_MASK;
+	u64 rmbi = rmbi_command & ISBDM_RDMA_RMBI_MASK;
+	u64 size = size_pasid_flags & ISBDM_RDMA_SIZE_MASK;
+	u64 liova = le64_to_cpu(command->cmd.iova);
+	void *local_va = NULL;
+	struct mm_struct *local_mm = NULL;
+	struct mm_struct *remote_mm = NULL;
+	u64 riova;
+	int this_size;
+	bool is_write = (op == ISBDM_COMMAND_WRITE);
+	struct isbdm_remote_buffer rmb;
+	uint32_t isbdm_status;
+	char *page = NULL;
+
+	if ((op != ISBDM_COMMAND_READ) && (op != ISBDM_COMMAND_WRITE)) {
+		dev_err(&ii->pdev->dev, "TODO: Implement AMO loopback\n");
+		isbdm_status = ISBDM_STATUS_ABORTED;
+		goto out;
+	}
+
+	/* Get the remote memory buffer like the hardware would. */
+	if (rmbi >= ISBDMEX_RMB_TABLE_SIZE) {
+		isbdm_status = ISBDM_STATUS_RMB_ACCESS_FAULT;
+		goto out;
+	}
+
+	/*
+	 * Acquire the table lock to prevent the RMB and associated mm from
+	 * disappearing.
+	 */
+	mutex_lock(&ii->rmb_table_lock);
+	memcpy(&rmb, &ii->rmb_table[rmbi], sizeof(rmb));
+	if (rmb.security_key != command->cmd.security_key) {
+		mutex_unlock(&ii->rmb_table_lock);
+		isbdm_status = ISBDM_STATUS_RMB_ACCESS_FAULT;
+		goto out;
+	}
+
+	riova = le64_to_cpu(rmb.iova);
+
+	/* Get the MM associated with the "remote" buffer. */
+	if (rmb.pasid_flags & ISBDM_REMOTE_BUF_PV) {
+		struct isbdm_mr *remote_mr =
+			(void *)(unsigned long)le64_to_cpu(rmb.sw_avail);
+
+		struct isbdm_pd *remote_pd = to_isbdm_pd(remote_mr->base_mr.pd);
+
+		remote_mm = remote_pd->mm;
+		if (!remote_mm) {
+			mutex_unlock(&ii->rmb_table_lock);
+			dev_warn(&ii->pdev->dev, "Failed to find RMB mm\n");
+			isbdm_status = ISBDM_STATUS_RMB_TRANSLATION_FAULT;
+			goto out;
+		}
+
+		mmget(remote_mm);
+	}
+
+	mutex_unlock(&ii->rmb_table_lock);
+
+	/*
+	 * Get the local MM too, in case the command is not being executed on
+	 * the task that submitted it.
+	 */
+	if (size_pasid_flags & ISBDM_RDMA_PV) {
+		struct isbdm_pd *local_pd = to_isbdm_pd(command->qp->base_qp.pd);
+
+		local_mm = local_pd->mm;
+		if (!local_mm) {
+			dev_warn(&ii->pdev->dev, "Failed to find local mm\n");
+			isbdm_status = ISBDM_STATUS_LMB_TRANSLATION_FAULT;
+			goto out;
+		}
+
+	/* For inline requests, cheat and find the dma_pool VA. */
+	} else if (command->inline_dma_addr) {
+		struct isbdm_sge *sge = &command->wqe.sqe.sge[0];
+
+		local_va = (void *)(unsigned long)sge->laddr;
+	}
+
+	page = (char *)__get_free_page(GFP_KERNEL);
+	if (!page) {
+		isbdm_status = ISBDM_STATUS_ABORTED;
+		goto out;
+	}
+
+	/* Process a page at a time. */
+	while (size) {
+		this_size = (size > PAGE_SIZE) ? PAGE_SIZE : size;
+		if (is_write) {
+			this_size = isbdm_sva_copy(ii, local_mm, liova,
+						   local_va, page, this_size,
+						   1);
+
+			this_size = isbdm_sva_copy(ii, remote_mm, riova, NULL,
+						   page, this_size, 0);
+
+		} else {
+			this_size = isbdm_sva_copy(ii, remote_mm, riova, NULL,
+						   page, this_size, 1);
+
+			this_size = isbdm_sva_copy(ii, local_mm, liova,
+						   local_va, page, this_size,
+						   0);
+		}
+
+		if (this_size < 0) {
+			isbdm_status = ISBDM_STATUS_LMB_ACCESS_FAULT;
+			goto out;
+		}
+
+		liova += this_size;
+		riova += this_size;
+		size -= this_size;
+	}
+
+	isbdm_status = ISBDM_STATUS_SUCCESS;
+
+out:
+	if (local_mm)
+		mmput(local_mm);
+
+	if (remote_mm)
+		mmput(remote_mm);
+
+	if (page)
+		free_page((unsigned long)page);
+
+	isbdm_complete_rdma_cmd(ii, command, isbdm_status);
+}
+
 /* Submit an RDMA command from userspace */
 static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
 	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
+	bool is_loopback = is_loopback_packet(qp, wqe);
 	struct isbdm *ii = sdev->ii;
 	struct isbdm_command *command;
-	struct task_struct *task = get_current();
+	const char *command_name = "unknown";
 	struct isbdm_sge *sge = &wqe->sqe.sge[0];
-	uint64_t pasid = task->mm->pasid;
+	struct isbdm_pd *pd = to_isbdm_pd(qp->pd);
 	int rc;
 	uint64_t value;
 
@@ -586,8 +824,8 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		return -EINVAL;
 	}
 
-	if (pasid == IOMMU_PASID_INVALID) {
-		dev_warn(&ii->pdev->dev, "Current process lacks a PASID\n");
+	if (pd->pasid == IOMMU_PASID_INVALID) {
+		dev_warn(&ii->pdev->dev, "PD lacks a PASID\n");
 		return -EAGAIN;
 	}
 
@@ -642,13 +880,13 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	} else {
 		command->cmd.iova = cpu_to_le64(sge->laddr);
 		value |= ISBDM_RDMA_PV;
-		if (pasid > ISBDM_RDMA_PASID_MASK) {
+		if (pd->pasid > ISBDM_RDMA_PASID_MASK) {
 			dev_warn(&ii->pdev->dev, "PASID out of range\n");
 			rc = -ERANGE;
 			goto out;
 		}
 
-		value |= pasid << ISBDM_RDMA_PASID_SHIFT;
+		value |= pd->pasid << ISBDM_RDMA_PASID_SHIFT;
 	}
 
 	command->cmd.size_pasid_flags = cpu_to_le64(value);
@@ -662,20 +900,25 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	switch (tx_type(wqe)) {
 	case ISBDM_OP_WRITE:
 		value |= ISBDM_COMMAND_WRITE << ISBDM_RDMA_COMMAND_SHIFT;
+		command_name = "write";
 		break;
 
 	case ISBDM_OP_READ:
 		value |= ISBDM_COMMAND_READ << ISBDM_RDMA_COMMAND_SHIFT;
+		command_name = "read";
 		break;
 
 	case ISBDM_OP_COMP_AND_SWAP:
 	case ISBDM_OP_FETCH_AND_ADD:
 		if (tx_type(wqe) == ISBDM_OP_COMP_AND_SWAP) {
 			value |= ISBDM_COMMAND_CAS << ISBDM_RDMA_COMMAND_SHIFT;
+			command_name = "CompareExchange";
 
 		} else {
 			value |= ISBDM_COMMAND_FETCH_ADD <<
 				 ISBDM_RDMA_COMMAND_SHIFT;
+
+			command_name = "add";
 		}
 
 		if ((sge->length != 4) && (sge->length != 8)) {
@@ -698,13 +941,25 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		goto out;
 	}
 
+	dev_info(&ii->pdev->dev,
+		 "RDMA %s%s, length 0x%x\n",
+		 command_name,
+		 is_loopback ? " loopback" : "",
+		 sge->length);
+
 	command->cmd.rmbi_command = cpu_to_le64(value);
 	/* TODO: How do we compute the RMBI offset? */
 	command->cmd.rmb_offset = 0;
 	command->cmd.notify_iova = 0;
 	command->cmd.security_key = cpu_to_le64(wqe->sqe.rkey);
-	list_add_tail(&command->node, &ii->cmd_ring.wait_list);
-	isbdm_cmd_enqueue(ii);
+	if (is_loopback) {
+		isbdm_do_loopback_rdma(ii, command);
+
+	} else {
+		list_add_tail(&command->node, &ii->cmd_ring.wait_list);
+		isbdm_cmd_enqueue(ii);
+	}
+
 	rc = 0;
 
 out:
@@ -773,13 +1028,15 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	}
 
 	/* Watch out for packets addressed to this same port: do loopback. */
-	if ((qp->base_qp.qp_type == IB_QPT_RC ||
-	     qp->base_qp.qp_type == IB_QPT_UC) &&
-	    (rdma_ah_get_dlid(&qp->remote_ah_attr) &
-	     ~((1 << sdev->lmc) - 1)) == sdev->lid) {
-
-		dev_err(&sdev->ii->pdev->dev, "TODO: Support loopback to %x!\n",
-			sdev->lid);
+	if (is_loopback_packet(qp, wqe) &&
+	    (tx_type(wqe) != ISBDM_OP_SEND) &&
+	    (tx_type(wqe) != ISBDM_OP_WRITE) &&
+	    (tx_type(wqe) != ISBDM_OP_READ)) {
+		dev_err(&sdev->ii->pdev->dev,
+			"TODO: Support loopback to %x for op %d, qp type %d!\n",
+			sdev->lid,
+			tx_type(wqe),
+			qp->base_qp.qp_type);
 
 		return 0;
 	}
@@ -1294,7 +1551,8 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 /* Handle an incoming send. */
 static void isbdm_process_ib_recv(struct isbdm *ii,
 				  struct isbdm_packet_header *hdr,
-				  struct list_head *packet_list)
+				  struct list_head *packet_list,
+				  bool is_loopback)
 {
 	struct isbdm_buf *buf;
 	struct isbdm_device *sdev = ii->ib_device;
@@ -1333,9 +1591,12 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 
 	if (has_grh) {
 		memset(&grh, 0, sizeof(grh));
-		grh.sgid.global.interface_id = cpu_to_be64(hdr->src_lid);
-		grh.dgid.global.interface_id =
-			cpu_to_be64(sdev->ii->instance + 0x10);
+		grh.dgid.global.interface_id = cpu_to_be64(isbdm_gid(sdev->ii));
+		if (is_loopback)
+			grh.sgid = grh.dgid;
+		else
+			grh.sgid.global.interface_id =
+					cpu_to_be64(hdr->src_lid);
 	}
 
 	wqe = isbdm_rqe_get(qp);
@@ -1458,6 +1719,12 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 	}
 
 	wqe->processed += rcvd_bytes;
+	dev_info(&ii->pdev->dev,
+		 "Recv length %x QP%d->%d\n",
+		 wqe->processed,
+		 hdr->src_qp,
+		 hdr->dest_qp);
+
 	rv = 0;
 
 out:
@@ -1519,7 +1786,7 @@ void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 		break;
 
 	case ISBDM_PACKET_IB_SEND:
-		isbdm_process_ib_recv(ii, hdr, &packet_list);
+		isbdm_process_ib_recv(ii, hdr, &packet_list, false);
 		break;
 
 	default:
