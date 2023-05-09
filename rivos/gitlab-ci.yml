@@ -16,6 +16,44 @@ prepare-version:
     # Debugging helper
     - cat gitvars.env
 
+.build-kernel: &build-kernel
+  - sudo apt update && sudo apt install -y kmod debhelper
+  - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+  - sccache --show-stats
+  - date
+  - bash rivos/build.sh ${BUILD_SH_ARGS} | tee -i make_logs_${KERNEL_CONFIG}.txt
+  - date
+  - sccache --show-stats
+
+.validate-kernel: &validate-kernel
+  - rm -rf "${INSTALL_DIR}"
+  - |
+    if [[ "$TEST_ONLY" == "yes" ]]; then
+      curl --output artifacts.zip -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.ba.rivosinc.com/api/v4/projects/38/jobs/artifacts/${CI_COMMIT_REF_NAME//\//%2F}/download?job=docker-build-${KERNEL_CONFIG//_/-}"
+      if ! unzip artifacts.zip; then
+        echo "Artifacts not found!"
+        exit -1
+      fi
+    fi
+    tar -C/ -xzf linux_${KERNEL_CONFIG}.tar.gz
+  - apt update
+  - pip install fabric decorator
+  - cd rivos/linux_ci
+  - |
+      if [[ "$TEST_SATP" == "yes" ]]; then
+        qemu_valid_option=" --satp-valid"
+      else
+        qemu_valid_option=""
+      fi
+      if [[ "$TEST_LONG" == "yes" ]]; then
+          timeout="1440m"
+          long_valid=" --long-valid"
+      else
+          timeout="57m"
+          long_valid=""
+      fi
+      timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
+
 docker-build-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
@@ -24,13 +62,9 @@ docker-build-defconfig:
     - prepare-version
   extends: .build-caching
   script:
-    - sudo apt update && sudo apt install -y kmod debhelper
-    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
-    - sccache --show-stats
-    - date
-    - bash rivos/build.sh "defconfig" "defconfig" | tee -i make_logs_defconfig.txt
-    - date
-    - sccache --show-stats
+    - export KERNEL_CONFIG="defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
   timeout: 60min
   artifacts:
     paths:
@@ -51,13 +85,9 @@ docker-build-ubuntu-defconfig:
     - prepare-version
   extends: .build-caching
   script:
-    - sudo apt update && sudo apt install -y kmod debhelper
-    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
-    - sccache --show-stats
-    - date
-    - bash rivos/build.sh "ubuntu_defconfig" "ubuntu_defconfig" | tee -i make_logs_ubuntu_defconfig.txt
-    - date
-    - sccache --show-stats
+    - export KERNEL_CONFIG="ubuntu_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
   timeout: 60min
   artifacts:
     paths:
@@ -85,13 +115,9 @@ docker-build-ubuntu-kasan-outline-defconfig:
   extends: .build-caching
   script:
     - *kasan-conf-generic
-    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
-    - sccache --show-stats
-    - sudo apt update && sudo apt install -y kmod debhelper
-    - date
-    - bash rivos/build.sh "ubuntu_kasan_outline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_outline_defconfig.txt
-    - date
-    - sccache --show-stats
+    - export KERNEL_CONFIG="ubuntu_kasan_outline_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
+    - *build-kernel
   timeout: 60min
   artifacts:
     paths:
@@ -114,14 +140,10 @@ docker-build-ubuntu-kasan-inline-defconfig:
   extends: .build-caching
   script:
     - *kasan-conf-generic
-    - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
-    - sccache --show-stats
+    - export KERNEL_CONFIG="ubuntu_kasan_inline_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
-    - sudo apt update && sudo apt install -y kmod debhelper
-    - date
-    - bash rivos/build.sh "ubuntu_kasan_inline_defconfig" "ubuntu_defconfig" "kasan.conf" | tee -i make_logs_ubuntu_kasan_inline_defconfig.txt
-    - date
-    - sccache --show-stats
+    - *build-kernel
   timeout: 60min
   artifacts:
     paths:
@@ -161,38 +183,13 @@ sdk-linux-ubuntu-test:
     - prepare-version
     - docker-build-ubuntu-defconfig
   script:
-    - rm -rf "${INSTALL_DIR}"
-    - |
-      if [[ "$TEST_ONLY" == "yes" ]]; then
-        curl --output artifacts.zip -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.ba.rivosinc.com/api/v4/projects/38/jobs/artifacts/${CI_COMMIT_REF_NAME//\//%2F}/download?job=docker-build-ubuntu-defconfig"
-        if ! unzip artifacts.zip; then
-          echo "Artifacts not found!"
-          exit -1
-        fi
-      fi
-      tar -C/ -xzf linux_ubuntu_defconfig.tar.gz
-    - apt update
-    - pip install fabric decorator
-    - cd rivos/linux_ci
-    - |
-        if [[ "$TEST_SATP" == "yes" ]]; then
-          qemu_valid_option=" --satp-valid"
-        else
-          qemu_valid_option=""
-        fi
-        if [[ "$TEST_LONG" == "yes" ]]; then
-            timeout="1440m"
-            long_valid=" --long-valid"
-        else
-            timeout="57m"
-            long_valid=""
-        fi
-        timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_defconfig ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ubuntu_output
+    - export KERNEL_CONFIG="ubuntu_defconfig"
+    - *validate-kernel
   timeout: 60min
   artifacts:
     when: always
     paths:
-      - rivos/linux_ci/ubuntu_output
+      - rivos/linux_ci/ubuntu_defconfig_output
       - rivos/linux_ci/tests_results/
       - linux_ubuntu_defconfig.tar.gz # used when TEST_ONLY to propagate artifacts
     expire_in: 3h
@@ -206,30 +203,13 @@ sdk-linux-ubuntu-kasan-inline-test:
     - prepare-version
     - docker-build-ubuntu-kasan-inline-defconfig
   script:
-    - rm -rf "${INSTALL_DIR}"
-    - tar -C/ -xzf linux_ubuntu_kasan_inline_defconfig.tar.gz
-    - apt update
-    - pip install fabric decorator
-    - cd rivos/linux_ci
-    - |
-        if [[ "$TEST_SATP" == "yes" ]]; then
-          qemu_valid_option=" --satp-valid"
-        else
-          qemu_valid_option=""
-        fi
-        if [[ "$TEST_LONG" == "yes" ]]; then
-            timeout="1440m"
-            long_valid=" --long-valid"
-        else
-            timeout="57m"
-            long_valid=""
-        fi
-        timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_inline_defconfig ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ubuntu_kasan_inline_output
+    - export KERNEL_CONFIG="ubuntu_kasan_inline_defconfig"
+    - *validate-kernel
   timeout: 60min
   artifacts:
     when: always
     paths:
-      - rivos/linux_ci/ubuntu_kasan_inline_output
+      - rivos/linux_ci/ubuntu_kasan_inline_defconfig_output
       - rivos/linux_ci/tests_results/
     expire_in: 3h
   rules:
@@ -242,30 +222,13 @@ sdk-linux-ubuntu-kasan-outline-test:
     - prepare-version
     - docker-build-ubuntu-kasan-outline-defconfig
   script:
-    - rm -rf "${INSTALL_DIR}"
-    - tar -C/ -xzf linux_ubuntu_kasan_outline_defconfig.tar.gz
-    - apt update
-    - pip install fabric decorator
-    - cd rivos/linux_ci
-    - |
-        if [[ "$TEST_SATP" == "yes" ]]; then
-          qemu_valid_option=" --satp-valid"
-        else
-          qemu_valid_option=""
-        fi
-        if [[ "$TEST_LONG" == "yes" ]]; then
-            timeout="1440m"
-            long_valid=" --long-valid"
-        else
-            timeout="57m"
-            long_valid=""
-        fi
-        timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_outline_defconfig ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ubuntu_kasan_outline_output
+    - export KERNEL_CONFIG="ubuntu_kasan_outline_defconfig"
+    - *validate-kernel
   timeout: 60min
   artifacts:
     when: always
     paths:
-      - rivos/linux_ci/ubuntu_kasan_outline_output
+      - rivos/linux_ci/ubuntu_kasan_outline_defconfig_output
       - rivos/linux_ci/tests_results/
     expire_in: 3h
   rules:
