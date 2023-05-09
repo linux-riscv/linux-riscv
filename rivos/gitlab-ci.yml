@@ -253,7 +253,6 @@ sdk-linux-ubuntu-kasan-outline-test:
         else
           qemu_valid_option=""
         fi
-        timeout 57m python3 linux_ci.py --dl-prepared-vm https://ghiti.fr/nextcloud/index.php/s/YxjZ9ENFCtKeeSq/download/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ubuntu_kasan_outline_defconfig 2>&1 | tee -a -i ubuntu_kasan_outline_output
         if [[ "$TEST_LONG" == "yes" ]]; then
             timeout="1440m"
             long_valid=" --long-valid"
