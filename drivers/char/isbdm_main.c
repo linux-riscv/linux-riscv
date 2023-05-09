@@ -116,8 +116,8 @@ struct isbdm_device *isbdm_device_create(struct isbdm *ii)
 
 	base_dev = &sdev->base_dev;
 
-	/* TODO: Need a unique ID for this device. Truly globally? */
-	base_dev->node_guid = cpu_to_be64(ii->instance + 0x10);
+	base_dev->node_guid = cpu_to_be64(isbdm_gid(ii));
+	dev_info(&ii->pdev->dev, "Node GUID is %llx\n", isbdm_gid(ii));
 	base_dev->uverbs_cmd_mask |= BIT_ULL(IB_USER_VERBS_CMD_POST_SEND);
 
 	/* TODO: Is this right? */
@@ -145,7 +145,7 @@ struct isbdm_device *isbdm_device_create(struct isbdm *ii)
 	sdev->attrs.max_srq = ISBDM_MAX_SRQ;
 	sdev->attrs.max_srq_wr = ISBDM_MAX_SRQ_WR;
 	sdev->attrs.max_srq_sge = ISBDM_MAX_SGE;
-	sdev->lid = ii->instance + 0x10;
+	sdev->lid = isbdm_gid(ii);
 	INIT_LIST_HEAD(&sdev->cep_list);
 	INIT_LIST_HEAD(&sdev->qp_list);
 	atomic_set(&sdev->num_ctx, 0);
