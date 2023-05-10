@@ -4,4 +4,5 @@ obj-$(CONFIG_RIVOS_PWC) += rivos-pwc.o \
 			   rivos-pwc-power.o \
 			   rivos-pwc-dimm-power.o \
 			   rivos-pwc-simple-power.o \
-			   rivos-pwc-soc-power.o
+			   rivos-pwc-soc-power.o \
+			   rivos-pwc-thermal.o
