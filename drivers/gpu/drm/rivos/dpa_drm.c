@@ -686,7 +686,7 @@ static int __init dpa_init(void)
 	int ret;
 
 	pr_warn("%s: DPA start\n", __func__);
-	dpa_class = class_create(THIS_MODULE, dpa_class_name);
+	dpa_class = class_create(dpa_class_name);
 	if (IS_ERR(dpa_class)) {
 		ret = PTR_ERR(dpa_class);
 		pr_err("Error creating DPA class: %d\n", ret);
