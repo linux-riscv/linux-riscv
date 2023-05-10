@@ -41,7 +41,7 @@ int isbdm_create_local_mb(struct isbdm_mr *mr)
 		struct task_struct *task = get_current();
 		uint64_t pasid = task->mm->pasid;
 
-		if (pasid == INVALID_IOASID) {
+		if (pasid == IOMMU_PASID_INVALID) {
 			dev_err(&sdev->ii->pdev->dev,
 				"Current process doesn't have PASID\n");
 
@@ -586,7 +586,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		return -EINVAL;
 	}
 
-	if (pasid == INVALID_IOASID) {
+	if (pasid == IOMMU_PASID_INVALID) {
 		dev_warn(&ii->pdev->dev, "Current process lacks a PASID\n");
 		return -EAGAIN;
 	}

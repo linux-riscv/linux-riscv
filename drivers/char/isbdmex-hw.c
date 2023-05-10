@@ -11,7 +11,6 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
-#include <linux/ioasid.h>
 #include <linux/iopoll.h>
 #include <linux/list.h>
 #include <linux/miscdevice.h>
@@ -865,7 +864,7 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 	int rc;
 	uint64_t value;
 
-	if (pasid == INVALID_IOASID) {
+	if (pasid == IOMMU_PASID_INVALID) {
 		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
 		return -EAGAIN;
 	}
@@ -951,7 +950,7 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 	struct isbdm_remote_buffer rbcopy;
 	uint64_t value;
 
-	if (pasid == INVALID_IOASID) {
+	if (pasid == IOMMU_PASID_INVALID) {
 		dev_err(&ii->pdev->dev, "Current process doesn't have PASID\n");
 		return -EAGAIN;
 	}
