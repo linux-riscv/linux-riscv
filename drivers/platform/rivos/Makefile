@@ -7,4 +7,5 @@ obj-$(CONFIG_RIVOS_PWC) += rivos-pwc.o \
 			   rivos-pwc-soc-power.o \
 			   rivos-pwc-thermal.o \
 			   rivos-pwc-chiplet-thermal.o \
-			   rivos-pwc-dimm-thermal.o
+			   rivos-pwc-dimm-thermal.o \
+			   rivos-pwc-dpa-thermal.o
