@@ -1373,6 +1373,7 @@ static void isbdm_disconnect(struct isbdm *ii)
 
 	/* Set link down first to keep new things from piling in. */
 	ii->link_status = ISBDM_LINK_DOWN;
+	isbdm_port_status_change(ii);
 
 	/* Stop the hardware. */
 	isbdm_disable(ii);
@@ -1428,6 +1429,7 @@ static void isbdm_check_link(struct isbdm *ii)
 
 	ii->link_status = link_status;
 	isbdm_connect(ii);
+	isbdm_port_status_change(ii);
 }
 
 void isbdm_start(struct isbdm *ii)
