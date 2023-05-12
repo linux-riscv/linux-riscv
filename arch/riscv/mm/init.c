@@ -27,6 +27,7 @@
 
 #include <asm/fixmap.h>
 #include <asm/io.h>
+#include <asm/kasan.h>
 #include <asm/numa.h>
 #include <asm/pgtable.h>
 #include <asm/ptdump.h>
@@ -160,6 +161,12 @@ static void __init print_vm_layout(void)
 static void print_vm_layout(void) { }
 #endif /* CONFIG_DEBUG_VM */
 
+#ifdef CONFIG_MEMORY_HOTPLUG
+static void __init prepare_memory_hotplug(void);
+#else
+static void __init prepare_memory_hotplug(void) { }
+#endif
+
 void __init mem_init(void)
 {
 #ifdef CONFIG_FLATMEM
@@ -168,6 +175,7 @@ void __init mem_init(void)
 
 	swiotlb_init(max_pfn > PFN_DOWN(dma32_phys_limit), SWIOTLB_VERBOSE);
 	memblock_free_all();
+	prepare_memory_hotplug();
 
 	print_vm_layout();
 }
@@ -1474,3 +1482,13 @@ void __init pgtable_cache_init(void)
 		preallocate_pgd_pages_range(MODULES_VADDR, MODULES_END, "bpf/modules");
 }
 #endif
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+#define PAGE_END KASAN_SHADOW_START
+
+static void __init prepare_memory_hotplug(void)
+{
+	preallocate_pgd_pages_range(VMEMMAP_START, VMEMMAP_END, "vmemmap");
+	preallocate_pgd_pages_range(PAGE_OFFSET, PAGE_END, "direct map");
+}
+#endif /* CONFIG_MEMORY_HOTPLUG */
