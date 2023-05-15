@@ -594,10 +594,11 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 			total_usleep  += 10000;
 			mutex_lock(&p->lock);
 		}
-	} while ((ret == 1) && ((total_usleep * 1000) < args->timeout_ns));
+	} while ((ret == 1) &&
+		 ((args->timeout_ns == 0) || (total_usleep * 1000) < args->timeout_ns));
 
-	dev_warn(p->dev->dev, "%s: idx %llu ret = %d\n", __func__,
-		 args->signal_idx, ret);
+	dev_warn(p->dev->dev, "%s: idx %llu ret = %d timeout = %lu\n", __func__,
+		 args->signal_idx, ret, args->timeout_ns);
 
 	if (ret == 1)
 		ret = -EBUSY;
