@@ -35,28 +35,26 @@
 /* Registers are mostly 64-bits, except for the head/tail regs. */
 #define ISBDM_CMD_RING_BASE	0
 #define ISBDM_CMD_RING_HEAD	8
-#define ISBDM_CMD_RING_TAIL	12
-#define ISBDM_CMD_RING_CTRL	16
-#define ISBDM_RX_RING_BASE	24
-#define ISBDM_RX_RING_HEAD	32
-#define ISBDM_RX_RING_TAIL	36
-#define ISBDM_RX_RING_CTRL	40
-#define ISBDM_TX_RING_BASE	48
-#define ISBDM_TX_RING_HEAD	56
-#define ISBDM_TX_RING_TAIL	60
-#define ISBDM_TX_RING_CTRL	64
-#define ISBDM_RMBA_BASE		72
-#define ISBDM_RMBA_CTRL		80
-#define ISBDM_IPSR		88
-#define ISBDM_IPMR		96
-#define ISBDM_IRCR		104
-#define ISBDM_ADMIN		112
+#define ISBDM_CMD_RING_TAIL	16
+#define ISBDM_CMD_RING_CTRL	24
+#define ISBDM_RX_RING_BASE	32
+#define ISBDM_RX_RING_HEAD	40
+#define ISBDM_RX_RING_TAIL	48
+#define ISBDM_RX_RING_CTRL	56
+#define ISBDM_TX_RING_BASE	64
+#define ISBDM_TX_RING_HEAD	72
+#define ISBDM_TX_RING_TAIL	80
+#define ISBDM_TX_RING_CTRL	88
+#define ISBDM_RMBA_BASE		96
+#define ISBDM_RMBA_CTRL		104
+#define ISBDM_IPSR		112
+#define ISBDM_IPMR		120
+#define ISBDM_IRCR		128
+#define ISBDM_ADMIN		136
 #define ISBDM_RX_TLP_DROP_CNT	160
 
 #define ISBDM_WRITEQ(isbdm, reg, val) writeq(cpu_to_le64(val), (isbdm)->base + (reg))
-#define ISBDM_WRITEL(isbdm, reg, val) writel(cpu_to_le32(val), (isbdm)->base + (reg))
 #define ISBDM_READQ(isbdm, reg) le64_to_cpu(readq((isbdm)->base + (reg)))
-#define ISBDM_READL(isbdm, reg) le32_to_cpu(readl((isbdm)->base + (reg)))
 
 /* Ring base register fields, which apply to CMD, TX, and RX rings. */
 /* The number of entries in the ring will be 2^(LOG2SZM1 + 1) */
