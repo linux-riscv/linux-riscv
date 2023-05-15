@@ -189,7 +189,7 @@ void isbdm_tx_enqueue(struct isbdm *ii)
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
-	ISBDM_WRITEL(ii, ISBDM_TX_RING_TAIL, ring->prod_idx);
+	ISBDM_WRITEQ(ii, ISBDM_TX_RING_TAIL, ring->prod_idx);
 	return;
 }
 
@@ -225,7 +225,7 @@ void isbdm_cmd_enqueue(struct isbdm *ii)
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
-	ISBDM_WRITEL(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
+	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
 	return;
 }
 
@@ -260,7 +260,7 @@ static void isbdm_rx_refill(struct isbdm *ii)
 
 	dev_dbg(&ii->pdev->dev, "%s: Added %u descriptors\n", __func__, count);
 	/* Let hardware know about all the yummy buffers. */
-	ISBDM_WRITEL(ii, ISBDM_RX_RING_TAIL, ring->prod_idx);
+	ISBDM_WRITEQ(ii, ISBDM_RX_RING_TAIL, ring->prod_idx);
 	return;
 }
 
@@ -651,7 +651,7 @@ void isbdm_reap_tx(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->tx_ring;
 	u32 mask = ring->size - 1;
-	u32 hw_next = ISBDM_READL(ii, ISBDM_TX_RING_HEAD) & mask;
+	u32 hw_next = ISBDM_READQ(ii, ISBDM_TX_RING_HEAD) & mask;
 
 	mutex_lock(&ring->lock);
 
@@ -734,7 +734,7 @@ void isbdm_reap_cmds(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->cmd_ring;
 	u32 mask = ring->size - 1;
-	u32 hw_next = ISBDM_READL(ii, ISBDM_CMD_RING_HEAD) & mask;
+	u32 hw_next = ISBDM_READQ(ii, ISBDM_CMD_RING_HEAD) & mask;
 
 	mutex_lock(&ring->lock);
 
@@ -1075,7 +1075,7 @@ void isbdm_process_rx_done(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->rx_ring;
 	u32 mask = ring->size - 1;
-	u32 hw_next = ISBDM_READL(ii, ISBDM_RX_RING_HEAD) & mask;
+	u32 hw_next = ISBDM_READQ(ii, ISBDM_RX_RING_HEAD) & mask;
 
 	mutex_lock(&ring->lock);
 
@@ -1151,7 +1151,7 @@ void isbdm_rx_overflow(struct isbdm *ii)
 	 * Go backwards from the end and poison any descriptors that are part of
 	 * the last packet that got cut off.
 	 */
-	i = (ISBDM_READL(ii, ISBDM_RX_RING_HEAD) - 1) & mask;
+	i = (ISBDM_READQ(ii, ISBDM_RX_RING_HEAD) - 1) & mask;
 	while ((i != ring->prod_idx) &&
 	       (!(ring->descs[i].flags & ISBDM_DESC_LS))) {
 

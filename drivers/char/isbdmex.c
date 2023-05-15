@@ -336,11 +336,11 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 		// if (done)
 		// 	break;
 		if (done <= 0) {
-			printk("Read timeout. RX prod %x cons %x HEAD %x TAIL %x IPSR %llx IPMR %llx pending_irqs %llx\n",
+			printk("Read timeout. RX prod %x cons %x HEAD %llx TAIL %llx IPSR %llx IPMR %llx pending_irqs %llx\n",
 				ii->rx_ring.prod_idx,
 				ii->rx_ring.cons_idx,
-				ISBDM_READL(ii, ISBDM_RX_RING_HEAD),
-				ISBDM_READL(ii, ISBDM_RX_RING_TAIL),
+				ISBDM_READQ(ii, ISBDM_RX_RING_HEAD),
+				ISBDM_READQ(ii, ISBDM_RX_RING_TAIL),
 				ISBDM_READQ(ii, ISBDM_IPSR),
 				ISBDM_READQ(ii, ISBDM_IPMR),
 				ii->pending_irqs.counter);
