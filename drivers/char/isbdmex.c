@@ -17,6 +17,7 @@
 #include <linux/pci.h>
 #include <linux/pci-epf.h>
 #include <linux/pci_ids.h>
+#include <linux/random.h>
 #include <linux/uaccess.h>
 
 #include "isbdmex.h"
@@ -479,6 +480,11 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto free_misc_name;
 	}
 
+	/*
+	 * The device doesn't have a unique ID, so create a random one to try
+	 * and avoid ID collisions with peers.
+	 */
+	get_random_bytes(&ii->rand_id, sizeof(ii->rand_id));
 	ii->ib_device = isbdm_device_create(ii);
 	if (!ii->ib_device) {
 		dev_err_probe(dev, ret, "Can't create IB device\n");
