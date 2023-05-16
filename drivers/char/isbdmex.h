@@ -244,7 +244,7 @@ struct isbdm_remote_buffer {
 
 /* Fields within the fourth qword of the command descriptor */
 /* Remote memory buffer index */
-#define ISBDM_RDMA_RMBI_MASK 0xffffffffff
+#define ISBDM_RDMA_RMBI_MASK 0xffffffff
 /* RDMA command */
 #define ISBDM_RDMA_RMBI_RESERVED_MASK (0x7ffffULL << 19)
 #define ISBDM_RDMA_COMMAND_MASK 0x1f
@@ -280,10 +280,10 @@ struct isbdm_rdma_command {
     __le64 notify_iova;
     /* Size, PASID, and flags */
     __le64 size_pasid_flags;
-    /* Remote buffer index and command */
+    /* Remote buffer index, command, and a couple flags */
     __le64 rmbi_command;
-    /* Offset within the remote memory buffer */
-    __le64 rmb_offset;
+    /* Remote virtual address */
+    __le64 riova;
     /* Value that much match what's in the remote buffer entry */
     __le64 security_key;
     /* Compare value for CAS, amount to add for FetchNAdd */

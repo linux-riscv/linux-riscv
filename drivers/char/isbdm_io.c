@@ -948,8 +948,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		 sge->length);
 
 	command->cmd.rmbi_command = cpu_to_le64(value);
-	/* TODO: How do we compute the RMBI offset? */
-	command->cmd.rmb_offset = 0;
+	command->cmd.riova = cpu_to_le64(wqe->sqe.raddr);
 	command->cmd.notify_iova = 0;
 	command->cmd.security_key = cpu_to_le64(wqe->sqe.rkey);
 	if (is_loopback) {
