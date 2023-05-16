@@ -29,10 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/pci_regs.h>
-#include <linux/of_device.h>
 #include <linux/mm.h>
 #include <linux/wait.h>
 #include <linux/mutex.h>
@@ -60,12 +57,6 @@ void dce_reg_write(struct dce_driver_priv *priv, int reg, uint64_t value)
 	iowrite64(value, (void __iomem *)(priv->mmio_start + reg));
 }
 
-/* Not sure this brings anything ...*/
-struct DescriptorRing *get_desc_ring(struct dce_driver_priv *priv, int wq_num)
-{
-	return &priv->wq[wq_num].descriptor_ring;
-}
-
 void clean_up_work(struct work_struct *work)
 {
 	struct dce_driver_priv *dce_priv =
@@ -79,12 +70,12 @@ void clean_up_work(struct work_struct *work)
 
 	for (int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
 		struct work_queue *wq = dce_priv->wq + wq_num;
-		bool irqbit = irq_sts & BIT(wq_num);
+		bool irqbit = irq_sts & BIT_ULL(wq_num);
 		bool flush;
 
 		spin_lock(&wq->lock);
 		flush = (wq->type == KERNEL_FLUSHING_WQ);
-		irq_sts &= ~BIT(wq_num);
+		irq_sts &= ~BIT_ULL(wq_num);
 
 		if (!flush && wq->type != KERNEL_WQ) {
 			spin_unlock(&wq->lock);
@@ -92,10 +83,9 @@ void clean_up_work(struct work_struct *work)
 		}
 
 		if (flush || irqbit) {
-			struct DescriptorRing *ring;
+			struct DescriptorRing *ring = &wq->descriptor_ring;
 			uint64_t head, curr;
 
-			ring = get_desc_ring(dce_priv, wq_num);
 			if (!ring->hti) {
 				dev_err(&dce_priv->dev, "Invalid ring for wq %d", wq_num);
 				spin_unlock(&wq->lock);
@@ -114,16 +104,18 @@ void clean_up_work(struct work_struct *work)
 				/* Position in queue int qi = (curr % ring->length); */
 				/* for every clean up, notify user via eventfd when applicable*/
 				/* TODO: Find out an optimal policy for eventfd */
-				if (dce_priv->wq[wq_num].efd_ctx_valid) {
-					// printk(KERN_INFO "eventfd signalling 0x%lx\n", (uint64_t)dce_priv->wq[wq_num].efd_ctx);
-					/* TODO: Check for very unlikely overflow */
-					eventfd_signal(dce_priv->wq[wq_num].efd_ctx, 1);
+				if (wq->efd_ctx_valid) {
+					if (eventfd_signal(wq->efd_ctx, 1) < 1)
+						dev_warn_ratelimited(&dce_priv->dev,
+							"wq: %d, overflow on eventfd\n",
+							wq_num);
 				}
 				curr++;
 			}
 
-			dev_dbg(&dce_priv->dev, "Cleanup done on %d updating clean index\n"
-					, wq_num);
+			dev_dbg(&dce_priv->dev,
+				"Cleanup done on %d updating clean index\n",
+				wq_num);
 			spin_lock(&wq->lock);
 			ring->clean_up_index = curr;
 			spin_unlock(&wq->lock);
@@ -178,7 +170,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			dev_err(&priv->dev, "open: sva_bind_device fail:%d!\n", err);
 			goto error;
 		} else {
-			dev_info(&priv->dev, "open: sva_bind_device success!\n");
+			dev_dbg(&priv->dev, "open: sva_bind_device success!\n");
 		}
 		ctx->pasid = iommu_sva_get_pasid(ctx->sva);
 		if (ctx->pasid == IOMMU_PASID_INVALID) {
@@ -187,7 +179,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 			err =  -ENODEV;
 			goto error;
 		} else {
-			dev_info(&priv->dev, "open: sva_get_pasid success!\n");
+			dev_dbg(&priv->dev, "open: sva_get_pasid success!\n");
 		}
 	} else {
 		dev_err(&priv->dev, "open: PASID support required, fail!\n");
@@ -228,8 +220,10 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 			"Waiting for queue %d flush - tail:%llu head:%llu, clean:%llu\n",
 			wq_num, tail, head, clean);
 		/* TODO: Change to event */
+		/* Give some time for HW to actually do some work */
 		usleep_range(10000, 100000);
 		schedule_work(&priv->clean_up_worker);
+		/* Wait some for the worker to have time to process descriptors */
 		usleep_range(10000, 100000);
 		spin_lock(&wq->lock);
 	}
@@ -309,7 +303,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 		goto opencleanup;
 	}
 	wq = priv->wq + wq_num;
-	dev_info(&priv->dev, "Releasing fd for queue %d\n", wq_num);
+	dev_dbg(&priv->dev, "Releasing fd for queue %d\n", wq_num);
 	/*
 	 * Lock the queue, this should make sure that not other operation happens on it
 	 * before it is marked as disabled. The release function should unlock it.
@@ -402,10 +396,10 @@ static bool dce_wq_full_locked(struct work_queue *wq)
 
 /* Push descriptor to kernel queue */
 static int dce_push_descriptor(struct dce_driver_priv *priv,
-					struct DCEDescriptor *descriptor, int wq_num, bool nonblock)
+		struct DCEDescriptor *descriptor, int wq_num, bool nonblock)
 {
 	struct DescriptorRing *ring;
-	u64 tail_idx, clean_idx;
+	u64 tail_idx;
 	int ret = 0;
 	struct work_queue *wq = &priv->wq[wq_num];
 	struct DCEDescriptor *dest;
@@ -421,11 +415,11 @@ try_push:
 		return -EFAULT;
 	}
 	queue_size = get_num_desc_for_wq(priv, wq_num);
-	ring = get_desc_ring(priv, wq_num);
+	ring = &wq->descriptor_ring;
 	tail_idx = ring->hti->tail;
-	clean_idx = ring->clean_up_index;
-	dev_dbg(&priv->dev, "Trying to push job %llu to wq %d (head=%llu)\n",
-			tail_idx, wq_num, ring->hti->head);
+	dev_dbg(&priv->dev,
+		"Trying to push job %llu to wq %d (head=%llu, clean=%llu)\n",
+		tail_idx, wq_num, ring->hti->head, ring->clean_up_index);
 
 	if (dce_wq_full(wq)) {
 		spin_unlock(&wq->lock);
@@ -526,9 +520,9 @@ static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool e
 	spin_lock(&dev_ctx->reg_lock);
 	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
 	if (enable)
-		wq_enable |= BIT(wq_num);
+		wq_enable |= BIT_ULL(wq_num);
 	else
-		wq_enable &= (~BIT(wq_num));
+		wq_enable &= (~BIT_ULL(wq_num));
 	dce_reg_write(dev_ctx, DCE_REG_WQENABLE, wq_enable);
 	spin_unlock(&dev_ctx->reg_lock);
 }
@@ -550,8 +544,8 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 {
 	struct dce_driver_priv *dce_priv = ctx->priv;
 	size_t length = ua->numDescs;
-	struct DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
 	struct work_queue *wq = dce_priv->wq+wq_num;
+	struct DescriptorRing *ring = &wq->descriptor_ring;
 	int size = length * sizeof(struct DCEDescriptor);
 	int DSCSZ;
 
@@ -612,14 +606,14 @@ static int request_user_wq(struct dce_submitter_ctx *ctx, struct UserArea *ua)
 	return setup_user_wq(ctx, ctx->wq_num, ua);
 }
 
-int setup_kernel_wq(
-		struct dce_driver_priv *dce_priv, int wq_num, struct KernelQueueReq *kqr)
+int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
+		struct KernelQueueReq *kqr)
 {
-	struct DescriptorRing *ring = get_desc_ring(dce_priv, wq_num);
+	struct work_queue *wq = dce_priv->wq + wq_num;
+	struct DescriptorRing *ring = &wq->descriptor_ring;
 	int DSCSZ = 0;
 	size_t length;
 	int err = 0;
-	struct work_queue *wq = dce_priv->wq + wq_num; /*TODO: Range check accessor*/
 
 	memset(ring, 0, sizeof(struct DescriptorRing));
 	/* Only setup reserved queues */
@@ -737,6 +731,7 @@ static int request_kernel_wq(
 	if (ctx->wq_num != -1)
 		return -EFAULT;
 
+	dev_info(&ctx->priv->dev, "Requesting kernel WQ\n");
 	/* allocate a queue to context or fallback to wq 0*/
 	{
 		int wqnum = reserve_unused_wq(ctx->priv);
@@ -744,7 +739,7 @@ static int request_kernel_wq(
 		if (wqnum < 0) { /* no more free queues */
 			ctx->wq_num = 0; /* Fallback to shared queue */
 			/* TODO: Would it make more sense to just fault here*/
-			pr_info("Out of wq!");
+			dev_info(&ctx->priv->dev, "Out of wq, falling back to default!\n");
 		} else {
 			ctx->wq_num = wqnum;
 			/*
@@ -752,7 +747,9 @@ static int request_kernel_wq(
 			 * requires a separate activation function for the queue
 			 */
 			if (setup_kernel_wq(ctx->priv, wqnum, kqr) < 0) {
-				//TODO: Print an error
+				dev_err(&ctx->priv->dev,
+					"Failure to setup wq %d as kernel WQ\n",
+					wqnum);
 				return -EFAULT;
 			}
 		}
@@ -877,10 +874,6 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				pr_warn("Failed to parse descriptor for submission\n");
 				return -EFAULT;
 			}
-
-			//printk(KERN_INFO "pushing descriptor thru wq %d with opcode %d!\n",
-			//	wq_num, descriptor.opcode);
-			//printk(KERN_INFO "submitting source 0x%lx\n", descriptor.source);
 			return dce_push_descriptor(priv, &descriptor, ctx->wq_num, nonblock);
 		}
 	}
@@ -914,7 +907,6 @@ int dce_mmap(struct file *file, struct vm_area_struct *vma)
 		dev_warn(&priv->dev, "Mapping failed!\n");
 		return -EAGAIN;
 	}
-	// printk(KERN_INFO "mmap completed\n");
 	return 0;
 }
 
@@ -1013,7 +1005,6 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	drv_priv->pdev = pdev;
 
 	drv_priv->mmio_start_phys = pci_resource_start(pdev, 0);
-	// mmio_len   = pci_resource_len  (pdev, 0);
 
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		drv_priv->sva_enabled = false;
@@ -1041,6 +1032,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		int vf_num = pci_iov_vf_id(pdev);
 		int pf_id;
 		struct dce_driver_priv *pfdrv = pci_iov_get_pf_drvdata(pdev, &dce_driver);
+
 		if (IS_ERR_OR_NULL(pfdrv)) {
 			dev_err(dev, "Failed to get PF driver data\n");
 			goto free_resources_and_fail;
@@ -1103,7 +1095,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (isPF) {
 		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
-		if(err < 0){
+		if (err < 0) {
 			dev_err(&pdev->dev, "pci_enable_sriov fail\n");
 			goto disable_device_and_fail;
 		}

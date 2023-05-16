@@ -207,7 +207,7 @@ struct DescriptorRing {
 	 * Sequence num of the last job where clean up was performed
 	 * written by clean_up_worker, read by dce_push_descriptor
 	 */
-	uint32_t clean_up_index;
+	uint64_t clean_up_index;
 
 	/* IOVA of the data strucs shared with HW, kept for cleanup*/
 	dma_addr_t desc_dma;
