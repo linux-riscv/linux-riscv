@@ -604,8 +604,6 @@ static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
 {
 
 	int done;
-	unsigned long not_done;
-	int flags = direction ? 0 : FOLL_WRITE;
 
 	/* If there's already a kernel mapping, use it directly. */
 	if (mapped_addr) {
@@ -619,6 +617,8 @@ static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
 
 	if (mm) {
 		if (mm == current->mm) {
+			unsigned long not_done;
+
 			if (direction)
 				not_done = copy_from_user(
 					kmem, (void *)(unsigned long)addr,
@@ -633,6 +633,8 @@ static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
 			done = size - not_done;
 
 		} else {
+			int flags = direction ? 0 : FOLL_WRITE;
+
 			done = access_remote_vm(mm, addr, kmem, size, flags);
 			if (done < 0) {
 				dev_warn(&ii->pdev->dev,
@@ -645,7 +647,7 @@ static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
 	}
 
 	/* TODO: get mappings, copy. */
-	dev_warn(&ii->pdev->dev, "TODO: Copy to/from kernel buf\n");
+	dev_warn(&ii->pdev->dev, "TODO: Copy to/from kernel buf: %llx\n", addr);
 	return -1;
 }
 
@@ -657,6 +659,8 @@ static void isbdm_do_loopback_rdma(struct isbdm *ii,
 	u64 rmbi_command = le64_to_cpu(command->cmd.rmbi_command);
 	u64 op = (rmbi_command >> ISBDM_RDMA_COMMAND_SHIFT) &
 		 ISBDM_RDMA_COMMAND_MASK;
+	u64 rmb_iova;
+	u64 rmb_iova_end;
 	u64 rmbi = rmbi_command & ISBDM_RDMA_RMBI_MASK;
 	u64 size = size_pasid_flags & ISBDM_RDMA_SIZE_MASK;
 	u64 liova = le64_to_cpu(command->cmd.iova);
@@ -694,7 +698,17 @@ static void isbdm_do_loopback_rdma(struct isbdm *ii,
 		goto out;
 	}
 
-	riova = le64_to_cpu(rmb.iova);
+	rmb_iova = le64_to_cpu(rmb.iova);
+	rmb_iova_end = rmb_iova + le64_to_cpu(rmb.size);
+	riova = le64_to_cpu(command->cmd.riova);
+	/* Verify the requested remote VA is in bounds. */
+	if ((riova < rmb_iova) || ((riova + size) < riova) ||
+	    ((riova + size) > rmb_iova_end)) {
+
+		mutex_unlock(&ii->rmb_table_lock);
+		isbdm_status = ISBDM_STATUS_RMB_ACCESS_FAULT;
+		goto out;
+	}
 
 	/* Get the MM associated with the "remote" buffer. */
 	if (rmb.pasid_flags & ISBDM_REMOTE_BUF_PV) {
@@ -867,7 +881,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		 */
 		WARN_ON_ONCE(tx_type(wqe) != ISBDM_OP_WRITE);
 
-		sge->laddr = (unsigned long)pool_buf;
+		command->wqe.sqe.sge[0].laddr = (unsigned long)pool_buf;
 		memcpy(pool_buf, &wqe->sqe.sge[1], sge->length);
 		dma_sync_single_for_device(&ii->pdev->dev,
 					   command->inline_dma_addr,
