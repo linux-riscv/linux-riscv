@@ -903,13 +903,6 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 	command->cmd.size_pasid_flags = cpu_to_le64(value);
 
 	/* Make sure sure usermode isn't trying to set reserved bits. */
-	value = le64_to_cpu(command->cmd.rmb_offset);
-	if (value & ISBDM_RDMA_RMB_OFFSET_RESERVED) {
-		dev_err(&ii->pdev->dev, "RMB offset reserved bits set\n");
-		rc = -ERANGE;
-		goto out;
-	}
-
 	value = le64_to_cpu(command->cmd.rmbi_command);
 	if (value & ISBDM_RDMA_RMBI_RESERVED_MASK) {
 		dev_err(&ii->pdev->dev, "RMBI/command reserved bits set\n");
