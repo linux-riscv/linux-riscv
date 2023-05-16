@@ -15,24 +15,7 @@
 #include <drm/drm.h>
 #include <drm_dpa.h>
 
-#define LITTLEENDIAN_CPU
-#include "hsa.h"
-
-// Currently we're using AMD HSA Kernel objects
-// AMDHSA Kernel descriptor (kept backwards compatible)
-struct KernelDescriptor {
-	uint32_t group_segment_fixed_size;
-	uint32_t private_segment_fixed_size;
-	uint32_t kernarg_size;
-	uint8_t reserved0[4];
-	int64_t kernel_code_entry_byte_offset;
-	uint8_t reserved1[20];
-	uint32_t compute_pgm_rsrc3;  // GFX10+ and GFX90A+
-	uint32_t compute_pgm_rsrc1;
-	uint32_t compute_pgm_rsrc2;
-	uint16_t kernel_code_properties;
-	uint8_t reserved2[6];
-};
+#include "duc_packets.h"
 
 // Doorbells are 8B long, 64B aligned, 64 per doorbell page
 struct Doorbell {
@@ -180,31 +163,26 @@ static void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
 {
 	fprintf(stderr, "\nPrinting AQL packet....\n");
 	fprintf(stderr, "header: 0x%x\n", pkt->header);
-	fprintf(stderr, "setup: 0x%x\n", pkt->setup);
 	fprintf(stderr, "workgroup_size_x: 0x%x\n", pkt->workgroup_size_x);
 	fprintf(stderr, "workgroup_size_y: 0x%x\n", pkt->workgroup_size_y);
 	fprintf(stderr, "workgroup_size_z: 0x%x\n", pkt->workgroup_size_z);
-	fprintf(stderr, "reserved0: 0x%x\n", pkt->reserved0);
-	fprintf(stderr, "grid_size_x: 0x%x\n", pkt->grid_size_x);
-	fprintf(stderr, "grid_size_y: 0x%x\n", pkt->grid_size_y);
-	fprintf(stderr, "grid_size_z: 0x%x\n", pkt->grid_size_z);
-	fprintf(stderr, "private_segment_size: 0x%x\n", pkt->private_segment_size);
-	fprintf(stderr, "group_segment_size: 0x%x\n", pkt->group_segment_size);
-	fprintf(stderr, "kernel_object: 0x%lx\n", pkt->kernel_object);
-	fprintf(stderr, "kernarg_address: 0x%lx\n", (unsigned long)pkt->kernarg_address);
-	fprintf(stderr, "reserved2: 0x%lx\n", pkt->reserved2);
-	fprintf(stderr, "completion_signal: 0x%lx\n\n", pkt->completion_signal.handle);
+	fprintf(stderr, "quilt_size_x: 0x%x\n", pkt->quilt_size_x);
+	fprintf(stderr, "quilt_size_y: 0x%x\n", pkt->quilt_size_x);
+	fprintf(stderr, "quilt_size_z: 0x%x\n", pkt->quilt_size_x);
+	fprintf(stderr, "kernel_code_entry: 0x%lx\n", pkt->kernel_code_entry);
+	fprintf(stderr, "kernarg_address: 0x%lx\n", pkt->kernarg_address);
+	fprintf(stderr, "private_segment_size_log2: 0x%x\n", pkt->private_segment_size_log2);
+	fprintf(stderr, "kernarg_size: 0x%x\n", pkt->kernarg_size);
+	fprintf(stderr, "private_mem_ptr: 0x%lx\n", pkt->private_mem_ptr);
+	fprintf(stderr, "num_pg_barriers: 0x%x\n\n", pkt->num_pg_barriers);
+	fprintf(stderr, "num_gprs_blocks: 0x%x\n\n", pkt->num_gprs_blocks);
+	fprintf(stderr, "scratch_mem_allocs: 0x%x\n\n", pkt->scratch_mem_allocs);
 }
-
-#define NULL_X_DIM (32)
-#define NULL_Y_DIM (1)
-#define NULL_Z_DIM (1)
 
 #define RIG64_EXIT_INSTRUCTION (0x0000000000080073ULL)
 
-static int init_null_kernel(void **kern_ptr, size_t *kernel_size, struct KernelDescriptor **kd_ptr)
+static int init_null_kernel(void **kern_ptr, size_t *kernel_size)
 {
-	uint64_t kd_addr;
 	uint64_t *kern_data;
 
 	*kernel_size = getpagesize();
@@ -219,24 +197,6 @@ static int init_null_kernel(void **kern_ptr, size_t *kernel_size, struct KernelD
 
 	// just one instruction, exit
 	kern_data[0] = RIG64_EXIT_INSTRUCTION;
-
-	// kernel descriptor will go after the kernel binary + one page gap
-	kd_addr = ALIGN_UP_PGSZ(*kern_ptr + *kernel_size, getpagesize()) +
-		getpagesize();
-	*kd_ptr = mmap((void *)kd_addr,
-		      getpagesize(), PROT_READ | PROT_WRITE,
-		      MAP_ANONYMOUS | MAP_PRIVATE,
-		      -1, 0);
-	if (*kd_ptr == MAP_FAILED) {
-		perror("mmap kernel descriptor");
-		return 1;
-	}
-
-	memset((void*)*kd_ptr, -1, sizeof(**kd_ptr));
-	(*kd_ptr)->kernel_code_entry_byte_offset = (int64_t)(*kern_ptr - (void*)(*kd_ptr));
-	fprintf(stderr, "kernel code byte offset 0x%" PRIx64 "\n",
-		(*kd_ptr)->kernel_code_entry_byte_offset);
-
 	return 0;
 }
 
@@ -275,12 +235,10 @@ int main(int argc, char *argv[])
 	hsa_kernel_dispatch_packet_t *aql_packet;
 	hsa_barrier_and_packet_t *aql_barrier_packet;
 
-	struct KernelDescriptor *kd_ptr;
-
 	struct drm_dpa_signal *signal_page, *signal;
 	int ret = 0;
 
-	if (init_null_kernel(&kern_ptr, &kernel_size, &kd_ptr)) {
+	if (init_null_kernel(&kern_ptr, &kernel_size)) {
 		fprintf(stderr, "null kernel init failed\n");
 		exit(1);
 	}
@@ -319,7 +277,6 @@ int main(int argc, char *argv[])
 		int wait_count = 0;
 
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
-		fprintf(stderr, "kern_desc_ptr: 0x%lx\n", (unsigned long)kd_ptr);
 
 		// send an empty barrier packet first to test multiple packets
 		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;
@@ -332,20 +289,21 @@ int main(int argc, char *argv[])
 
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-		aql_packet->setup = 0;
-		aql_packet->workgroup_size_x = NULL_X_DIM;
-		aql_packet->workgroup_size_y = NULL_Y_DIM;
-		aql_packet->workgroup_size_z = NULL_Z_DIM;
-		aql_packet->reserved0 = 0;
-		aql_packet->grid_size_x = NULL_X_DIM;;
-		aql_packet->grid_size_y = NULL_Y_DIM;;
-		aql_packet->grid_size_z = NULL_Z_DIM;;
-		aql_packet->private_segment_size = 0;
-		aql_packet->group_segment_size = 0;
-		aql_packet->kernel_object = (uint64_t) kd_ptr;
+		aql_packet->workgroup_size_x = 32;
+		aql_packet->workgroup_size_y = 1;
+		aql_packet->workgroup_size_z = 1;
+		aql_packet->quilt_size_x = 1;
+		aql_packet->quilt_size_y = 1;
+		aql_packet->quilt_size_z = 1;
+		aql_packet->kernel_code_entry = (uint64_t) kern_ptr;
 		aql_packet->kernarg_address = 0;
-		aql_packet->reserved2 = 0;
-		aql_packet->completion_signal.handle = 0;
+		aql_packet->private_segment_size_log2 = 0; // It means no private.
+		aql_packet->kernarg_size = 0;
+		aql_packet->private_mem_ptr = 0;
+		aql_packet->completion_signal.handle = 0;		
+		aql_packet->num_pg_barriers = 0;
+		aql_packet->num_gprs_blocks = 1;  // Min 1 for r-mode.
+		aql_packet->scratch_mem_allocs = 0;
 
 		print_aql_packet(aql_packet);
 
