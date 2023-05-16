@@ -70,8 +70,8 @@ void clean_up_work(struct work_struct *work)
 	/* getting per queue interrupt status */
 	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	/* clear irq status */
-	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, 0);
-	// printk(KERN_INFO "Doing important cleaning up work! IRQSTS: 0x%lx\n", irq_sts);
+	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, irq_sts);
+
 	dev_dbg(&dce_priv->dev, "Cleanup start\n");
 
 	for (int wq_num = 0; wq_num < NUM_WQ; wq_num++) {
