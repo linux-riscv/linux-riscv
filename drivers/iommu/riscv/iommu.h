@@ -22,6 +22,7 @@
 #include <linux/iommu.h>
 #include <linux/io-pgtable.h>
 #include <linux/mmu_notifier.h>
+#include <linux/perf_event.h>
 
 #include "iommu-bits.h"
 #include "../iommu-sva.h"
@@ -88,6 +89,10 @@ struct riscv_iommu_device {
 	/* DebugFS Info */
 	struct dentry *debugfs;
 #endif
+
+	/* Performance Monitoring */
+	struct pmu pmu;
+	unsigned long counters_used;
 };
 
 struct riscv_iommu_domain {
@@ -177,5 +182,8 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu);
 #ifdef CONFIG_RISCV_IOMMU_DEBUGFS
 void riscv_iommu_debugfs_setup(struct riscv_iommu_device *iommu);
 #endif
+
+int riscv_iommu_pmu_register(struct riscv_iommu_device *iommu);
+void riscv_iommu_pmu_unregister(struct riscv_iommu_device *iommu);
 
 #endif
