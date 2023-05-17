@@ -30,6 +30,7 @@
 #include "../dma-iommu.h"
 #include "../iommu-sva.h"
 #include "iommu.h"
+#include "iommu-pmu.h"
 
 #include <asm/csr.h>
 #include <asm/delay.h>
@@ -2050,6 +2051,7 @@ void riscv_iommu_remove(struct device *dev)
 {
 	struct riscv_iommu_device *iommu = dev_get_drvdata(dev);
 
+	iommu_pmu_unregister(&iommu->pmu);
 	iommu_device_unregister(&iommu->iommu);
 	iommu_device_sysfs_remove(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
@@ -2067,6 +2069,14 @@ int riscv_iommu_init_common(struct riscv_iommu_device *iommu)
 	int ret;
 
 	iommu->eps = RB_ROOT;
+
+	/* TODO: figure out where to best place this */
+	iommu->pmu.iommu_dev = iommu;
+	// iommu->pmu.dev = dev;
+	int err;
+	if (err = iommu_pmu_register(&iommu->pmu)) {
+		dev_err(dev, "failed to register IOMMU PMU: %d\n", err);
+	}
 
 	/* TODO: Version check */
 
