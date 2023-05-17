@@ -1539,3 +1539,17 @@ u64 isbdmex_get_dropped_rx_count(struct isbdm *ii)
 	mutex_unlock(&ii->rx_ring.lock);
 	return value;
 }
+
+int isbdmex_link_status_op(struct isbdm *ii, void __user *argp)
+{
+	long op = (long)argp;
+
+	if (op == IOCTL_LINK_STATUS_OP_DISCONNECT)
+		isbdm_disconnect(ii);
+	else if (op == IOCTL_LINK_STATUS_OP_RECONNECT)
+		isbdm_check_link(ii);
+	else
+		return -EINVAL;
+
+	return 0;
+}

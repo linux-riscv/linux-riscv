@@ -364,6 +364,10 @@ struct isbdm_packet_header {
 #define IOCTL_RDMA_CMD		_IO('3', 7)	/* Send RDMA command. */
 #define IOCTL_GET_LAST_ERROR	_IO('3', 8)	/* Get error status. */
 #define IOCTL_GET_RX_DROP_CNT	_IO('3', 9)	/* Get RX drop count. */
+#define IOCTL_LINK_STATUS_OP	_IO('3', 10)	/* Link status operations */
+
+#define IOCTL_LINK_STATUS_OP_DISCONNECT 1
+#define IOCTL_LINK_STATUS_OP_RECONNECT 2
 
 /* Info about a hardware ring (tx, rx, or cmd). */
 struct isbdm_ring {
@@ -561,6 +565,7 @@ u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
+int isbdmex_link_status_op(struct isbdm *ii, void __user *argp);
 
 void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 			     uint32_t status);
