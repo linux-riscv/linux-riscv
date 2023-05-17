@@ -312,6 +312,10 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		rc = put_user(isbdmex_get_dropped_rx_count(ii), argp64);
 		break;
 
+	case IOCTL_LINK_STATUS_OP:
+		rc = isbdmex_link_status_op(ii, argp64);
+		break;
+
 	default:
 		rc = -ENOENT;
 		break;
