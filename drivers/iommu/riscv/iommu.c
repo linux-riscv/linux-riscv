@@ -2052,6 +2052,7 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 #ifdef CONFIG_RISCV_IOMMU_DEBUGFS
 	debugfs_remove(iommu->debugfs);
 #endif
+	riscv_iommu_pmu_unregister(iommu);
 	iommu_device_sysfs_remove(&iommu->iommu);
 	iommu_device_unregister(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
@@ -2141,6 +2142,13 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	if (ret) {
 		dev_err(dev, "cannot register sysfs interface (%d)\n", ret);
 		goto fail;
+	}
+
+	if (iommu->cap & RISCV_IOMMU_CAP_HPM) {
+		ret = riscv_iommu_pmu_register(iommu);
+		if (ret) {
+			dev_err(dev, "failed to register IOMMU PMU: %d\n", ret);
+		}
 	}
 
 	ret = iommu_device_register(&iommu->iommu, &riscv_iommu_ops, dev);
