@@ -24,6 +24,7 @@
 #include <linux/mmu_notifier.h>
 
 #include "iommu-bits.h"
+#include "iommu-pmu.h"
 
 #define IOMMU_PAGE_SIZE_4K	BIT_ULL(12)
 #define IOMMU_PAGE_SIZE_2M	BIT_ULL(21)
@@ -97,6 +98,9 @@ struct riscv_iommu_device {
 	/* Connected end-points */
 	struct rb_root eps;
 	struct mutex eps_mutex;
+
+	/* Performance Monitoring */
+	struct riscv_iommu_pmu pmu;
 };
 
 struct riscv_iommu_domain {
