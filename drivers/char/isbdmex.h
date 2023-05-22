@@ -575,7 +575,7 @@ void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 
 static inline u64 isbdm_gid(struct isbdm *ii)
 {
-	return ((u64)ii->rand_id << 32) | (ii->instance + 0x10);
+	return ((u64)ii->rand_id << 8) | (ii->instance + 0x10);
 }
 
 #endif
