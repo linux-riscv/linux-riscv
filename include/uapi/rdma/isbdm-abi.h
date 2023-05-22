@@ -62,8 +62,6 @@ enum isbdm_opcode {
 	ISBDM_OP_COMP_AND_SWAP,
 
 	ISBDM_OP_RECEIVE,
-	/* provider internal SQE */
-	ISBDM_OP_READ_RESPONSE,
 	/*
 	 * below opcodes valid for
 	 * in-kernel clients only
