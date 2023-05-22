@@ -1247,10 +1247,9 @@ void isbdm_sq_flush(struct isbdm_qp *qp)
 
 		isbdm_wqe_put_mem(wqe, tx_type(wqe));
 
-		if (tx_type(wqe) != ISBDM_OP_READ_RESPONSE &&
-		    ((tx_type(wqe) != ISBDM_OP_READ &&
-		      tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) ||
-		     wqe->wr_status == ISBDM_WR_QUEUED))
+		if ((tx_type(wqe) != ISBDM_OP_READ &&
+		     tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) ||
+		     wqe->wr_status == ISBDM_WR_QUEUED)
 
 			/*
 			 * An in-progress Read Request is already in
@@ -1316,7 +1315,6 @@ void isbdm_rq_flush(struct isbdm_qp *qp)
 					   0, 0, 0, ISBDM_WC_WR_FLUSH_ERR);
 
 		} else if (rx_type(wqe) != ISBDM_OP_READ &&
-			   rx_type(wqe) != ISBDM_OP_READ_RESPONSE &&
 			   rx_type(wqe) != ISBDM_OP_WRITE) {
 
 			isbdm_sqe_complete(qp, &wqe->sqe, 0,
