@@ -21,7 +21,6 @@ static int map_wc_opcode[ISBDM_NUM_OPCODES] = {
 	[ISBDM_OP_INVAL_STAG] = IB_WC_LOCAL_INV,
 	[ISBDM_OP_REG_MR] = IB_WC_REG_MR,
 	[ISBDM_OP_RECEIVE] = IB_WC_RECV,
-	[ISBDM_OP_READ_RESPONSE] = -1 /* not used */
 };
 
 enum ib_wc_status map_cqe_status[ISBDM_NUM_WC_STATUS] = {
