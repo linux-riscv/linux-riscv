@@ -280,10 +280,6 @@ void isbdm_wqe_put_mem(struct isbdm_wqe *wqe, enum isbdm_opcode op)
 		isbdm_unref_mem_sgl(wqe->mem, wqe->rqe.num_sge);
 		break;
 
-	case ISBDM_OP_READ_RESPONSE:
-		isbdm_unref_mem_sgl(wqe->mem, 1);
-		break;
-
 	default:
 		/*
 		 * ISBDM_OP_INVAL_STAG and SIW_OP_REG_MR
