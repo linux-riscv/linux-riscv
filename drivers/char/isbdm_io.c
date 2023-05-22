@@ -1001,9 +1001,6 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 	if (wqe->wr_status == ISBDM_WR_QUEUED) {
 		if (!(wqe->sqe.flags & ISBDM_WQE_INLINE)) {
-			if (tx_type(wqe) == ISBDM_OP_READ_RESPONSE)
-				wqe->sqe.num_sge = 1;
-
 			if (tx_type(wqe) != ISBDM_OP_READ &&
 			    tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) {
 
@@ -1070,7 +1067,6 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	case ISBDM_OP_SEND_WITH_IMM:
 	case ISBDM_OP_SEND_REMOTE_INV:
 	case ISBDM_OP_RECEIVE:
-	case ISBDM_OP_READ_RESPONSE:
 		isbdm_dbg_qp(qp,
 			     "Not yet implemented wqe type %d\n",
 			     tx_type(wqe));
@@ -1114,7 +1110,7 @@ next_wqe:
 	// 	goto done;
 	// }
 	tx_type = tx_type(wqe);
-	if (tx_type <= ISBDM_OP_READ_RESPONSE) {
+	if (tx_type <= ISBDM_OP_RECEIVE) {
 		rv = isbdm_qp_sq_proc_tx(qp, wqe);
 
 	} else {
@@ -1144,10 +1140,6 @@ next_wqe:
 			/*
 			 * Dereferencing happens in isbdm_complete_rdma_cmd().
 			 */
-			break;
-
-		case ISBDM_OP_READ_RESPONSE:
-			isbdm_wqe_put_mem(wqe, tx_type);
 			break;
 
 		default:
@@ -1233,15 +1225,6 @@ next_wqe:
 					   ISBDM_WC_LOC_QP_OP_ERR);
 
 			isbdm_qp_event(qp, IB_EVENT_QP_FATAL);
-			break;
-
-		case ISBDM_OP_READ_RESPONSE:
-			isbdm_dbg_qp(qp,
-				     "proc. read.response failed: %d\n",
-				     rv);
-
-			isbdm_qp_event(qp, IB_EVENT_QP_REQ_ERR);
-			isbdm_wqe_put_mem(wqe, ISBDM_OP_READ_RESPONSE);
 			break;
 
 		default:
