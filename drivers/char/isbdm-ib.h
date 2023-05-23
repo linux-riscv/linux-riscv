@@ -208,12 +208,6 @@ enum isbdm_access_status {
 	E_PD_MISMATCH
 };
 
-enum isbdm_wr_state {
-	ISBDM_WR_IDLE,
-	ISBDM_WR_QUEUED, /* processing has not started yet */
-	ISBDM_WR_INPROGRESS /* initiated processing of the WR */
-};
-
 /* The WQE currently being processed (RX or TX) */
 struct isbdm_wqe {
 	/* Copy of applications SQE or RQE */
@@ -222,7 +216,6 @@ struct isbdm_wqe {
 		struct isbdm_rqe rqe;
 	};
 	struct isbdm_mem *mem[ISBDM_MAX_SGE]; /* per sge's resolved mem */
-	enum isbdm_wr_state wr_status;
 	enum isbdm_wc_status wc_status;
 	u32 bytes; /* total bytes to process */
 	u32 processed; /* bytes processed */
@@ -354,10 +347,6 @@ struct isbdm_qp_attrs {
 
 /* Context associated with an active RX association. */
 struct isbdm_rx {
-	/*
-	 * Local destination memory of inbound RDMA operation.
-	 * Valid, according to wqe->wr_status
-	 */
 	struct isbdm_wqe wqe_active;
 
 // 	unsigned int pbl_idx; /* Index into current PBL */
@@ -443,6 +432,8 @@ struct isbdm_tx {
 // 	unsigned int tcp_seglen; /* remaining tcp seg space */
 
 	struct isbdm_wqe wqe_active;
+	bool send_pending; /* Protected by qp->sq_lock. */
+	bool tx_halted; /* Further TX halted due to error. */
 
 // 	int pbl_idx; /* Index into current PBL */
 // 	int sge_idx; /* current sge in tx */
