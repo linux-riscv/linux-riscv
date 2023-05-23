@@ -97,12 +97,9 @@ int isbdm_create_local_mb(struct isbdm_mr *mr)
 
 // Fill out a WQE for the next item to send. Returns -ENOENT if there are no
 // more entries.
-// TODO: Remove tx_wqe() and just pass a parameter to a wqe that this function
-// fills in.
-static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp)
+static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
 	struct isbdm_sqe *sqe;
-	struct isbdm_wqe *wqe = tx_wqe(qp);
 	int rv = 1;
 
 	if (unlikely(qp->tx_ctx.tx_halted)) {
@@ -1092,9 +1089,8 @@ tx_error:
  *
  * Must be called with the QP state read-locked.
  */
-static int isbdm_qp_sq_process(struct isbdm_qp *qp)
+static int isbdm_qp_sq_process(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
-	struct isbdm_wqe *wqe = tx_wqe(qp);
 	enum isbdm_opcode tx_type;
 	unsigned long flags;
 	int rv = 0;
@@ -1146,7 +1142,7 @@ next_wqe:
 		 */
 		spin_lock_irqsave(&qp->sq_lock, flags);
 		/* Activate returns -ENOENT if there are no more. */
-		rv = isbdm_activate_tx_from_sq(qp);
+		rv = isbdm_activate_tx_from_sq(qp, wqe);
 		if (rv == -ENOENT) {
 			rv = 0;
 			qp->tx_ctx.send_pending = 0;
@@ -1233,28 +1229,34 @@ done:
  */
 int isbdm_process_send_qp(struct isbdm_qp *qp)
 {
+	struct isbdm_wqe *wqe = &qp->tx_ctx.wqe_active;
 	int rc;
 
-	rc = isbdm_activate_tx_from_sq(qp);
+	rc = isbdm_activate_tx_from_sq(qp, wqe);
 	if (rc <= 0) {
 		isbdm_dbg_qp(qp, "Activate TX failed: %d\n", rc);
 		return rc;
 	}
 
-	rc = isbdm_qp_sq_process(qp);
+	rc = isbdm_qp_sq_process(qp, wqe);
 	if (rc)
 		isbdm_dbg_qp(qp, "SQ processing failed: %d\n", rc);
 
 	return rc;
 }
 
-static struct isbdm_wqe *isbdm_rqe_get(struct isbdm_qp *qp)
+/*
+ * Get a new receive queue entry, and fill out the given work queue entry based
+ * on it. Returns 0 if the WQE was successfully filled out, or -ENOENT if no
+ * RQEs are available.
+ */
+static int isbdm_rqe_get(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
 	struct isbdm_rqe *rqe;
 	struct isbdm_srq *srq;
-	struct isbdm_wqe *wqe = NULL;
 	bool srq_event = false;
 	unsigned long flags;
+	int rv = -ENOENT;
 
 	srq = qp->srq;
 	if (srq) {
@@ -1276,11 +1278,10 @@ static struct isbdm_wqe *isbdm_rqe_get(struct isbdm_qp *qp)
 		if (likely(num_sge <= ISBDM_MAX_SGE)) {
 			int i = 0;
 
-			wqe = rx_wqe(&qp->rx_untagged);
-			rx_type(wqe) = ISBDM_OP_RECEIVE;
 			wqe->bytes = 0;
 			wqe->processed = 0;
 			wqe->rqe.id = rqe->id;
+			wqe->rqe.opcode = ISBDM_OP_RECEIVE;
 			wqe->rqe.num_sge = num_sge;
 			while (i < num_sge) {
 				wqe->rqe.sge[i].laddr = rqe->sge[i].laddr;
@@ -1292,12 +1293,11 @@ static struct isbdm_wqe *isbdm_rqe_get(struct isbdm_qp *qp)
 			}
 			/* can be re-used by appl */
 			smp_store_mb(rqe->flags, 0);
+			rv = 0;
+
 		} else {
 			isbdm_dbg_qp(qp, "too many SGEs: %d\n", rqe->num_sge);
-			if (srq)
-				spin_unlock_irqrestore(&srq->lock, flags);
-
-			return NULL;
+			goto out;
 		}
 
 		if (!srq) {
@@ -1318,6 +1318,7 @@ static struct isbdm_wqe *isbdm_rqe_get(struct isbdm_qp *qp)
 			srq->rq_get++;
 		}
 	}
+
 out:
 	if (srq) {
 		spin_unlock_irqrestore(&srq->lock, flags);
@@ -1325,7 +1326,7 @@ out:
 			isbdm_srq_event(srq, IB_EVENT_SRQ_LIMIT_REACHED);
 	}
 
-	return wqe;
+	return rv;
 }
 
 /*
@@ -1402,16 +1403,15 @@ static int isbdm_rx_pbl(int *pbl_idx, struct isbdm_mem *mem, u64 addr,
 /*
  * isbdm_rx_complete()
  *
- * Complete processing of an RX message or ABort processing after encountering
- * error case.
+ * Complete processing of an RX message, or abort processing after encountering
+ * an error case.
  */
 static int isbdm_rx_complete(struct isbdm_qp *qp,
+			     struct isbdm_wqe *wqe,
 			     struct isbdm_packet_header *hdr,
 			     int error)
 {
-	/* TODO: Do we just have untagged since remote doesn't deal with RDMA? */
 	// struct isbdm_wqe *wqe = rx_wqe(qp->rx_fpdu);
-	struct isbdm_wqe *wqe = rx_wqe(&qp->rx_untagged);
 	enum isbdm_wc_status wc_status = wqe->wc_status;
 	int rv = 0;
 
@@ -1582,9 +1582,11 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 					cpu_to_be64(hdr->src_lid);
 	}
 
-	wqe = isbdm_rqe_get(qp);
-	if (unlikely(!wqe)) {
+	wqe = &qp->rx_ctx.wqe_active;
+	rv = isbdm_rqe_get(qp, wqe);
+	if (unlikely(rv)) {
 		isbdm_dbg_qp(qp, "Dropping RX packet, no RQEs\n");
+		wqe = NULL;
 		goto out;
 	}
 
@@ -1715,7 +1717,7 @@ out:
 
 		WARN_ON_ONCE(rv > 0);
 
-		isbdm_rx_complete(qp, hdr, rv);
+		isbdm_rx_complete(qp, wqe, hdr, rv);
 	}
 
 	isbdm_qp_put(qp);
