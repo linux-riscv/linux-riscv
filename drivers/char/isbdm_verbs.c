@@ -669,9 +669,8 @@ int isbdm_verbs_modify_qp(struct ib_qp *base_qp, struct ib_qp_attr *attr,
 
 		new_attrs.state = ib_qp_state_to_siw_qp_state[attr->qp_state];
 
-		/* TODO: anything needed here given no TX thread? */
-		// if (new_attrs.state > ISBDM_QP_STATE_RTS)
-		// 	qp->tx_ctx.tx_suspend = 1;
+		if (new_attrs.state > ISBDM_QP_STATE_RTS)
+			qp->tx_ctx.tx_halted = true;
 
 		isbdm_attr_mask |= ISBDM_QP_ATTR_STATE;
 	}
@@ -1146,17 +1145,18 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 	}
 
 	/*
-	 * Send directly if SQ processing is not in progress.
-	 * Eventual immediate errors (rv < 0) do not affect the involved
-	 * RI resources (Verbs, 8.3.1) and thus do not prevent from SQ
-	 * processing, if new work is already pending. But rv must be passed
-	 * to caller.
+	 * If nobody is processing the send queue, this routine needs to start
+	 * it, either by processing directly (for usermode callers) or kicking
+	 * off a worker thread (kernel callers that may be in an IRQ context).
+	 * The sq_lock synchronizes both other senders trying to get here, and
+	 * the worker itself trying to finish.
 	 */
-	if (wqe->wr_status != ISBDM_WR_IDLE) {
+	if (qp->tx_ctx.send_pending) {
 		spin_unlock_irqrestore(&qp->sq_lock, flags);
 		goto skip_direct_sending;
 	}
 
+	qp->tx_ctx.send_pending = true;
 	spin_unlock_irqrestore(&qp->sq_lock, flags);
 	if (rv < 0)
 		goto skip_direct_sending;
@@ -1167,12 +1167,10 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 	 * mutex_lock() needed to send now. Queue a work item to get off of this
 	 * context and send in peace.
 	 */
-	if (enqueue_count) {
+	if (enqueue_count)
 		schedule_work(&qp->send_work);
-		goto skip_direct_sending;
-	}
-
-	rv = isbdm_process_send_qp(qp);
+	else
+		rv = isbdm_process_send_qp(qp);
 
 skip_direct_sending:
 	up_read(&qp->state_lock);
