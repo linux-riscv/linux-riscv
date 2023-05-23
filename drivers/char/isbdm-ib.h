@@ -471,8 +471,7 @@ struct isbdm_qp {
 
 // 	struct siw_rx_stream rx_stream;
 // 	struct siw_rx_fpdu *rx_fpdu;
-	struct isbdm_rx rx_tagged;
-	struct isbdm_rx rx_untagged;
+	struct isbdm_rx rx_ctx;
 	spinlock_t rq_lock;
 	struct isbdm_rqe *recvq; /* recv queue element array */
 	uint32_t rq_get; /* consumer index into rq array */
@@ -498,11 +497,6 @@ struct isbdm_qp {
 };
 
 // /* helper macros */
-// #define rx_qp(rx) container_of(rx, struct siw_qp, rx_stream)
-// #define tx_qp(tx) container_of(tx, struct siw_qp, tx_ctx)
-#define tx_wqe(qp) (&(qp)->tx_ctx.wqe_active)
-#define rx_wqe(rctx) (&(rctx)->wqe_active)
-// #define rx_mem(rctx) ((rctx)->wqe_active.mem[0])
 #define tx_type(wqe) ((wqe)->sqe.opcode)
 #define rx_type(wqe) ((wqe)->rqe.opcode)
 #define tx_flags(wqe) ((wqe)->sqe.flags)
