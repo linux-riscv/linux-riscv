@@ -694,6 +694,7 @@ static int isbdm_qp_nextstate_from_idle(struct isbdm_qp *qp,
 
 		/* TODO: Any replacement for socket needed? */
 		//qp->attrs.sk = attrs->sk;
+		qp->tx_ctx.tx_halted = false;
 		qp->attrs.state = ISBDM_QP_STATE_RTS;
 
 		isbdm_dbg_qp(qp, "enter RTS: crc=%s, ord=%u, ird=%u\n",
@@ -729,21 +730,10 @@ static int isbdm_qp_nextstate_from_rts(struct isbdm_qp *qp,
 	switch (attrs->state) {
 	case ISBDM_QP_STATE_CLOSING:
 		/*
-		 * Verbs: move to IDLE if SQ and ORQ are empty.
-		 * Move to ERROR otherwise. But first of all we must
-		 * close the connection. So we keep CLOSING or ERROR
-		 * as a transient state, schedule connection drop work
-		 * and wait for the socket state change upcall to
-		 * come back closed.
+		 * Allow existing things in the queue to flush out, reject
+		 * new ones.
 		 */
-		if (tx_wqe(qp)->wr_status == ISBDM_WR_IDLE) {
-			qp->attrs.state = ISBDM_QP_STATE_CLOSING;
-
-		} else {
-			qp->attrs.state = ISBDM_QP_STATE_ERROR;
-			isbdm_sq_flush(qp);
-		}
-
+		qp->attrs.state = ISBDM_QP_STATE_CLOSING;
 		isbdm_rq_flush(qp);
 		drop_conn = 1;
 		break;
@@ -792,9 +782,7 @@ static void isbdm_qp_nextstate_from_term(struct isbdm_qp *qp,
 	case ISBDM_QP_STATE_ERROR:
 		isbdm_rq_flush(qp);
 		qp->attrs.state = ISBDM_QP_STATE_ERROR;
-		if (tx_wqe(qp)->wr_status != ISBDM_WR_IDLE)
-			isbdm_sq_flush(qp);
-
+		isbdm_sq_flush(qp);
 		break;
 
 	default:
@@ -810,23 +798,16 @@ static int isbdm_qp_nextstate_from_close(struct isbdm_qp *qp,
 
 	switch (attrs->state) {
 	case ISBDM_QP_STATE_IDLE:
-		WARN_ON(tx_wqe(qp)->wr_status != ISBDM_WR_IDLE);
 		qp->attrs.state = ISBDM_QP_STATE_IDLE;
 		break;
 
 	case ISBDM_QP_STATE_CLOSING:
-		/*
-		 * The LLP may already moved the QP to closing due to graceful
-		 * peer close init
-		 */
 		break;
 
 	case ISBDM_QP_STATE_ERROR:
 		/* QP was moved to CLOSING by LLP event not yet seen by user. */
 		qp->attrs.state = ISBDM_QP_STATE_ERROR;
-		if (tx_wqe(qp)->wr_status != ISBDM_WR_IDLE)
-			isbdm_sq_flush(qp);
-
+		isbdm_sq_flush(qp);
 		isbdm_rq_flush(qp);
 		break;
 
@@ -1220,7 +1201,6 @@ int isbdm_rqe_complete(struct isbdm_qp *qp, struct isbdm_rqe *rqe, u32 bytes,
 void isbdm_sq_flush(struct isbdm_qp *qp)
 {
 	struct isbdm_sqe *sqe;
-	struct isbdm_wqe *wqe = tx_wqe(qp);
 	int async_event = 0;
 
 	/*
@@ -1236,29 +1216,6 @@ void isbdm_sq_flush(struct isbdm_qp *qp)
 
 		WRITE_ONCE(sqe->flags, 0);
 		qp->orq_get++;
-	}
-
-	/*
-	 * Flush an in-progress WQE if present
-	 */
-	if (wqe->wr_status != ISBDM_WR_IDLE) {
-		isbdm_dbg_qp(qp, "flush current SQE, type %d, status %d\n",
-			     tx_type(wqe), wqe->wr_status);
-
-		isbdm_wqe_put_mem(wqe, tx_type(wqe));
-
-		if ((tx_type(wqe) != ISBDM_OP_READ &&
-		     tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) ||
-		     wqe->wr_status == ISBDM_WR_QUEUED)
-
-			/*
-			 * An in-progress Read Request is already in
-			 * the ORQ
-			 */
-			isbdm_sqe_complete(qp, &wqe->sqe, wqe->bytes,
-					 ISBDM_WC_WR_FLUSH_ERR);
-
-		wqe->wr_status = ISBDM_WR_IDLE;
 	}
 
 	/*
@@ -1299,37 +1256,6 @@ void isbdm_sq_flush(struct isbdm_qp *qp)
  */
 void isbdm_rq_flush(struct isbdm_qp *qp)
 {
-	struct isbdm_wqe *wqe = &qp->rx_untagged.wqe_active;
-
-	/*
-	 * Flush an in-progress untagged operation if present
-	 */
-	if (wqe->wr_status != ISBDM_WR_IDLE) {
-		isbdm_dbg_qp(qp, "flush current rqe, type %d, status %d\n",
-			     rx_type(wqe), wqe->wr_status);
-
-		isbdm_wqe_put_mem(wqe, rx_type(wqe));
-
-		if (rx_type(wqe) == ISBDM_OP_RECEIVE) {
-			isbdm_rqe_complete(qp, &wqe->rqe, wqe->bytes,
-					   0, 0, 0, ISBDM_WC_WR_FLUSH_ERR);
-
-		} else if (rx_type(wqe) != ISBDM_OP_READ &&
-			   rx_type(wqe) != ISBDM_OP_WRITE) {
-
-			isbdm_sqe_complete(qp, &wqe->sqe, 0,
-					   ISBDM_WC_WR_FLUSH_ERR);
-		}
-
-		wqe->wr_status = ISBDM_WR_IDLE;
-	}
-
-	wqe = &qp->rx_tagged.wqe_active;
-	if (wqe->wr_status != ISBDM_WR_IDLE) {
-		isbdm_wqe_put_mem(wqe, rx_type(wqe));
-		wqe->wr_status = ISBDM_WR_IDLE;
-	}
-
 	/* Flush the Receive Queue */
 	while (qp->attrs.rq_size) {
 		struct isbdm_rqe *rqe =
