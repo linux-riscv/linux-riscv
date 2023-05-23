@@ -906,7 +906,6 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 		    const struct ib_send_wr **bad_wr)
 {
 	struct isbdm_qp *qp = to_isbdm_qp(base_qp);
-	struct isbdm_wqe *wqe = tx_wqe(qp);
 	int enqueue_count = 0;
 	unsigned long flags;
 	int rv = 0;
