@@ -95,7 +95,8 @@ int isbdm_create_local_mb(struct isbdm_mr *mr)
 	return 0;
 }
 
-// Equivalent to isbdm_activate_tx_from_sq().
+// Fill out a WQE for the next item to send. Returns -ENOENT if there are no
+// more entries.
 // TODO: Remove tx_wqe() and just pass a parameter to a wqe that this function
 // fills in.
 static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp)
@@ -104,12 +105,16 @@ static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp)
 	struct isbdm_wqe *wqe = tx_wqe(qp);
 	int rv = 1;
 
+	if (unlikely(qp->tx_ctx.tx_halted)) {
+		isbdm_dbg_qp(qp, "QP halted\n");
+		return -ENOTCONN;
+	}
+
 	sqe = sq_get_next(qp);
 	if (!sqe)
-		return 0;
+		return -ENOENT;
 
 	memset(wqe->mem, 0, sizeof(*wqe->mem) * ISBDM_MAX_SGE);
-	wqe->wr_status = ISBDM_WR_QUEUED;
 
 	/* First copy SQE to kernel private memory */
 	memcpy(&wqe->sqe, sqe, sizeof(*sqe));
@@ -189,7 +194,6 @@ static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp)
 out:
 	if (unlikely(rv < 0)) {
 		isbdm_dbg_qp(qp, "error %d\n", rv);
-		wqe->wr_status = ISBDM_WR_IDLE;
 	}
 
 	return rv;
@@ -996,46 +1000,40 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
 	int rv = 0;
 
-	if (unlikely(wqe->wr_status == ISBDM_WR_IDLE))
-		return 0;
+	if (!(wqe->sqe.flags & ISBDM_WQE_INLINE)) {
+		if (tx_type(wqe) != ISBDM_OP_READ &&
+		    tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) {
 
-	if (wqe->wr_status == ISBDM_WR_QUEUED) {
-		if (!(wqe->sqe.flags & ISBDM_WQE_INLINE)) {
-			if (tx_type(wqe) != ISBDM_OP_READ &&
-			    tx_type(wqe) != ISBDM_OP_READ_LOCAL_INV) {
-
-				/*
-				 * Reference memory to be tx'd w/o checking
-				 * access for LOCAL_READ permission, since
-				 * not defined in RDMA core.
-				 */
-				rv = isbdm_check_sgl_tx(qp->pd, wqe, 0);
-				if (rv < 0) {
-					rv = -EINVAL;
-					goto tx_error;
-				}
-
-				wqe->bytes = rv;
-
-			} else {
-				wqe->bytes = 0;
+			/*
+			 * Reference memory to be tx'd w/o checking access for
+			 * LOCAL_READ permission, since not defined in RDMA
+			 * core.
+			 */
+			rv = isbdm_check_sgl_tx(qp->pd, wqe, 0);
+			if (rv < 0) {
+				rv = -EINVAL;
+				goto tx_error;
 			}
+
+			wqe->bytes = rv;
+
 		} else {
-			wqe->bytes = wqe->sqe.sge[0].length;
-			if (!rdma_is_kernel_res(&qp->base_qp.res)) {
-				if (wqe->bytes > ISBDM_MAX_INLINE) {
-					rv = -EINVAL;
-					goto tx_error;
-				}
-
-				wqe->sqe.sge[0].laddr =
-					(u64)(uintptr_t)&wqe->sqe.sge[1];
-			}
+			wqe->bytes = 0;
 		}
+	} else {
+		wqe->bytes = wqe->sqe.sge[0].length;
+		if (!rdma_is_kernel_res(&qp->base_qp.res)) {
+			if (wqe->bytes > ISBDM_MAX_INLINE) {
+				rv = -EINVAL;
+				goto tx_error;
+			}
 
-		wqe->wr_status = ISBDM_WR_INPROGRESS;
-		wqe->processed = 0;
+			wqe->sqe.sge[0].laddr =
+				(u64)(uintptr_t)&wqe->sqe.sge[1];
+		}
 	}
+
+	wqe->processed = 0;
 
 	/* Watch out for packets addressed to this same port: do loopback. */
 	if (is_loopback_packet(qp, wqe) &&
@@ -1104,11 +1102,6 @@ static int isbdm_qp_sq_process(struct isbdm_qp *qp)
 	//isbdm_dbg_qp(qp, "enter for type %d\n", tx_type(wqe));
 
 next_wqe:
-	// /* Stop QP processing if SQ state changed */
-	// if (unlikely(qp->tx_ctx.tx_suspend)) {
-	// 	siw_dbg_qp(qp, "tx suspended\n");
-	// 	goto done;
-	// }
 	tx_type = tx_type(wqe);
 	if (tx_type <= ISBDM_OP_RECEIVE) {
 		rv = isbdm_qp_sq_proc_tx(qp, wqe);
@@ -1143,14 +1136,24 @@ next_wqe:
 			break;
 
 		default:
-			WARN(1, "undefined WQE type %d\n", tx_type);
-			rv = -EINVAL;
+			WARN_ONCE(1, "undefined WQE type %d\n", tx_type);
+			break;
+		}
+
+		/*
+		 * Lock to synchronize with new senders wondering if they need
+		 * to start TX themselves.
+		 */
+		spin_lock_irqsave(&qp->sq_lock, flags);
+		/* Activate returns -ENOENT if there are no more. */
+		rv = isbdm_activate_tx_from_sq(qp);
+		if (rv == -ENOENT) {
+			rv = 0;
+			qp->tx_ctx.send_pending = 0;
+			spin_unlock_irqrestore(&qp->sq_lock, flags);
 			goto done;
 		}
 
-		spin_lock_irqsave(&qp->sq_lock, flags);
-		wqe->wr_status = ISBDM_WR_IDLE;
-		rv = isbdm_activate_tx_from_sq(qp);
 		spin_unlock_irqrestore(&qp->sq_lock, flags);
 		if (rv <= 0)
 			goto done;
@@ -1188,25 +1191,6 @@ next_wqe:
 		isbdm_dbg_qp(qp, "wqe type %d processing failed: %d\n",
 			     tx_type(wqe), rv);
 
-		spin_lock_irqsave(&qp->sq_lock, flags);
-
-		/* RREQ may have already been completed by inbound RRESP! */
-		if ((tx_type == ISBDM_OP_READ ||
-		     tx_type == ISBDM_OP_READ_LOCAL_INV) &&
-		    qp->attrs.orq_size) {
-			/* Cleanup pending entry in ORQ */
-			// TODO: Handle READ failure.
-			// qp->orq_put--;
-			// qp->orq[qp->orq_put % qp->attrs.orq_size].flags = 0;
-		}
-
-		spin_unlock_irqrestore(&qp->sq_lock, flags);
-
-		/* Immediately suspends further TX processing */
-		// TODO: Is this or some replacement needed?
-		// if (!qp->tx_ctx.tx_suspend)
-		// 	siw_qp_cm_drop(qp, 0);
-
 		switch (tx_type) {
 		case ISBDM_OP_SEND:
 		case ISBDM_OP_SEND_REMOTE_INV:
@@ -1232,13 +1216,21 @@ next_wqe:
 			rv = -EINVAL;
 		}
 
-		wqe->wr_status = ISBDM_WR_IDLE;
+		spin_lock_irqsave(&qp->sq_lock, flags);
+		/* Immediately halt further TX processing */
+		qp->tx_ctx.tx_halted = true;
+		qp->tx_ctx.send_pending = false;
+		spin_unlock_irqrestore(&qp->sq_lock, flags);
+
 	}
 done:
 	return rv;
 }
 
-/* Churn through entries added to the send QP. */
+/*
+ * Churn through entries added to the send QP. Assumes the synchronization for
+ * ensuring only one thread is doing this has already been handled.
+ */
 int isbdm_process_send_qp(struct isbdm_qp *qp)
 {
 	int rc;
@@ -1286,7 +1278,6 @@ static struct isbdm_wqe *isbdm_rqe_get(struct isbdm_qp *qp)
 
 			wqe = rx_wqe(&qp->rx_untagged);
 			rx_type(wqe) = ISBDM_OP_RECEIVE;
-			wqe->wr_status = ISBDM_WR_INPROGRESS;
 			wqe->bytes = 0;
 			wqe->processed = 0;
 			wqe->rqe.id = rqe->id;
@@ -1432,9 +1423,6 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 
 	case ISBDM_PACKET_IB_SEND:
 	// case RDMAP_SEND_INVAL:
-		if (wqe->wr_status == ISBDM_WR_IDLE)
-			break;
-
 		// srx->ddp_msn[RDMAP_UNTAGGED_QN_SEND]++;
 
 		if (error != 0 && wc_status == ISBDM_WC_SUCCESS)
@@ -1540,7 +1528,6 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 		break;
 	}
 
-	wqe->wr_status = ISBDM_WR_IDLE;
 	return rv;
 }
 
