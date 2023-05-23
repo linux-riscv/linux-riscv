@@ -31,19 +31,24 @@
 #define DCE_INTERRUPT_STATUS                       72
 #define DCE_INTERRUPT_MASK                         80
 
+#define DCE_PAGE_SIZE       0x1000
+
 /* TODO: fix offset */
 #define DCE_REG_WQITBA      0x0
 #define DCE_REG_WQRUNSTS    0x10
 #define DCE_REG_WQENABLE    0x18
 #define DCE_REG_WQIRQSTS    0x20
 
+#define DCE_WQCR_PAGE0      0x1
 #define DCE_REG_WQCR        0x0
+#define DCE_WQCR(wq) ((DCE_WQCR_PAGE0 + wq) * DCE_PAGE_SIZE + DCE_REG_WQCR)
 
-#define DCE_GCS                 (127 * 4096)
+#define DCE_GCS_PAGE            127
+#define DCE_GCS_BASE            (DCE_GCS_PAGE * DCE_PAGE_SIZE)
 #define DCE_GCS_KEYOWN_BASE     0x10
 #define DCE_GCS_KEYOWN_STRIDE   8
 #define DCE_GCS_KEYOWN(fn) \
-	(DCE_GCS + DCE_GCS_KEYOWN_BASE + fn * DCE_GCS_KEYOWN_STRIDE)
+	(DCE_GCS_BASE + DCE_GCS_KEYOWN_BASE + fn * DCE_GCS_KEYOWN_STRIDE)
 
 #define DCE_OPCODE_CLFLUSH            0
 #define DCE_OPCODE_MEMCPY             1
@@ -116,10 +121,11 @@ enum {
 
 /* WQ type based on ownership */
 enum wq_type {
-	DISABLED = 0,
+	DISABLED_WQ = 0,
 	KERNEL_WQ,
 	KERNEL_FLUSHING_WQ,
 	USER_OWNED_WQ,
+	USER_FLUSHING_WQ,
 	SHARED_KERNEL_WQ,
 	RESERVED_WQ,
 };
@@ -231,6 +237,7 @@ struct KernelQueueReq {
 #define SUBMIT_DESCRIPTOR _IOW(0xAA, 2, struct DescriptorInput*)
 #define SETUP_USER_WQ     _IOW(0xAA, 3, struct UserArea *)
 #define REQUEST_KERNEL_WQ _IOW(0xAA, 4, struct KernelQueueReq *)
+#define SYNC_WQ            _IO(0xAA, 5)
 
 #define MIN(a, b) \
 	({	__typeof__(a) _a = (a); \
@@ -258,7 +265,7 @@ struct work_queue {
 
 	spinlock_t lock;
 	/* Wait queue to wait on space being available for job submission */
-	wait_queue_head_t full_waiter;
+	wait_queue_head_t cleanupd_wq;
 } work_queue;
 
 struct dce_driver_priv {
