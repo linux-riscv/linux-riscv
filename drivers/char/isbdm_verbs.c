@@ -849,7 +849,7 @@ static int isbdm_rq_flush_wr(struct isbdm_qp *qp, const struct ib_recv_wr *wr,
 
 	while (wr) {
 		rqe.id = wr->wr_id;
-		rv = isbdm_rqe_complete(qp, &rqe, 0, 0, 0, 0,
+		rv = isbdm_rqe_complete(qp, &rqe, 0, 0, 0, 0, 0,
 					ISBDM_WC_WR_FLUSH_ERR);
 
 		if (rv) {
@@ -996,6 +996,7 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 		switch (wr->opcode) {
 		case IB_WR_SEND:
 		case IB_WR_SEND_WITH_INV:
+		case IB_WR_SEND_WITH_IMM:
 			if (wr->send_flags & IB_SEND_SOLICITED)
 				sqe->flags |= ISBDM_WQE_SOLICITED;
 
@@ -1019,9 +1020,15 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 			if (wr->opcode == IB_WR_SEND) {
 				sqe->opcode = ISBDM_OP_SEND;
 
-			} else {
+			} else if (wr->opcode == IB_WR_SEND_WITH_INV) {
 				sqe->opcode = ISBDM_OP_SEND_REMOTE_INV;
-				sqe->rkey = wr->ex.invalidate_rkey;
+				sqe->invalidate_rkey = wr->ex.invalidate_rkey;
+				sqe->flags |= ISBDM_WQE_REM_INVAL;
+
+			} else {
+				sqe->opcode = ISBDM_OP_SEND_WITH_IMM;
+				sqe->imm_data = wr->ex.imm_data;
+				sqe->flags |= ISBDM_WQE_HAS_IMMEDIATE;
 			}
 
 			if (qp->base_qp.qp_type == IB_QPT_UD ||
@@ -1044,15 +1051,6 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 
 		case IB_WR_RDMA_READ_WITH_INV:
 		case IB_WR_RDMA_READ:
-
-			/*
-			 * TODO: Consider allowing multiple entries.
-			 * iWarp restricts RREAD sink to SGL containing
-			 * 1 SGE only. we could relax to SGL with multiple
-			 * elements referring the SAME ltag or even sending
-			 * a private per-rreq tag referring to a checked
-			 * local sgl with MULTIPLE ltag's.
-			 */
 			if (unlikely(wr->num_sge != 1)) {
 				rv = -EINVAL;
 				break;
@@ -1069,6 +1067,7 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 
 			} else {
 				sqe->opcode = ISBDM_OP_READ_LOCAL_INV;
+				sqe->invalidate_rkey = wr->ex.invalidate_rkey;
 			}
 
 			break;

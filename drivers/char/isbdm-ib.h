@@ -548,7 +548,7 @@ void isbdm_free_qp(struct kref *ref);
 int isbdm_sqe_complete(struct isbdm_qp *qp, struct isbdm_sqe *sqe, u32 bytes,
 		       enum isbdm_wc_status status);
 int isbdm_rqe_complete(struct isbdm_qp *qp, struct isbdm_rqe *rqe, u32 bytes,
-		       u32 inval_stag, u16 src_lid, u32 src_qp,
+		       u32 wc_flags, u32 imm_or_stag, u16 src_lid, u32 src_qp,
 		       enum isbdm_wc_status status);
 // void siw_qp_llp_data_ready(struct sock *sk);
 // void siw_qp_llp_write_space(struct sock *sk);
