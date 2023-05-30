@@ -52,18 +52,20 @@ int isbdm_reap_cqe(struct isbdm_cq *cq, struct ib_wc *wc)
 		wc->byte_len = cqe->bytes;
 		wc->slid = cqe->src_lid;
 		wc->src_qp = cqe->src_qp;
+		if (cqe->flags & ISBDM_WQE_REM_INVAL) {
+			wc->ex.invalidate_rkey = cqe->inval_stag;
+			wc->wc_flags = IB_WC_WITH_INVALIDATE;
+
+		} else if (cqe->flags & ISBDM_WQE_HAS_IMMEDIATE) {
+			wc->ex.imm_data = cqe->imm_data;
+			wc->wc_flags = IB_WC_WITH_IMM;
+		}
 
 		/*
 		 * During CQ flush, also user land CQE's may get reaped here,
-		 * which do not hold a QP reference and do not qualify for
-		 * memory extension verbs.
+		 * which do not hold a QP reference.
 		 */
 		if (likely(rdma_is_kernel_res(&cq->base_cq.res))) {
-			if (cqe->flags & ISBDM_WQE_REM_INVAL) {
-				wc->ex.invalidate_rkey = cqe->inval_stag;
-				wc->wc_flags = IB_WC_WITH_INVALIDATE;
-			}
-
 			wc->qp = cqe->base_qp;
 			wc->opcode = map_wc_opcode[cqe->opcode];
 			wc->status = map_cqe_status[cqe->status];

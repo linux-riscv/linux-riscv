@@ -140,8 +140,8 @@ static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	if (wqe->sqe.flags & ISBDM_WQE_READ_FENCE) {
 		/* A READ cannot be fenced */
 		if (unlikely(wqe->sqe.opcode == ISBDM_OP_READ ||
-			     wqe->sqe.opcode ==
-				     ISBDM_OP_READ_LOCAL_INV)) {
+			     wqe->sqe.opcode == ISBDM_OP_READ_LOCAL_INV)) {
+
 			isbdm_dbg_qp(qp, "cannot fence read\n");
 			rv = -EINVAL;
 			goto out;
@@ -198,7 +198,7 @@ out:
 
 static struct isbdm_packet_header *
 isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
-			 u16 src_lid, u32 src_qp, u32 dest_qp)
+			 u16 src_lid, u32 src_qp, u32 dest_qp, u32 imm_or_rkey)
 {
 	struct isbdm_packet_header *hdr = buf->buf + buf->size;
 
@@ -212,6 +212,7 @@ isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
 	hdr->src_lid = cpu_to_le16(src_lid);
 	hdr->src_qp = cpu_to_le32(src_qp);
 	hdr->dest_qp = cpu_to_le32(dest_qp);
+	hdr->imm_data = cpu_to_le32(imm_or_rkey);
 	buf->size += sizeof(*hdr);
 	return hdr;
 }
@@ -243,7 +244,7 @@ ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size)
 	}
 
 	buf->flags = ISBDM_DESC_FS;
-	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0);
+	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0, 0);
 
 	/* Loop creating packets and queueing them on to our local list. */
 	while (remaining != 0) {
@@ -327,10 +328,12 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
 	bool is_loopback = is_loopback_packet(qp, wqe);
 	struct isbdm_packet_header *hdr;
+	u8 hdr_type;
 	struct isbdm_buf *buf, *tmp;
 	void *dst;
 	u32 dest_qp;
 	struct isbdm *ii = qp->sdev->ii;
+	u32 imm_or_rkey = 0;
 	LIST_HEAD(local_list);
 	struct isbdm_sge *sge;
 	int mem_idx = 0;
@@ -370,11 +373,28 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		 qp->base_qp.qp_num,
 		 dest_qp);
 
+	switch (tx_type(wqe)) {
+	case ISBDM_OP_SEND:
+		hdr_type = ISBDM_PACKET_IB_SEND;
+		break;
+
+	case ISBDM_OP_SEND_REMOTE_INV:
+		hdr_type = ISBDM_PACKET_IB_SEND_INVALIDATE;
+		imm_or_rkey = cpu_to_le32(wqe->sqe.invalidate_rkey);
+		break;
+
+	case ISBDM_OP_SEND_WITH_IMM:
+		hdr_type = ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE;
+		imm_or_rkey = cpu_to_le32(wqe->sqe.imm_data);
+		break;
+	}
+
 	hdr = isbdm_fill_packet_header(buf,
-				       ISBDM_PACKET_IB_SEND,
+				       hdr_type,
 				       qp->sdev->lid,
 				       qp->base_qp.qp_num,
-				       dest_qp);
+				       dest_qp,
+				       imm_or_rkey);
 
 	while (wqe->processed < wqe->bytes) {
 		size_t size_this_round;
@@ -1035,6 +1055,8 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	/* Watch out for packets addressed to this same port: do loopback. */
 	if (is_loopback_packet(qp, wqe) &&
 	    (tx_type(wqe) != ISBDM_OP_SEND) &&
+	    (tx_type(wqe) != ISBDM_OP_SEND_WITH_IMM) &&
+	    (tx_type(wqe) != ISBDM_OP_SEND_REMOTE_INV) &&
 	    (tx_type(wqe) != ISBDM_OP_WRITE) &&
 	    (tx_type(wqe) != ISBDM_OP_READ)) {
 		dev_err(&sdev->ii->pdev->dev,
@@ -1048,6 +1070,8 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 	switch (tx_type(wqe)) {
 	case ISBDM_OP_SEND:
+	case ISBDM_OP_SEND_WITH_IMM:
+	case ISBDM_OP_SEND_REMOTE_INV:
 		rv = isbdm_do_send(qp, wqe);
 		break;
 
@@ -1059,8 +1083,6 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		break;
 
 	case ISBDM_OP_READ_LOCAL_INV:
-	case ISBDM_OP_SEND_WITH_IMM:
-	case ISBDM_OP_SEND_REMOTE_INV:
 	case ISBDM_OP_RECEIVE:
 		isbdm_dbg_qp(qp,
 			     "Not yet implemented wqe type %d\n",
@@ -1110,6 +1132,7 @@ next_wqe:
 		/* WQE processing done */
 		switch (tx_type) {
 		case ISBDM_OP_SEND:
+		case ISBDM_OP_SEND_WITH_IMM:
 		case ISBDM_OP_SEND_REMOTE_INV:
 			isbdm_wqe_put_mem(wqe, tx_type);
 			fallthrough;
@@ -1155,21 +1178,6 @@ next_wqe:
 			goto done;
 
 		goto next_wqe;
-
-	} else if (rv == -EAGAIN) {
-		// isbdm_dbg_qp(qp, "sq paused: hd/tr %d of %d, data %d\n",
-		// 	     qp->tx_ctx.ctrl_sent, qp->tx_ctx.ctrl_len,
-		// 	     qp->tx_ctx.bytes_unsent);
-
-		isbdm_dbg_qp(qp, "SQ paused\n");
-		rv = 0;
-		goto done;
-
-	} else if (rv == -EINPROGRESS) {
-		// TODO: Is this needed at all, or can it be removed?
-		// rv = isbdm_sq_start(qp);
-		rv = -ENOSYS;
-		goto done;
 
 	} else {
 		/*
@@ -1413,6 +1421,8 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 {
 	// struct isbdm_wqe *wqe = rx_wqe(qp->rx_fpdu);
 	enum isbdm_wc_status wc_status = wqe->wc_status;
+	u32 imm_or_stag = 0;
+	u32 wc_flags = 0;
 	int rv = 0;
 
 	switch (hdr->type) {
@@ -1422,35 +1432,43 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 	// 	fallthrough;
 
 	case ISBDM_PACKET_IB_SEND:
-	// case RDMAP_SEND_INVAL:
+	case ISBDM_PACKET_IB_SEND_INVALIDATE:
+	case ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE:
 		// srx->ddp_msn[RDMAP_UNTAGGED_QN_SEND]++;
 
 		if (error != 0 && wc_status == ISBDM_WC_SUCCESS)
 			wc_status = ISBDM_WC_GENERAL_ERR;
 
-		/* Handle STag invalidation request */
-		// if (wc_status == ISBDM_WC_SUCCESS &&
-		//     (opcode == RDMAP_SEND_INVAL ||
-		//      opcode == RDMAP_SEND_SE_INVAL)) {
-		// 	rv = siw_invalidate_stag(qp->pd, srx->inval_stag);
-		// 	if (rv) {
-		// 		siw_init_terminate(
-		// 			qp, TERM_ERROR_LAYER_RDMAP,
-		// 			rv == -EACCES ?
-		// 				RDMAP_ETYPE_REMOTE_PROTECTION :
-		// 				RDMAP_ETYPE_REMOTE_OPERATION,
-		// 			RDMAP_ECODE_CANNOT_INVALIDATE, 0);
+		if (wc_status == ISBDM_WC_SUCCESS) {
+			/* Handle STag invalidation request */
+			if (hdr->type == ISBDM_PACKET_IB_SEND_INVALIDATE) {
+				imm_or_stag = le32_to_cpu(hdr->invalidate_rkey);
+				wc_flags = ISBDM_WQE_REM_INVAL;
+				rv = isbdm_invalidate_stag(qp->pd, imm_or_stag);
+				// TODO: Handle failure to invalidate the STag.
+			// 	if (rv) {
+			// 		siw_init_terminate(
+			// 			qp, TERM_ERROR_LAYER_RDMAP,
+			// 			rv == -EACCES ?
+			// 				RDMAP_ETYPE_REMOTE_PROTECTION :
+			// 				RDMAP_ETYPE_REMOTE_OPERATION,
+			// 			RDMAP_ECODE_CANNOT_INVALIDATE, 0);
 
-		// 		wc_status = SIW_WC_REM_INV_REQ_ERR;
-		// 	}
-		// 	rv = siw_rqe_complete(qp, &wqe->rqe, wqe->processed,
-		// 			      rv ? 0 : srx->inval_stag,
-		// 			      wc_status);
-		// } else {
-			rv = isbdm_rqe_complete(qp, &wqe->rqe, wqe->processed,
-						0, hdr->src_lid, hdr->src_qp,
-						wc_status);
-		// }
+			// 		wc_status = SIW_WC_REM_INV_REQ_ERR;
+			// 	}
+			/* Pluck out an immediate if there was one. */
+			} else if (hdr->type ==
+				   ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE) {
+
+				imm_or_stag = le32_to_cpu(hdr->imm_data);
+				wc_flags = ISBDM_WQE_HAS_IMMEDIATE;
+			}
+		}
+
+		rv = isbdm_rqe_complete(qp, &wqe->rqe, wqe->processed,
+					wc_flags, imm_or_stag, hdr->src_lid,
+					hdr->src_qp, wc_status);
+
 		isbdm_wqe_put_mem(wqe, ISBDM_OP_RECEIVE);
 		break;
 
@@ -1771,6 +1789,8 @@ void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 		break;
 
 	case ISBDM_PACKET_IB_SEND:
+	case ISBDM_PACKET_IB_SEND_INVALIDATE:
+	case ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE:
 		isbdm_process_ib_recv(ii, hdr, &packet_list, false);
 		break;
 
