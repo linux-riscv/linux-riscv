@@ -298,12 +298,16 @@ struct isbdm_rdma_command {
 #define ISBDM_PACKET_RAW 0x01
 /* Infiniband send op. */
 #define ISBDM_PACKET_IB_SEND 0x02
+/* Infiniband send with remote invalidate. */
+#define ISBDM_PACKET_IB_SEND_INVALIDATE 0x03
+/* Infiniband send with immediate. */
+#define ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE 0x04
 
 /* Protocol structure defined by software for send/recv packets. */
 struct isbdm_packet_header {
 	/* Set this to cpu_to_le16(ISBDM_PACKET_MAGIC). */
 	__le16 magic;
-	/* See ISBDM_PACKET_TYPE_* definitions. */
+	/* See ISBDM_PACKET_* definitions. */
 	u8 type;
 	/* Padding */
 	u8 reserved;
@@ -313,6 +317,12 @@ struct isbdm_packet_header {
 	__le32 src_qp;
 	/* Destination Queue Pair number for IB sends. */
 	__le32 dest_qp;
+	union {
+		/* The rkey to invalidate, for SEND_WITH_INVALIDATE type. */
+		__le32 invalidate_rkey;
+		/* The immediate data, for SEND_WITH_IMMEDIATE. */
+		__le32 imm_data;
+	};
 };
 
 /*

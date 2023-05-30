@@ -1124,7 +1124,7 @@ int isbdm_sqe_complete(struct isbdm_qp *qp, struct isbdm_sqe *sqe, u32 bytes,
 }
 
 int isbdm_rqe_complete(struct isbdm_qp *qp, struct isbdm_rqe *rqe, u32 bytes,
-		       u32 inval_stag, u16 src_lid, u32 src_qp,
+		       u32 wc_flags, u32 imm_or_stag, u16 src_lid, u32 src_qp,
 		       enum isbdm_wc_status status)
 {
 	struct isbdm_cq *cq = qp->rcq;
@@ -1151,20 +1151,19 @@ int isbdm_rqe_complete(struct isbdm_qp *qp, struct isbdm_rqe *rqe, u32 bytes,
 		cqe->status = status;
 		cqe->imm_data = 0;
 		cqe->bytes = bytes;
+		cqe->src_qp = src_qp;
+		cqe->src_lid = src_lid;
+		cqe_flags |= wc_flags &
+			     (ISBDM_WQE_REM_INVAL | ISBDM_WQE_HAS_IMMEDIATE);
+
+		if (wc_flags & ISBDM_WQE_REM_INVAL)
+			cqe->inval_stag = imm_or_stag;
+
+		else if (wc_flags & ISBDM_WQE_HAS_IMMEDIATE)
+			cqe->imm_data = imm_or_stag;
+
 		if (rdma_is_kernel_res(&cq->base_cq.res)) {
 			cqe->base_qp = &qp->base_qp;
-			if (inval_stag) {
-
-				WARN_ON_ONCE(src_lid || src_qp);
-
-				cqe_flags |= ISBDM_WQE_REM_INVAL;
-				cqe->inval_stag = inval_stag;
-
-			} else {
-				cqe->src_lid = src_lid;
-				cqe->src_qp = src_qp;
-			}
-
 		} else {
 			cqe->qp_id = qp_id(qp);
 		}
@@ -1264,7 +1263,7 @@ void isbdm_rq_flush(struct isbdm_qp *qp)
 		if (!READ_ONCE(rqe->flags))
 			break;
 
-		if (isbdm_rqe_complete(qp, rqe, 0, 0, 0, 0,
+		if (isbdm_rqe_complete(qp, rqe, 0, 0, 0, 0, 0,
 				       ISBDM_WC_WR_FLUSH_ERR))
 
 			break;
