@@ -96,7 +96,8 @@ enum isbdm_wqe_flags {
 	ISBDM_WQE_SOLICITED = (1 << 3),
 	ISBDM_WQE_READ_FENCE = (1 << 4),
 	ISBDM_WQE_REM_INVAL = (1 << 5),
-	ISBDM_WQE_COMPLETED = (1 << 6)
+	ISBDM_WQE_HAS_IMMEDIATE = (1 << 6),
+	ISBDM_WQE_COMPLETED = (1 << 7)
 };
 
 /* Send Queue Element */
@@ -107,6 +108,10 @@ struct isbdm_sqe {
 	/* Contains enum isbdm_opcode values */
 	__u8 opcode;
 	__u32 rkey;
+	union {
+		__u32 imm_data;
+		__u32 invalidate_rkey;
+	};
 	union {
 		__aligned_u64 raddr;
 		__aligned_u64 base_mr;
@@ -169,7 +174,7 @@ struct isbdm_cqe {
 	__u16 status;
 	__u32 bytes;
 	union {
-		__aligned_u64 imm_data;
+		__u32 imm_data;
 		__u32 inval_stag;
 	};
 	/* QP number or QP pointer */
