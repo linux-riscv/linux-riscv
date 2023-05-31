@@ -98,6 +98,10 @@ def userspace_launch_tests(c, kernel_version, long_valid, subset):
 def userspace_validate_kernel(c, kernel_version):
     print("* Validating {}...".format(kernel_version), end = "")
 
+    # Print dmesg (in the gitlab log so that we have access to it even
+    # if artifacts are not available).
+    c.sudo("dmesg")
+
     # Mount the shared directory that contains the linux sources
     c.sudo("mkdir -p /opt/sources/linux/")
     c.sudo("mount -t 9p -o trans=virtio host0 /opt/sources/linux/ -oversion=9p2000.L")
@@ -129,7 +133,7 @@ def userspace_install_kernel(c, version):
 def launch_vm_and_execute_userspace_fn(fn, kernel_version, satp_mode = "sv48"):
     print("* Launching the VM in {}...".format(satp_mode), end = "")
 
-    with open("vm_output", "a") as f:
+    with open("vm_output_{}".format(kernel_version), "a") as f:
         complete_qemu_cmd = qemu_cmd.format(satp_mode, vm_path, os.path.join(os.getcwd(), "../.."))
         print(complete_qemu_cmd)
         with subprocess.Popen(complete_qemu_cmd.split(" "), text = True, stdout = f, stderr = subprocess.STDOUT) as vm_proc:
