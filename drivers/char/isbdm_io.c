@@ -197,7 +197,7 @@ out:
 }
 
 static struct isbdm_packet_header *
-isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
+isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type, u8 flags,
 			 u16 src_lid, u32 src_qp, u32 dest_qp, u32 imm_or_rkey)
 {
 	struct isbdm_packet_header *hdr = buf->buf + buf->size;
@@ -208,7 +208,7 @@ isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type,
 
 	hdr->magic = cpu_to_le16(ISBDM_PACKET_MAGIC);
 	hdr->type = type;
-	hdr->reserved = 0;
+	hdr->flags = flags;
 	hdr->src_lid = cpu_to_le16(src_lid);
 	hdr->src_qp = cpu_to_le32(src_qp);
 	hdr->dest_qp = cpu_to_le32(dest_qp);
@@ -244,7 +244,7 @@ ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size)
 	}
 
 	buf->flags = ISBDM_DESC_FS;
-	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0, 0);
+	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0, 0, 0);
 
 	/* Loop creating packets and queueing them on to our local list. */
 	while (remaining != 0) {
@@ -286,7 +286,6 @@ ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size)
 	 * Now that all the buffers are set up, enqueue them onto the waitlist,
 	 * then stick as many as possible into the hardware.
 	 */
-
 	list_splice_tail_init(&local_list, &ii->tx_ring.wait_list);
 	isbdm_tx_enqueue(ii);
 	rc = size;
@@ -328,6 +327,7 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
 	bool is_loopback = is_loopback_packet(qp, wqe);
 	struct isbdm_packet_header *hdr;
+	u8 hdr_flags = 0;
 	u8 hdr_type;
 	struct isbdm_buf *buf, *tmp;
 	void *dst;
@@ -366,8 +366,12 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		dest_qp = qp->attrs.dest_qp_num;
 	}
 
+	if (tx_flags(wqe) & ISBDM_WQE_SOLICITED)
+		hdr_flags |= ISBDM_PACKET_FLAG_SOLICITED;
+
 	dev_info(&ii->pdev->dev,
-		 "Send %slength 0x%x to QP%d->%d\n",
+		 "Send %s%slength 0x%x to QP%d->%d\n",
+		 (hdr_flags & ISBDM_PACKET_FLAG_SOLICITED) ? "solicited " : "",
 		 is_loopback ? "loopback " : "",
 		 wqe->bytes,
 		 qp->base_qp.qp_num,
@@ -391,6 +395,7 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 	hdr = isbdm_fill_packet_header(buf,
 				       hdr_type,
+				       hdr_flags,
 				       qp->sdev->lid,
 				       qp->base_qp.qp_num,
 				       dest_qp,
@@ -1273,6 +1278,7 @@ static int isbdm_rqe_get(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 			goto out;
 
 		rqe = &srq->recvq[srq->rq_get % srq->num_rqe];
+
 	} else {
 		if (unlikely(!qp->recvq))
 			goto out;
@@ -1310,6 +1316,7 @@ static int isbdm_rqe_get(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 		if (!srq) {
 			qp->rq_get++;
+
 		} else {
 			if (srq->armed) {
 				/* Test SRQ limit */
@@ -1426,15 +1433,13 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 	int rv = 0;
 
 	switch (hdr->type) {
-	// case RDMAP_SEND_SE:
-	// case RDMAP_SEND_SE_INVAL:
-	// 	wqe->rqe.flags |= SIW_WQE_SOLICITED;
-	// 	fallthrough;
-
 	case ISBDM_PACKET_IB_SEND:
 	case ISBDM_PACKET_IB_SEND_INVALIDATE:
 	case ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE:
 		// srx->ddp_msn[RDMAP_UNTAGGED_QN_SEND]++;
+
+		if (hdr->flags & ISBDM_PACKET_FLAG_SOLICITED)
+			wqe->rqe.flags |= ISBDM_WQE_SOLICITED;
 
 		if (error != 0 && wc_status == ISBDM_WC_SUCCESS)
 			wc_status = ISBDM_WC_GENERAL_ERR;
@@ -1723,7 +1728,7 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 
 	wqe->processed += rcvd_bytes;
 	dev_info(&ii->pdev->dev,
-		 "Recv length %x QP%d->%d\n",
+		 "Recv length 0x%x QP%d->%d\n",
 		 wqe->processed,
 		 hdr->src_qp,
 		 hdr->dest_qp);
