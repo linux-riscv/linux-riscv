@@ -59,6 +59,7 @@ prepare-version:
     when: always
     paths:
       - rivos/linux_ci/*_defconfig_output
+      - rivos/linux_ci/vm_output_*
       - rivos/linux_ci/tests_results/
     expire_in: 3h
   script:
