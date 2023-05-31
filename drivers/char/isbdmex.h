@@ -303,14 +303,17 @@ struct isbdm_rdma_command {
 /* Infiniband send with immediate. */
 #define ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE 0x04
 
+/* Set if this is a Solicited Event. */
+#define ISBDM_PACKET_FLAG_SOLICITED 0x01
+
 /* Protocol structure defined by software for send/recv packets. */
 struct isbdm_packet_header {
 	/* Set this to cpu_to_le16(ISBDM_PACKET_MAGIC). */
 	__le16 magic;
 	/* See ISBDM_PACKET_* definitions. */
 	u8 type;
-	/* Padding */
-	u8 reserved;
+	/* See ISBDM_PACKET_FLAG_* definitions. */
+	u8 flags;
 	/* Source LID for IB UD sends. */
 	__le16 src_lid;
 	/* Source Queue Pair number for IB UD sends. */
