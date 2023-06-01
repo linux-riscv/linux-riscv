@@ -534,7 +534,8 @@ static int isbdm_check_sgl_tx(struct ib_pd *pd, struct isbdm_wqe *wqe,
 			      enum ib_access_flags perms)
 {
 	struct isbdm_sge *sge = &wqe->sqe.sge[0];
-	int i, len, num_sge = wqe->sqe.num_sge;
+	int i, num_sge = wqe->sqe.num_sge;
+	u64 len;
 
 	if (unlikely(num_sge > ISBDM_MAX_SGE))
 		return -EINVAL;
@@ -552,7 +553,11 @@ static int isbdm_check_sgl_tx(struct ib_pd *pd, struct isbdm_wqe *wqe,
 		len += sge->length;
 	}
 
-	return len;
+	if (len > U32_MAX)
+		return -ERANGE;
+
+	wqe->bytes = len;
+	return 0;
 }
 
 struct isbdm_status_map_entry {
@@ -1033,8 +1038,6 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 				rv = -EINVAL;
 				goto tx_error;
 			}
-
-			wqe->bytes = rv;
 
 		} else {
 			wqe->bytes = 0;
