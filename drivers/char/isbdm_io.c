@@ -816,9 +816,6 @@ static void isbdm_do_loopback_rdma(struct isbdm *ii,
 	isbdm_status = ISBDM_STATUS_SUCCESS;
 
 out:
-	if (local_mm)
-		mmput(local_mm);
-
 	if (remote_mm)
 		mmput(remote_mm);
 
