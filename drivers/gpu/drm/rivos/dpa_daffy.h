@@ -51,6 +51,28 @@ struct dpa_fw_queue_desc {
 	u64 d_ring_base_ptr;
 };
 
+// DUC-to-Host MSI vectors
+enum host_msi_id {
+	FW_QUEUE_H2D = 0,
+	FW_QUEUE_D2H = 1,
+	FW_FATAL = 2,
+	PERF_MON = 3,
+};
+
+// FW_QUEUE_H2D MSI vector cause offsets
+enum msi_causes_fw_queue_h2d {
+	PACKET_COMPLETE = 0,
+	BAD_PACKET = 1,
+	H2D_DMA_ERROR = 2,
+};
+
+// FW_QUEUE_D2H MSI vector cause offsets
+enum msi_causes_fw_queue_d2h {
+	NEW_PACKET = 0,
+	OVERFLOW = 1,
+	D2H_DMA_ERROR = 2,
+};
+
 enum daffy_command {
 	INVALID = 1,
 	GET_INFO = 2,

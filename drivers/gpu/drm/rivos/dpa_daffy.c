@@ -225,25 +225,35 @@ irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev)
 irqreturn_t daffy_handle_irq(int irq, void *dpa_dev)
 {
 	struct dpa_device *dpa = dpa_dev;
-	void __iomem *addr;
+	void __iomem *cause_addr;
 	int vec = irq - dpa->base_irq;
-	struct dpa_fw_queue_desc *fw_queue;
-	u64 dq_read_index, dq_write_index;
+	u64 cause;
 	irqreturn_t irq_ret = IRQ_HANDLED;
 
-	dev_info(dpa->dev, "%s: Received interrupt %d!!\n", __func__, vec);
-	addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + irq * sizeof(u64);
-	// XXX Parse cause
-	writeq(readq(addr), addr);
-	wake_up_interruptible(&dpa->wq);
+	cause_addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + vec * sizeof(u64);
+	cause = readq(cause_addr);
+	writeq(cause, cause_addr);
+	dev_info(dpa->dev, "%s: Received MSI interrupt %d with cause %llu\n",
+		__func__, vec, cause);
 
-	fw_queue = dpa->qinfo.fw_queue;
-	dq_read_index = fw_queue->d_read_index;
-	dq_write_index = fw_queue->d_write_index;
+	/*
+	 * Handle the MSI-X vector, only FW_QUEUE_H2D and FW_QUEUE_D2H
+	 * are supported for now.
+	 * TODO: Add handling for causes that indicate an error.
+	 */
+	switch (vec) {
+	case FW_QUEUE_H2D:
+		wake_up_interruptible(&dpa->wq);
+		break;
 
-	/* Check if our bottom-half needs to process incoming Daffy packets */
-	if (dq_read_index != dq_write_index)
+	case FW_QUEUE_D2H:
 		irq_ret = IRQ_WAKE_THREAD;
+		break;
+
+	default:
+		dev_warn(dpa->dev, "%s: MSI vector %d received but not handled",
+			__func__, vec);
+	}
 
 	return irq_ret;
 }
