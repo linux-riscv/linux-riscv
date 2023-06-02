@@ -682,6 +682,118 @@ static int isbdm_sva_copy(struct isbdm *ii, struct mm_struct *mm, u64 addr,
 	return -1;
 }
 
+/* Do a CompareExchange or FetchAndAdd locally. */
+static u32 isbdm_loopback_amo(struct isbdm *ii,
+			      struct isbdm_command *command,
+			      int op,
+			      u64 size,
+			      char *result_buf,
+			      struct mm_struct *remote_mm, u64 remote_addr)
+{
+	struct page *page = NULL;
+	int gup_flags = FOLL_WRITE;
+	struct vm_area_struct *vma;
+	void *maddr;
+	void *amo_addr;
+	u32 status;
+	int ret;
+
+	if ((size != 4) && (size != 8)) {
+		dev_warn(&ii->pdev->dev,
+			 "Loopback AMO with bad size %llx\n", size);
+
+		return ISBDM_STATUS_MALFORMED_COMMAND;
+	}
+
+	/*
+	 * The address must be aligned to the size, which also ensures the data
+	 * doesn't cross a page boundary.
+	 */
+	if (remote_addr & (size - 1)) {
+		dev_warn(&ii->pdev->dev,
+			 "Loopback AMO address misaligned");
+
+		return ISBDM_STATUS_MALFORMED_COMMAND;
+	}
+
+	/* Do a deconstructed version of __access_remote_vm() below. */
+	if (mmap_read_lock_killable(remote_mm)) {
+		dev_warn(&ii->pdev->dev,
+			 "Loopback AMO failed to lock remote mm");
+
+		return ISBDM_STATUS_RMB_ACCESS_FAULT;
+	}
+
+	ret = get_user_pages_remote(remote_mm, remote_addr, 1,
+				    gup_flags, &page, &vma, NULL);
+
+	if (ret <= 0) {
+		dev_warn(&ii->pdev->dev,
+			 "Loopback AMO failed to get user pages: %d\n", ret);
+
+		status = ISBDM_STATUS_LMB_ACCESS_FAULT;
+		goto unlock;
+	}
+
+	maddr = kmap(page);
+	amo_addr = maddr + (remote_addr & (PAGE_SIZE - 1));
+	instrument_copy_from_user_before(amo_addr, (void __user *)remote_addr,
+					 size);
+
+	instrument_copy_to_user((void __user *)remote_addr,
+				&command->cmd.amo_value1, size);
+
+	if (size == 4) {
+		u32 result32;
+
+		if (op == ISBDM_COMMAND_FETCH_ADD) {
+			result32 = atomic_fetch_add(command->cmd.amo_value1,
+						    (atomic_t *)amo_addr);
+
+		} else {
+			WARN_ON_ONCE(op != ISBDM_COMMAND_CAS);
+
+			result32 = atomic_cmpxchg((atomic_t *)amo_addr,
+						  (int)command->cmd.amo_value1,
+						  (int)command->cmd.amo_value2);
+		}
+
+		*(u32 *)result_buf = result32;
+
+	} else {
+		u64 result64;
+
+		WARN_ON_ONCE(size != 8);
+
+		if (op == ISBDM_COMMAND_FETCH_ADD) {
+			result64 = atomic64_fetch_add(command->cmd.amo_value1,
+						      (atomic64_t *)amo_addr);
+
+		} else {
+			WARN_ON_ONCE(op != ISBDM_COMMAND_CAS);
+
+			result64 = atomic64_cmpxchg((atomic64_t *)amo_addr,
+						    command->cmd.amo_value1,
+						    command->cmd.amo_value2);
+		}
+
+		*(u64 *)result_buf = result64;
+	}
+
+	set_page_dirty_lock(page);
+	instrument_copy_from_user_after(amo_addr, (void __user *)remote_addr,
+					size, 0);
+
+	flush_icache_user_page(vma, page, (void __user *)remote_addr, size);
+	kunmap(page);
+	put_page(page);
+	status = ISBDM_STATUS_SUCCESS;
+
+unlock:
+	mmap_read_unlock(remote_mm);
+	return status;
+}
+
 /* Do a silly loopback RDMA operation */
 static void isbdm_do_loopback_rdma(struct isbdm *ii,
 				   struct isbdm_command *command)
@@ -704,12 +816,6 @@ static void isbdm_do_loopback_rdma(struct isbdm *ii,
 	struct isbdm_remote_buffer rmb;
 	uint32_t isbdm_status;
 	char *page = NULL;
-
-	if ((op != ISBDM_COMMAND_READ) && (op != ISBDM_COMMAND_WRITE)) {
-		dev_err(&ii->pdev->dev, "TODO: Implement AMO loopback\n");
-		isbdm_status = ISBDM_STATUS_ABORTED;
-		goto out;
-	}
 
 	/* Get the remote memory buffer like the hardware would. */
 	if (rmbi >= ISBDMEX_RMB_TABLE_SIZE) {
@@ -787,6 +893,38 @@ static void isbdm_do_loopback_rdma(struct isbdm *ii,
 		isbdm_status = ISBDM_STATUS_ABORTED;
 		goto out;
 	}
+
+	/*
+	 * Handle atomic operations separately, they require more intricate
+	 * surgery to get a direct buffer.
+	 */
+	if ((op == ISBDM_COMMAND_CAS) || (op == ISBDM_COMMAND_FETCH_ADD)) {
+		isbdm_status = isbdm_loopback_amo(ii, command, op, size,
+						  page, remote_mm, riova);
+
+		if (isbdm_status != ISBDM_STATUS_SUCCESS) {
+			dev_warn(&ii->pdev->dev,
+				 "Loopback AMO failed: %x\n", isbdm_status);
+
+			goto out;
+		}
+
+		/* Copy back out to the local process. */
+		this_size = isbdm_sva_copy(ii, local_mm, liova, local_va, page,
+					   size, 0);
+
+		if (this_size != size) {
+			dev_warn(&ii->pdev->dev,
+				 "Loopback AMO copyback failed\n");
+
+			isbdm_status = ISBDM_STATUS_LMB_ACCESS_FAULT;
+		}
+
+		goto out;
+	}
+
+	/* Just reads and writes handled here on out. */
+	WARN_ON_ONCE((op != ISBDM_COMMAND_READ) && (op != ISBDM_COMMAND_WRITE));
 
 	/* Process a page at a time. */
 	while (size) {
@@ -1021,7 +1159,6 @@ out:
  */
 static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 {
-	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
 	int rv = 0;
 
 	if (!(wqe->sqe.flags & ISBDM_WQE_INLINE)) {
@@ -1056,23 +1193,6 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	}
 
 	wqe->processed = 0;
-
-	/* Watch out for packets addressed to this same port: do loopback. */
-	if (is_loopback_packet(qp, wqe) &&
-	    (tx_type(wqe) != ISBDM_OP_SEND) &&
-	    (tx_type(wqe) != ISBDM_OP_SEND_WITH_IMM) &&
-	    (tx_type(wqe) != ISBDM_OP_SEND_REMOTE_INV) &&
-	    (tx_type(wqe) != ISBDM_OP_WRITE) &&
-	    (tx_type(wqe) != ISBDM_OP_READ)) {
-		dev_err(&sdev->ii->pdev->dev,
-			"TODO: Support loopback to %x for op %d, qp type %d!\n",
-			sdev->lid,
-			tx_type(wqe),
-			qp->base_qp.qp_type);
-
-		return 0;
-	}
-
 	switch (tx_type(wqe)) {
 	case ISBDM_OP_SEND:
 	case ISBDM_OP_SEND_WITH_IMM:
