@@ -464,8 +464,25 @@ struct isbdm_command {
 	struct isbdm_user_ctx *user_ctx;
 	/* The queue pair this command was sent from. */
 	struct isbdm_qp *qp;
-	/* A copy of the work queue entry associated with this command. */
-	struct isbdm_wqe wqe;
+	union {
+		/*
+		 * The WQE itself, if this command has a single SGE, or is the
+		 * last/authoritative one.
+		 */
+		struct isbdm_wqe wqe;
+		/*
+		 * The parent WQE, if this is one of several commands comprising
+		 * an IB transfer.
+		 */
+		struct isbdm_wqe *parent_wqe;
+	};
+	/*
+	 * The number of ISBDM commands that comprise the WQE. Commands other
+	 * than the last one have this set to 0, indicating the parent_wqe
+	 * pointer should be used for updates. The last (or only in the case of
+	 * 1 SGE) command in a WQE will have this set to non-zero.
+	 */
+	int cmd_count;
 	/*
 	 * The address of a DMA pool buffer, used for RDMA ops with inline data.
 	 */
