@@ -282,7 +282,7 @@ void isbdm_wqe_put_mem(struct isbdm_wqe *wqe, enum isbdm_opcode op)
 
 	default:
 		/*
-		 * ISBDM_OP_INVAL_STAG and SIW_OP_REG_MR
+		 * ISBDM_OP_INVAL_STAG and ISBDM_OP_REG_MR
 		 * do not hold memory references
 		 */
 		break;
