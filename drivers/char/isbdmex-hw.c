@@ -1009,7 +1009,7 @@ int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi)
 	int rc = -ENOENT;
 	__le64 token = cpu_to_le64((unsigned long)file);
 
-	if (rmbi > ISBDMEX_RMB_TABLE_SIZE) {
+	if (rmbi >= ISBDMEX_RMB_TABLE_SIZE) {
 		dev_err(&ii->pdev->dev, "RMB index %u out of range\n", rmbi);
 		return -ERANGE;
 	}
