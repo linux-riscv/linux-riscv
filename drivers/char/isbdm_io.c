@@ -112,6 +112,8 @@ static int isbdm_activate_tx_from_sq(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		return -ENOENT;
 
 	memset(wqe->mem, 0, sizeof(*wqe->mem) * ISBDM_MAX_SGE);
+	wqe->wc_status = ISBDM_WC_SUCCESS;
+	wqe->processed = 0;
 
 	/* First copy SQE to kernel private memory */
 	memcpy(&wqe->sqe, sqe, sizeof(*sqe));
@@ -595,25 +597,8 @@ static enum isbdm_wc_status isbdm_map_hw_status(uint32_t status)
 	return ISBDM_WC_GENERAL_ERR;
 }
 
-/* Called when a completed command descriptor is reaped out of the hw table. */
-void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
-			     uint32_t status)
+static void isbdm_free_command(struct isbdm *ii, struct isbdm_command *command)
 {
-	enum isbdm_wc_status wc_status = isbdm_map_hw_status(status);
-	struct isbdm_qp *qp = command->qp;
-	u32 completed = 0;
-
-	if (status == ISBDM_STATUS_SUCCESS)
-		completed = le64_to_cpu(command->cmd.size_pasid_flags) &
-			    ISBDM_RDMA_SIZE_MASK;
-
-	isbdm_wqe_put_mem(&command->wqe, command->wqe.sqe.opcode);
-	if ((command->wqe.sqe.flags & ISBDM_WQE_SIGNALLED) ||
-	    (status != ISBDM_STATUS_SUCCESS)) {
-
-		isbdm_sqe_complete(qp, &command->wqe.sqe, completed, wc_status);
-	}
-
 	if (command->inline_dma_addr != 0) {
 		struct isbdm_sge *sge = &command->wqe.sqe.sge[0];
 		void *vaddr = (void *)(unsigned long)sge->laddr;
@@ -621,8 +606,55 @@ void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 		dma_pool_free(ii->inline_pool, vaddr, command->inline_dma_addr);
 		command->inline_dma_addr = 0;
 	}
+}
+
+/* Called when a completed command descriptor is reaped out of the hw table. */
+void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
+			     uint32_t status)
+{
+	enum isbdm_wc_status wc_status = isbdm_map_hw_status(status);
+	int cmd_count = command->cmd_count;
+	struct isbdm_wqe *wqe = cmd_count ? &command->wqe : command->parent_wqe;
+	struct isbdm_qp *qp = command->qp;
+
+	if (status == ISBDM_STATUS_SUCCESS)
+		wqe->processed += le64_to_cpu(command->cmd.size_pasid_flags) &
+				  ISBDM_RDMA_SIZE_MASK;
+
+	/*
+	 * If this is not the last command in the set, just update the parent
+	 * and wait for the last one to do the official completion.
+	 */
+	if (!cmd_count) {
+		if ((wc_status != ISBDM_WC_SUCCESS) &&
+		    (wqe->wc_status == ISBDM_STATUS_SUCCESS)) {
+
+			wqe->wc_status = wc_status;
+		}
+
+		isbdm_free_command(ii, command);
+		return;
+	}
+
+	/*
+	 * This is the last (or only) transfer in the set. Any failure along the
+	 * way bubbles up to the end result.
+	 */
+	if (wqe->wc_status != ISBDM_WC_SUCCESS)
+		wc_status = wqe->wc_status;
+
+	isbdm_wqe_put_mem(&command->wqe, command->wqe.sqe.opcode);
+	if ((command->wqe.sqe.flags & ISBDM_WQE_SIGNALLED) ||
+	    (wc_status != ISBDM_WC_SUCCESS)) {
+
+		isbdm_sqe_complete(qp,
+				   &command->wqe.sqe,
+				   wqe->processed,
+				   wc_status);
+	}
 
 	isbdm_qp_put(qp);
+	isbdm_free_command(ii, command);
 }
 
 /*
@@ -966,60 +998,52 @@ out:
 		free_page((unsigned long)page);
 
 	isbdm_complete_rdma_cmd(ii, command, isbdm_status);
+	put_cmd(ii, &ii->cmd_ring, command);
 }
 
-/* Submit an RDMA command from userspace */
-static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
+/*
+ * Set up an RDMA command for a single SGE. SGEs must be built in reverse order,
+ * so that the parent (last) element is available when the subcommands are
+ * created.
+ */
+static int isbdm_rdma_one_sge(struct isbdm *ii, struct isbdm_qp *qp,
+			      struct isbdm_wqe *wqe, struct isbdm_sge *sge,
+			      uint64_t *offset, struct list_head *list)
 {
-	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
-	bool is_loopback = is_loopback_packet(qp, wqe);
-	struct isbdm *ii = sdev->ii;
-	struct isbdm_command *command;
-	const char *command_name = "unknown";
-	struct isbdm_sge *sge = &wqe->sqe.sge[0];
 	struct isbdm_pd *pd = to_isbdm_pd(qp->pd);
-	int rc;
+	const char *command_name = "unknown";
+	struct isbdm_command *command;
+	void *pool_buf = NULL;
 	uint64_t value;
+	int rc;
 
-	if (wqe->sqe.num_sge != 1) {
-		dev_warn(&ii->pdev->dev,
-			 "Expected 1 SGE, got %u\n",
-			 wqe->sqe.num_sge);
-
-		return -EINVAL;
-	}
-
-	/* Just succeed zero sized writes. */
-	if (sge->length == 0) {
-		isbdm_sqe_complete(qp, &wqe->sqe, 0, ISBDM_WC_SUCCESS);
-		return 0;
-	}
-
-	/*
-	 * TODO: Kernel addresses fill out the structure differently (!PV, no
-	 * PASID, physical address, and maybe PP).
-	 */
-	if (rdma_is_kernel_res(&qp->base_qp.res)) {
-		dev_warn(&ii->pdev->dev, "Kernel VAs not yet implemented\n");
-		return -EINVAL;
-	}
-
-	if (pd->pasid == IOMMU_PASID_INVALID) {
-		dev_warn(&ii->pdev->dev, "PD lacks a PASID\n");
-		return -EAGAIN;
-	}
-
-	/* Grab a reference to give to the command. */
-	isbdm_qp_get(qp);
-	mutex_lock(&ii->cmd_ring.lock);
 	command = get_cmd(ii, &ii->cmd_ring);
 	if (!command) {
 		rc = -ENOMEM;
-		goto out;
+		goto err;
 	}
 
 	command->qp = qp;
-	memcpy(&command->wqe, wqe, sizeof(command->wqe));
+
+	/*
+	 * If the list is empty this must be the first (or only) command
+	 * created, AKA the last command in execution order. Make this the
+	 * official owner.
+	 */
+	if (list_empty(list)) {
+		memcpy(&command->wqe, wqe, sizeof(command->wqe));
+		command->cmd_count = wqe->sqe.num_sge;
+
+		WARN_ON_ONCE(!command->cmd_count);
+
+	} else {
+		struct isbdm_command *parent =
+			list_last_entry(list, struct isbdm_command, node);
+
+		command->cmd_count = 0;
+		command->parent_wqe = &parent->wqe;
+	}
+
 	value = sge->length & ISBDM_RDMA_SIZE_MASK;
 	value |= ISBDM_RDMA_NV;
 
@@ -1029,13 +1053,16 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	 * to this purpose and use that for the actual I/O, without PASID.
 	 */
 	if (wqe->sqe.flags & ISBDM_WQE_INLINE) {
-		void *pool_buf = dma_pool_alloc(ii->inline_pool,
-						GFP_KERNEL,
-						&command->inline_dma_addr);
+
+		WARN_ON_ONCE(sge != &wqe->sqe.sge[0]);
+
+		pool_buf = dma_pool_alloc(ii->inline_pool,
+					  GFP_KERNEL,
+					  &command->inline_dma_addr);
 
 		if (!pool_buf) {
 			rc = -ENOMEM;
-			goto out;
+			goto err;
 		}
 
 		/* We use non-zero to know it's there. */
@@ -1063,7 +1090,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		if (pd->pasid > ISBDM_RDMA_PASID_MASK) {
 			dev_warn(&ii->pdev->dev, "PASID out of range\n");
 			rc = -ERANGE;
-			goto out;
+			goto err;
 		}
 
 		value |= pd->pasid << ISBDM_RDMA_PASID_SHIFT;
@@ -1073,7 +1100,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	if ((wqe->sqe.rkey >> 8) == 0) {
 		dev_warn(&ii->pdev->dev, "Invalid zeroed rkey\n");
 		rc = -EINVAL;
-		goto out;
+		goto err;
 	}
 
 	value = isbdm_stag_to_rmbi(wqe->sqe.rkey) & ISBDM_RDMA_RMBI_MASK;
@@ -1106,7 +1133,7 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 				 sge->length);
 
 			rc = -EINVAL;
-			goto out;
+			goto err;
 		}
 
 		command->cmd.amo_value1 =
@@ -1118,24 +1145,93 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	default:
 		dev_warn(&ii->pdev->dev, "Unexpected op %d\n", tx_type(wqe));
 		rc = -EINVAL;
-		goto out;
+		goto err;
 	}
 
 	dev_info(&ii->pdev->dev,
 		 "RDMA %s%s, length 0x%x\n",
 		 command_name,
-		 is_loopback ? " loopback" : "",
+		 is_loopback_packet(qp, wqe) ? " loopback" : "",
 		 sge->length);
 
 	command->cmd.rmbi_command = cpu_to_le64(value);
-	command->cmd.riova = cpu_to_le64(wqe->sqe.raddr);
+
+	WARN_ON_ONCE(*offset < sge->length);
+
+	*offset -= sge->length;
+	command->cmd.riova = cpu_to_le64(wqe->sqe.raddr + *offset);
 	command->cmd.notify_iova = 0;
 	command->cmd.security_key = cpu_to_le64(wqe->sqe.rkey);
+	list_add(&command->node, list);
+	return 0;
+
+err:
+	if (command) {
+		isbdm_free_command(ii, command);
+		put_cmd(ii, &ii->cmd_ring, command);
+	}
+
+	return rc;
+}
+
+/* Submit an RDMA command from userspace */
+static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
+{
+	struct isbdm_device *sdev = to_isbdm_dev(qp->pd->device);
+	bool is_loopback = is_loopback_packet(qp, wqe);
+	struct isbdm *ii = sdev->ii;
+	struct isbdm_command *command;
+	struct isbdm_command *tmp;
+	LIST_HEAD(command_list);
+	struct isbdm_sge *sge = &wqe->sqe.sge[0];
+	struct isbdm_pd *pd = to_isbdm_pd(qp->pd);
+	uint64_t offset = 0;
+	int rc;
+	int i;
+
+	/* Just succeed zero sized writes. */
+	if (sge->length == 0) {
+		isbdm_sqe_complete(qp, &wqe->sqe, 0, ISBDM_WC_SUCCESS);
+		return 0;
+	}
+
+	/*
+	 * TODO: Kernel addresses fill out the structure differently (!PV, no
+	 * PASID, physical address, and maybe PP).
+	 */
+	if (rdma_is_kernel_res(&qp->base_qp.res)) {
+		dev_warn(&ii->pdev->dev, "Kernel VAs not yet implemented\n");
+		return -EINVAL;
+	}
+
+	if (pd->pasid == IOMMU_PASID_INVALID) {
+		dev_warn(&ii->pdev->dev, "PD lacks a PASID\n");
+		return -EAGAIN;
+	}
+
+	/* Compute the total length. */
+	for (i = 0; i < wqe->sqe.num_sge; i++)
+		offset += sge[i].length;
+
+	/* Grab a reference to give to the command. */
+	isbdm_qp_get(qp);
+	mutex_lock(&ii->cmd_ring.lock);
+	/* Prepare an ISBDM RDMA command for each SGE, in reverse order. */
+	for (i = wqe->sqe.num_sge - 1; i >= 0; i--) {
+		rc = isbdm_rdma_one_sge(ii, qp, wqe, &sge[i], &offset,
+					&command_list);
+
+		if (rc)
+			goto out;
+	}
+
 	if (is_loopback) {
-		isbdm_do_loopback_rdma(ii, command);
+		list_for_each_entry_safe(command, tmp, &command_list, node) {
+			isbdm_do_loopback_rdma(ii, command);
+		}
 
 	} else {
-		list_add_tail(&command->node, &ii->cmd_ring.wait_list);
+		list_splice_tail_init(&command_list, &ii->cmd_ring.wait_list);
 		isbdm_cmd_enqueue(ii);
 	}
 
@@ -1144,8 +1240,10 @@ static int isbdm_do_rdma(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 out:
 	if (rc) {
 		isbdm_qp_put(qp);
-		if (command)
+		list_for_each_entry_safe(command, tmp, &command_list, node) {
+			isbdm_free_command(ii, command);
 			put_cmd(ii, &ii->cmd_ring, command);
+		}
 	}
 
 	mutex_unlock(&ii->cmd_ring.lock);
@@ -1414,6 +1512,7 @@ static int isbdm_rqe_get(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 			wqe->bytes = 0;
 			wqe->processed = 0;
+			wqe->wc_status = ISBDM_WC_SUCCESS;
 			wqe->rqe.id = rqe->id;
 			wqe->rqe.opcode = ISBDM_OP_RECEIVE;
 			wqe->rqe.num_sge = num_sge;
