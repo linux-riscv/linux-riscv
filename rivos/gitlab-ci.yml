@@ -76,6 +76,28 @@ docker-build-defconfig:
         when: never
       - if: '$CI_COMMIT_BRANCH'
 
+docker-build-rivos-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - export KERNEL_CONFIG="rivos_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_rivos_defconfig.tar.gz
+      - make_logs_rivos_defconfig.txt
+    expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
+
 docker-build-ubuntu-defconfig:
   # Use the rivos-sdk container to get the toolchains and build tools.
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
@@ -161,6 +183,7 @@ package-deb:
   dependencies:
     - prepare-version
     - docker-build-defconfig
+    - docker-build-rivos-defconfig
     - docker-build-ubuntu-defconfig
     - docker-build-ubuntu-kasan-outline-defconfig
     - docker-build-ubuntu-kasan-inline-defconfig
@@ -174,7 +197,7 @@ package-deb:
   before_script:
     # clean up pre-built binaries from the rivos-sdk
     - rm -rf "${INSTALL_PATH}"
-    - if [[ -z "$TEST_ONLY" ]]; then tar -C/ -xzf linux_defconfig.tar.gz; fi
+    - if [[ -z "$TEST_ONLY" ]]; then tar -C/ -xzf linux_rivos_defconfig.tar.gz; fi
 
 sdk-linux-ubuntu-test:
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
