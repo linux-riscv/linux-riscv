@@ -371,13 +371,13 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	if (tx_flags(wqe) & ISBDM_WQE_SOLICITED)
 		hdr_flags |= ISBDM_PACKET_FLAG_SOLICITED;
 
-	dev_info(&ii->pdev->dev,
-		 "Send %s%slength 0x%x to QP%d->%d\n",
-		 (hdr_flags & ISBDM_PACKET_FLAG_SOLICITED) ? "solicited " : "",
-		 is_loopback ? "loopback " : "",
-		 wqe->bytes,
-		 qp->base_qp.qp_num,
-		 dest_qp);
+	dev_dbg(&ii->pdev->dev,
+		"Send %s%slength 0x%x to QP%d->%d\n",
+		(hdr_flags & ISBDM_PACKET_FLAG_SOLICITED) ? "solicited " : "",
+		is_loopback ? "loopback " : "",
+		wqe->bytes,
+		qp->base_qp.qp_num,
+		dest_qp);
 
 	switch (tx_type(wqe)) {
 	case ISBDM_OP_SEND:
@@ -644,6 +644,29 @@ void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 		wc_status = wqe->wc_status;
 
 	isbdm_wqe_put_mem(&command->wqe, command->wqe.sqe.opcode);
+
+	/* Invalidate the STag if this is a read with local invalidate. */
+	if ((tx_type(wqe) == ISBDM_OP_READ_LOCAL_INV) &&
+	    (wc_status == ISBDM_WC_SUCCESS)) {
+
+		if (rdma_is_kernel_res(&qp->base_qp.res) &&
+		    tx_type(wqe) == ISBDM_OP_READ_LOCAL_INV) {
+
+			int rv = isbdm_invalidate_stag(qp->pd,
+						       wqe->sqe.sge[0].lkey);
+
+			if (rv) {
+				dev_warn(&ii->pdev->dev,
+					 "%s: Cannot invalidate STag %x: %d\n",
+					 __func__,
+					 wqe->sqe.sge[0].lkey,
+					 rv);
+
+				wc_status = ISBDM_WC_GENERAL_ERR;
+			}
+		}
+	}
+
 	if ((command->wqe.sqe.flags & ISBDM_WQE_SIGNALLED) ||
 	    (wc_status != ISBDM_WC_SUCCESS)) {
 
@@ -1148,11 +1171,11 @@ static int isbdm_rdma_one_sge(struct isbdm *ii, struct isbdm_qp *qp,
 		goto err;
 	}
 
-	dev_info(&ii->pdev->dev,
-		 "RDMA %s%s, length 0x%x\n",
-		 command_name,
-		 is_loopback_packet(qp, wqe) ? " loopback" : "",
-		 sge->length);
+	dev_dbg(&ii->pdev->dev,
+		"RDMA %s%s, length 0x%x\n",
+		command_name,
+		is_loopback_packet(qp, wqe) ? " loopback" : "",
+		sge->length);
 
 	command->cmd.rmbi_command = cpu_to_le64(value);
 
@@ -1300,18 +1323,11 @@ static int isbdm_qp_sq_proc_tx(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 
 	case ISBDM_OP_WRITE:
 	case ISBDM_OP_READ:
+	case ISBDM_OP_READ_LOCAL_INV:
 	case ISBDM_OP_FETCH_AND_ADD:
 	case ISBDM_OP_COMP_AND_SWAP:
 		rv = isbdm_do_rdma(qp, wqe);
 		break;
-
-	case ISBDM_OP_READ_LOCAL_INV:
-	case ISBDM_OP_RECEIVE:
-		isbdm_dbg_qp(qp,
-			     "Not yet implemented wqe type %d\n",
-			     tx_type(wqe));
-
-		return -EINVAL;
 
 	default:
 		isbdm_dbg_qp(qp, "Unexpected wqe type %d\n", tx_type(wqe));
@@ -1524,6 +1540,7 @@ static int isbdm_rqe_get(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 				wqe->mem[i] = NULL;
 				i++;
 			}
+
 			/* can be re-used by appl */
 			smp_store_mb(rqe->flags, 0);
 			rv = 0;
@@ -1645,8 +1662,8 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 			     struct isbdm_packet_header *hdr,
 			     int error)
 {
-	// struct isbdm_wqe *wqe = rx_wqe(qp->rx_fpdu);
 	enum isbdm_wc_status wc_status = wqe->wc_status;
+	struct isbdm *ii = qp->sdev->ii;
 	u32 imm_or_stag = 0;
 	u32 wc_flags = 0;
 	int rv = 0;
@@ -1655,8 +1672,6 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 	case ISBDM_PACKET_IB_SEND:
 	case ISBDM_PACKET_IB_SEND_INVALIDATE:
 	case ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE:
-		// srx->ddp_msn[RDMAP_UNTAGGED_QN_SEND]++;
-
 		if (hdr->flags & ISBDM_PACKET_FLAG_SOLICITED)
 			wqe->rqe.flags |= ISBDM_WQE_SOLICITED;
 
@@ -1669,17 +1684,14 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 				imm_or_stag = le32_to_cpu(hdr->invalidate_rkey);
 				wc_flags = ISBDM_WQE_REM_INVAL;
 				rv = isbdm_invalidate_stag(qp->pd, imm_or_stag);
-				// TODO: Handle failure to invalidate the STag.
-			// 	if (rv) {
-			// 		siw_init_terminate(
-			// 			qp, TERM_ERROR_LAYER_RDMAP,
-			// 			rv == -EACCES ?
-			// 				RDMAP_ETYPE_REMOTE_PROTECTION :
-			// 				RDMAP_ETYPE_REMOTE_OPERATION,
-			// 			RDMAP_ECODE_CANNOT_INVALIDATE, 0);
+				if (rv) {
+					dev_warn(&ii->pdev->dev,
+						 "%s: Invalidate STag %x: %d\n",
+						 __func__,
+						 imm_or_stag,
+						 rv);
+				}
 
-			// 		wc_status = SIW_WC_REM_INV_REQ_ERR;
-			// 	}
 			/* Pluck out an immediate if there was one. */
 			} else if (hdr->type ==
 				   ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE) {
@@ -1695,75 +1707,6 @@ static int isbdm_rx_complete(struct isbdm_qp *qp,
 
 		isbdm_wqe_put_mem(wqe, ISBDM_OP_RECEIVE);
 		break;
-
-	// case RDMAP_RDMA_READ_RESP:
-	// 	if (wqe->wr_status == SIW_WR_IDLE)
-	// 		break;
-
-	// 	if (error != 0) {
-	// 		if ((srx->state == SIW_GET_HDR &&
-	// 		     qp->rx_fpdu->first_ddp_seg) || error == -ENODATA)
-	// 			/* possible RREQ in ORQ left untouched */
-	// 			break;
-
-	// 		if (wc_status == SIW_WC_SUCCESS)
-	// 			wc_status = SIW_WC_GENERAL_ERR;
-	// 	} else if (rdma_is_kernel_res(&qp->base_qp.res) &&
-	// 		   rx_type(wqe) == SIW_OP_READ_LOCAL_INV) {
-	// 		/*
-	// 		 * Handle any STag invalidation request
-	// 		 */
-	// 		rv = siw_invalidate_stag(qp->pd, wqe->sqe.sge[0].lkey);
-	// 		if (rv) {
-	// 			siw_init_terminate(qp, TERM_ERROR_LAYER_RDMAP,
-	// 					   RDMAP_ETYPE_CATASTROPHIC,
-	// 					   RDMAP_ECODE_UNSPECIFIED, 0);
-
-	// 			if (wc_status == SIW_WC_SUCCESS) {
-	// 				wc_status = SIW_WC_GENERAL_ERR;
-	// 				error = rv;
-	// 			}
-	// 		}
-	// 	}
-	// 	/*
-	// 	 * All errors turn the wqe into signalled.
-	// 	 */
-	// 	if ((wqe->sqe.flags & SIW_WQE_SIGNALLED) || error != 0)
-	// 		rv = siw_sqe_complete(qp, &wqe->sqe, wqe->processed,
-	// 				      wc_status);
-	// 	siw_wqe_put_mem(wqe, SIW_OP_READ);
-
-	// 	if (!error) {
-	// 		rv = siw_check_tx_fence(qp);
-	// 	} else {
-	// 		/* Disable current ORQ element */
-	// 		if (qp->attrs.orq_size)
-	// 			WRITE_ONCE(orq_get_current(qp)->flags, 0);
-	// 	}
-	// 	break;
-
-	// case RDMAP_RDMA_READ_REQ:
-	// 	if (!error) {
-	// 		rv = siw_init_rresp(qp, srx);
-	// 		srx->ddp_msn[RDMAP_UNTAGGED_QN_RDMA_READ]++;
-	// 	}
-	// 	break;
-
-	// case RDMAP_RDMA_WRITE:
-	// 	if (wqe->wr_status == SIW_WR_IDLE)
-	// 		break;
-
-	// 	/*
-	// 	 * Free References from memory object if
-	// 	 * attached to receive context (inbound WRITE).
-	// 	 * While a zero-length WRITE is allowed,
-	// 	 * no memory reference got created.
-	// 	 */
-	// 	if (rx_mem(&qp->rx_tagged)) {
-	// 		siw_mem_put(rx_mem(&qp->rx_tagged));
-	// 		rx_mem(&qp->rx_tagged) = NULL;
-	// 	}
-	// 	break;
 
 	default:
 		isbdm_dbg_qp(qp, "Unknown RX op %d\n", hdr->type);
@@ -1946,11 +1889,11 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 	}
 
 	wqe->processed += rcvd_bytes;
-	dev_info(&ii->pdev->dev,
-		 "Recv length 0x%x QP%d->%d\n",
-		 wqe->processed,
-		 hdr->src_qp,
-		 hdr->dest_qp);
+	dev_dbg(&ii->pdev->dev,
+		"Recv length 0x%x QP%d->%d\n",
+		wqe->processed,
+		hdr->src_qp,
+		hdr->dest_qp);
 
 	rv = 0;
 
