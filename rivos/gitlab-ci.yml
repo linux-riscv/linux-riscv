@@ -19,11 +19,11 @@ prepare-version:
 .build-kernel: &build-kernel
   - sudo apt update && sudo apt install -y kmod debhelper
   - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
-  - sccache --show-stats
+  - test ! -x /usr/bin/sccache || sccache --show-stats
   - date
   - bash rivos/build.sh ${BUILD_SH_ARGS} | tee -i make_logs_${KERNEL_CONFIG}.txt
   - date
-  - sccache --show-stats
+  - test ! -x /usr/bin/sccache || sccache --show-stats
 
 .validate-kernel: &validate-kernel
   - rm -rf "${INSTALL_DIR}"
