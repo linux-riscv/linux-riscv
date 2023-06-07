@@ -3,7 +3,11 @@
 set -e
 
 COMPILE="riscv64-unknown-linux-gnu-"
-CC="sccache riscv64-unknown-linux-gnu-gcc"
+CC="riscv64-unknown-linux-gnu-gcc"
+
+if [ -x /usr/bin/sccache ]; then
+    CC="sccache ${CC}"
+fi
 
 # For now, build only a monolithic kernel for our VM
 # and a rudimentary install
