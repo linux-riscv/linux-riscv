@@ -221,6 +221,8 @@ enum riscv_iommu_ddtp_modes {
 #define RISCV_IOMMU_IOHPMEVT_IDT	BIT_ULL(62)
 #define RISCV_IOMMU_IOHPMEVT_OF		BIT_ULL(63)
 
+#define RISCV_IOMMU_IOHPMEVT_CNT	31
+
 /**
  * enum riscv_iommu_hpmevent_id - Performance-monitoring event identifier
  *

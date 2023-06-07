@@ -30,7 +30,6 @@
 #include "../dma-iommu.h"
 #include "../iommu-sva.h"
 #include "iommu.h"
-#include "iommu-pmu.h"
 
 #include <asm/csr.h>
 #include <asm/delay.h>
@@ -2024,7 +2023,7 @@ static const struct iommu_ops riscv_iommu_ops = {
 
 void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 {
-	iommu_pmu_unregister(&iommu->pmu);
+	riscv_iommu_pmu_unregister(iommu);
 	iommu_device_unregister(&iommu->iommu);
 	iommu_device_sysfs_remove(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
@@ -2041,12 +2040,6 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	int ret;
 
 	iommu->eps = RB_ROOT;
-
-	/* TODO: figure out where to best place this */
-	iommu->pmu.iommu_dev = iommu;
-	if (ret = iommu_pmu_register(&iommu->pmu)) {
-		dev_err(dev, "failed to register IOMMU PMU: %d\n", ret);
-	}
 
 	fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
 
@@ -2120,6 +2113,13 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	if (ret) {
 		dev_err(dev, "cannot register sysfs interface (%d)\n", ret);
 		goto fail;
+	}
+
+	if (iommu->cap & RISCV_IOMMU_CAP_HPM) {
+		ret = riscv_iommu_pmu_register(iommu);
+		if (ret) {
+			dev_err(dev, "failed to register IOMMU PMU: %d\n", ret);
+		}
 	}
 
 	ret = iommu_device_register(&iommu->iommu, &riscv_iommu_ops, dev);
