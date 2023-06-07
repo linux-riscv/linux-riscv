@@ -143,8 +143,7 @@ struct isbdm_device *isbdm_device_create(struct isbdm *ii)
 	base_dev->node_guid = cpu_to_be64(isbdm_gid(ii));
 	dev_info(&ii->pdev->dev, "Node GUID is %llx\n", isbdm_gid(ii));
 	base_dev->uverbs_cmd_mask |= BIT_ULL(IB_USER_VERBS_CMD_POST_SEND);
-
-	/* TODO: Is this right? */
+	/* ISBDM is closer to a CA than it is a NIC, so... */
 	base_dev->node_type = RDMA_NODE_IB_CA;
 	memcpy(base_dev->node_desc, ISBDM_NODE_DESC_COMMON,
 	       sizeof(ISBDM_NODE_DESC_COMMON));
