@@ -44,6 +44,7 @@ kernel_build() {
 
     # For debugging purposes
     cp build_${config}/vmlinux ${INSTALL_PATH}/${config}
+    cp build_${config}/arch/riscv/boot/Image ${INSTALL_PATH}/${config}
 }
 
 kernel_tar() {
