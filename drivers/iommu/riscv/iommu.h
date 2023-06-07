@@ -22,9 +22,9 @@
 #include <linux/iommu.h>
 #include <linux/io-pgtable.h>
 #include <linux/mmu_notifier.h>
+#include <linux/perf_event.h>
 
 #include "iommu-bits.h"
-#include "iommu-pmu.h"
 
 #define IOMMU_PAGE_SIZE_4K	BIT_ULL(12)
 #define IOMMU_PAGE_SIZE_2M	BIT_ULL(21)
@@ -100,7 +100,8 @@ struct riscv_iommu_device {
 	struct mutex eps_mutex;
 
 	/* Performance Monitoring */
-	struct riscv_iommu_pmu pmu;
+	struct pmu pmu;
+	unsigned long counters_used;
 };
 
 struct riscv_iommu_domain {
@@ -183,5 +184,8 @@ int riscv_iommu_init_common(struct riscv_iommu_device *iommu);
 void riscv_iommu_remove(struct device *dev);
 
 int riscv_iommu_sysfs_add(struct riscv_iommu_device *iommu);
+
+int riscv_iommu_pmu_register(struct riscv_iommu_device *iommu);
+void riscv_iommu_pmu_unregister(struct riscv_iommu_device *iommu);
 
 #endif
