@@ -20,9 +20,10 @@
 #ifndef _DPA_DRM_H_
 #define _DPA_DRM_H_
 
+#include <linux/io.h>
+#include <linux/iommu.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
-#include <linux/iommu.h>
 #include <linux/wait.h>
 #include <linux/completion.h>
 #include <drm/drm.h>
@@ -32,34 +33,24 @@
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
 
-// DUC-SS register regions
-#define DUC_REGS_DISPATCH			0x0000
-#define DUC_REGS_INTERNAL_VF		0x0940
-#define DUC_REGS_QL_SYNC			0x0980
-#define DUC_REGS_INTERNAL_PF		0x0b80
-#define DUC_REGS_FW					0x0fd0
-#define DUC_REGS_CTN				0x1008
-#define DUC_REGS_DMA				0x1018
-#define DUC_REGS_DOORBELLS			0x2000
+#define DPA_DB_PAGES_BASE	0x0
+#define DPA_FWQ_BASE		0x11000
+#define DPA_PERF_MON_BASE	0x12000
+#define DPA_MSIX_CAUSE_BASE	0x13000
+#define DPA_MMIO_SIZE		0x100000
 
-// Individual regs within DUC_REGS_FW region
-#define DUC_REGS_FW_VER				0x0fd0
-#define DUC_REGS_FW_PASID			0x0fd8
-#define DUC_REGS_FW_DESC			0x0fe0
-#define DUC_REGS_FW_DOORBELL		0x0fe8
-#define DUC_REGS_FW_TIMESTAMP		0x1000
+#define DPA_NUM_DB_PAGES	16
+#define DPA_DB_PAGE_SIZE	4096
 
-#define DUC_PAGE_SIZE           (1 << 12)
-#define DUC_NUM_MSIX_INTERRUPTS	8
+#define DPA_FWQ_VERSION_ID		0x0
+#define DPA_FWQ_QUEUE_DESCRIPTOR	0x8
+#define DPA_FWQ_QUEUE_DOORBELL		0x10
+#define DPA_FWQ_QUEUE_CTRL		0x18
+#define DPA_FWQ_ERROR_CODE		0x20
 
-#define DUC_REGS_MSIX_CAUSE_START       (18 * DUC_PAGE_SIZE)
-#define DUC_REGS_MSIX_CAUSE_END			\
-	(DUC_REGS_MSIX_CAUSE_START + DUC_NUM_MSIX_INTERRUPTS)
-#define DUC_REGS_MSIX                   (19 * DUC_PAGE_SIZE)
+#define DPA_NUM_MSIX		8
 
-#define DUC_MMIO_SIZE				0x80000
-
-#define DPA_PROCESS_MAX (16)
+#define DPA_PROCESS_MAX		DPA_NUM_DB_PAGES
 
 #define DRM_IOCTL(name)						        \
 static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
@@ -178,6 +169,16 @@ static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 	return container_of(ddev, struct dpa_device, ddev);
 }
 
+static inline u64 dpa_fwq_read(struct dpa_device *dpa, u64 offset)
+{
+	return readq(dpa->regs + DPA_FWQ_BASE + offset);
+}
+
+static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
+{
+	writeq(val, dpa->regs + DPA_FWQ_BASE + offset);
+}
+
 /* some random number for now */
 #define DPA_GPU_ID (1234)
 
@@ -186,9 +187,6 @@ static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
 
 /* For now let userspace allocate anything within a 47-bit address space */
 #define DPA_GPUVM_ADDR_LIMIT ((1ULL << 47) - 1)
-
-/* Size of a doorbell page */
-#define DPA_DOORBELL_PAGE_SIZE (PAGE_SIZE)
 
 struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm);
 struct dpa_process *dpa_get_process_by_pasid(u32 pasid);

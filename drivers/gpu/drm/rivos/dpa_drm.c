@@ -101,8 +101,8 @@ static void dpa_setup_queue(struct dpa_device *dpa)
 {
 	dev_warn(dpa->dev, "DMA address of queue is: %llx\n",
 		dpa->qinfo.fw_queue_dma_addr);
-	writeq(dpa->qinfo.fw_queue_dma_addr, dpa->regs + DUC_REGS_FW_DESC);
-	writeq(0, dpa->regs + DUC_REGS_FW_PASID);
+	dpa_fwq_write(dpa, dpa->qinfo.fw_queue_dma_addr,
+		      DPA_FWQ_QUEUE_DESCRIPTOR);
 }
 
 static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
@@ -123,7 +123,7 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 	switch (type) {
 
 	case DRM_MMAP_TYPE_DOORBELL:
-		if (size != DPA_DOORBELL_PAGE_SIZE) {
+		if (size != DPA_DB_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
 					__func__);
 			kref_put(&p->ref, dpa_release_process);
@@ -256,11 +256,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
 
 	// Setup doorbell register offsets
-	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) + DUC_REGS_DOORBELLS;
-	if (!dpa_app->doorbell_base) {
-		dev_err(dpa_dev, "DPA failed to map doorbell registers\n");
-		return -EIO;
-	}
+	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
+		DPA_DB_PAGES_BASE;
 
 	// Init dpa_signal_waiter queue
 	INIT_LIST_HEAD(&dpa_app->signal_waiters);
@@ -328,7 +325,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dpa->drm_minor = ddev->render->index;
 
-	version = ioread64(dpa->regs + DUC_REGS_FW_VER);
+	version = dpa_fwq_read(dpa, DPA_FWQ_VERSION_ID);
 	dev_warn(dev, "%s: got version %u\n", __func__, version);
 
 	/*
@@ -347,7 +344,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_info(dev, "No HBM node\n");
 	}
 
-	err = pci_alloc_irq_vectors(pdev, 1, DUC_NUM_MSIX_INTERRUPTS, PCI_IRQ_MSIX);
+	err = pci_alloc_irq_vectors(pdev, 1, DPA_NUM_MSIX, PCI_IRQ_MSIX);
 	if (err < 0) {
 		dev_err(dev, "Failed setting up IRQ\n");
 		goto free_daffy;
@@ -359,7 +356,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		pdev->msix_enabled);
 
 	dpa->base_irq = pci_irq_vector(pdev, 0);
-	for (int i = 0; i < DUC_NUM_MSIX_INTERRUPTS; i++) {
+	for (int i = 0; i < DPA_NUM_MSIX; i++) {
 		vec = pci_irq_vector(pdev, i);
 		/* auto frees on device detach, nice */
 		err = devm_request_threaded_irq(dev, vec, daffy_handle_irq,

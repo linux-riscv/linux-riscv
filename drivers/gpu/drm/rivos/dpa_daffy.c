@@ -63,7 +63,7 @@ static unsigned int daffy_add_to_queue(struct dpa_device *dev,
 
 	mutex_unlock(&dev->daffy_lock);
 
-	writeq(1, dev->regs + DUC_REGS_FW_DOORBELL);
+	dpa_fwq_write(dev, 1, DPA_FWQ_QUEUE_DOORBELL);
 
 	return index;
 }
@@ -230,7 +230,7 @@ irqreturn_t daffy_handle_irq(int irq, void *dpa_dev)
 	u64 cause;
 	irqreturn_t irq_ret = IRQ_HANDLED;
 
-	cause_addr = dpa->regs + DUC_REGS_MSIX_CAUSE_START + vec * sizeof(u64);
+	cause_addr = dpa->regs + DPA_MSIX_CAUSE_BASE + vec * sizeof(u64);
 	cause = readq(cause_addr);
 	writeq(cause, cause_addr);
 	dev_info(dpa->dev, "%s: Received MSI interrupt %d with cause %llu\n",
