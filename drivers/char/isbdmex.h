@@ -517,6 +517,8 @@ struct isbdm {
 	/* Remembers the most recent descriptor with the FIRST_SEGMENT bit. */
 	struct isbdm_buf *packet_start;
 	struct isbdm_remote_buffer *rmb_table;
+	/* Optimise search by starting after previously allocated index */
+	int prev_alloced_rmbi;
 	dma_addr_t rmb_table_physical;
 	struct mutex rmb_table_lock;
 	/*
