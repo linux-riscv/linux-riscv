@@ -30,6 +30,8 @@
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
 
+#include "dpa_daffy.h"
+
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
 
@@ -63,20 +65,18 @@ static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
 	return dpa_ioctl_##name(p, dpa, data);				\
 }									\
 
-// contains info about the queue to fw
-struct dpa_fwq_info {
+struct dpa_fwq {
+	struct dpa_fw_queue_desc desc;
+	struct dpa_fw_queue_pkt h_ring[DPA_FW_QUEUE_SIZE];
+	struct dpa_fw_queue_pkt d_ring[DPA_FW_QUEUE_SIZE];
+};
 
-	// one page allocated for queue to fw
-	struct dpa_fw_queue_desc *fw_queue;
+struct dpa_daffy {
+	struct mutex lock;
+	wait_queue_head_t wq;
 
-	// convinience pointers to the rings
-	struct dpa_fw_queue_pkt *h_ring;
-	struct dpa_fw_queue_pkt *d_ring;
-
-	// dma address of the q
-	dma_addr_t fw_queue_dma_addr;
-	// XXX lock? use big lock?
-	// XXX need to add wait event if q is full
+	struct dpa_fwq *fwq;
+	dma_addr_t fwq_dma_addr;
 };
 
 struct dpa_device {
@@ -100,10 +100,7 @@ struct dpa_device {
 	struct list_head dpa_processes;
 	unsigned int dpa_process_count;
 
-	/* Daffy structures */
-	struct mutex daffy_lock;
-	wait_queue_head_t wq;
-	struct dpa_fwq_info qinfo;
+	struct dpa_daffy daffy;
 };
 
 // keep track of all allocated aql queues

@@ -20,8 +20,6 @@
 #ifndef _DPA_DRM_DAFFY_H_
 #define _DPA_DRM_DAFFY_H_
 
-#include "dpa_drm.h"
-
 // don't assume the value of PAGE_SIZE
 #define DPA_FW_QUEUE_PAGE_SIZE (4 * 1024)
 
@@ -187,8 +185,8 @@ struct dpa_fw_queue_pkt {
 struct dpa_device;
 struct dpa_process;
 
-int daffy_alloc_fw_queue(struct dpa_device *dpa_dev);
-void daffy_free_fw_queue(struct dpa_device *dpa_dev);
+int daffy_init(struct dpa_device *dpa_dev);
+void daffy_free(struct dpa_device *dpa_dev);
 int daffy_get_info_cmd(struct dpa_device *dev,
 					struct dpa_process *p,
 					struct drm_dpa_get_info *args);

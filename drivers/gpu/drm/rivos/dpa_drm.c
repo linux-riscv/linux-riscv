@@ -97,14 +97,6 @@ static const struct pci_device_id dpa_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 
-static void dpa_setup_queue(struct dpa_device *dpa)
-{
-	dev_warn(dpa->dev, "DMA address of queue is: %llx\n",
-		dpa->qinfo.fw_queue_dma_addr);
-	dpa_fwq_write(dpa, dpa->qinfo.fw_queue_dma_addr,
-		      DPA_FWQ_QUEUE_DESCRIPTOR);
-}
-
 static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 {
 	struct dpa_process *p;
@@ -280,7 +272,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device_node *np;
 	int err, vec, nid;
 	u16 vendor, device;
-	u32 version;
 
 	dev_warn(dev, "%s: DPA start\n", __func__);
 	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
@@ -315,18 +306,11 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dpa->regs = pcim_iomap_table(pdev)[0];
 
-	err = daffy_alloc_fw_queue(dpa);
-	if (err) {
-		dev_warn(dev, "%s: unable to allocate memory\n", __func__);
+	err = daffy_init(dpa);
+	if (err)
 		goto disable_sva;
-	}
-	// Write Daffy information to FW queue regs
-	dpa_setup_queue(dpa);
 
 	dpa->drm_minor = ddev->render->index;
-
-	version = dpa_fwq_read(dpa, DPA_FWQ_VERSION_ID);
-	dev_warn(dev, "%s: got version %u\n", __func__, version);
 
 	/*
 	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
@@ -367,9 +351,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 
-	init_waitqueue_head(&dpa->wq);
-	mutex_init(&dpa->daffy_lock);
-
 	INIT_LIST_HEAD(&dpa->dpa_processes);
 	mutex_init(&dpa->dpa_processes_lock);
 
@@ -383,7 +364,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 free_irqs:
 	pci_free_irq_vectors(pdev);
 free_daffy:
-	daffy_free_fw_queue(dpa);
+	daffy_free(dpa);
 disable_sva:
 	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
 
@@ -744,7 +725,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 {
 	if (dpa) {
 		// XXX other stuff
-		daffy_free_fw_queue(dpa);
+		daffy_free(dpa);
 		// Disable PASID support
 		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 		// unmap regs
