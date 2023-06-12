@@ -419,7 +419,9 @@ static void riscv_iommu_cmd_ats_set_pid(struct riscv_iommu_command *cmd, u32 pid
 
 static void riscv_iommu_cmd_ats_set_dseg(struct riscv_iommu_command *cmd, u8 seg)
 {
-	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_ATS_DSEG, seg) | RISCV_IOMMU_CMD_ATS_DSV;
+	// Segments aren't properly supported by the RISC-V IOMMU in QEMU.
+	// We comment the following code until this is resolved.
+	// cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_ATS_DSEG, seg) | RISCV_IOMMU_CMD_ATS_DSV;
 }
 
 static void riscv_iommu_cmd_ats_set_payload(struct riscv_iommu_command *cmd, u64 payload)
