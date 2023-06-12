@@ -1,0 +1,272 @@
+include:
+  - project: 'rv/it/int/rivos-sdk'
+    ref: rivos/main
+    file: '/packager/gitlab-ci-packaging-helper.yml'
+
+variables:
+  INSTALL_PATH: "/rivos/sysroot/riscv/boot"
+  KUBERNETES_CPU_REQUEST: "32"
+  KUBERNETES_CPU_LIMIT: "32"
+
+# Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
+prepare-version:
+  after_script:
+    - upstream_version="$(git describe --always --tags --abbrev=0 --match='v[0-9].*' | sed -e 's@-rc@~rc@')"
+    - sed -i -e "s@GIT_TAG=.\+@GIT_TAG=${upstream_version:1}@" gitvars.env
+    # Debugging helper
+    - cat gitvars.env
+
+.build-kernel: &build-kernel
+  - sudo apt update && sudo apt install -y kmod debhelper
+  - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+  - test ! -x /usr/bin/sccache || sccache --show-stats
+  - date
+  - bash rivos/build.sh ${BUILD_SH_ARGS} | tee -i make_logs_${KERNEL_CONFIG}.txt
+  - date
+  - test ! -x /usr/bin/sccache || sccache --show-stats
+
+.validate-kernel: &validate-kernel
+  - rm -rf "${INSTALL_DIR}"
+  - |
+    if [[ "$TEST_ONLY" == "yes" ]]; then
+      curl --output artifacts.zip -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.ba.rivosinc.com/api/v4/projects/38/jobs/artifacts/${CI_COMMIT_REF_NAME//\//%2F}/download?job=docker-build-${KERNEL_CONFIG//_/-}"
+      if ! unzip artifacts.zip; then
+        echo "Artifacts not found!"
+        exit -1
+      fi
+    fi
+    tar -C/ -xzf linux_${KERNEL_CONFIG}.tar.gz
+  - apt update
+  - pip install fabric decorator
+  - cd rivos/linux_ci
+  - |
+      if [[ "$TEST_SATP" == "yes" ]]; then
+        qemu_valid_option=" --satp-valid"
+      else
+        qemu_valid_option=""
+      fi
+      if [[ "$TEST_LONG" == "yes" ]]; then
+          timeout="1440m"
+          long_valid=" --long-valid"
+      else
+          timeout="57m"
+          long_valid=""
+      fi
+      timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/ubuntu_images/1/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
+
+docker-build-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - export KERNEL_CONFIG="defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_defconfig.tar.gz
+      - make_logs_defconfig.txt
+    expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
+
+docker-build-rivos-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - export KERNEL_CONFIG="rivos_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_rivos_defconfig.tar.gz
+      - make_logs_rivos_defconfig.txt
+    expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
+
+docker-build-ubuntu-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - export KERNEL_CONFIG="ubuntu_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_ubuntu_defconfig.tar.gz
+      - make_logs_ubuntu_defconfig.txt
+    expire_in: 3 hours
+  rules:
+      - if: '$TEST_ONLY == "yes"'
+        when: never
+      - if: '$CI_COMMIT_BRANCH'
+
+.kasan-conf-generic: &kasan-conf-generic
+    - echo "CONFIG_KASAN=y" > kasan.conf
+    - echo "CONFIG_KUNIT=y" >> kasan.conf
+    - echo "CONFIG_KASAN_KUNIT_TEST=m" >> kasan.conf
+    - echo "CONFIG_KASAN_MODULE_TEST=m" >> kasan.conf
+
+docker-build-ubuntu-kasan-outline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - *kasan-conf-generic
+    - export KERNEL_CONFIG="ubuntu_kasan_outline_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_outline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_outline_defconfig.txt
+    expire_in: 3 hours
+  rules:
+    - if: '$TEST_ONLY == "yes"'
+      when: never
+    - if: '$TEST_KASAN == "yes"'
+      when: on_success
+
+docker-build-ubuntu-kasan-inline-defconfig:
+  # Use the rivos-sdk container to get the toolchains and build tools.
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  tags: ['docker-cpu-xl']
+  stage: build
+  dependencies:
+    - prepare-version
+  extends: .build-caching
+  script:
+    - *kasan-conf-generic
+    - export KERNEL_CONFIG="ubuntu_kasan_inline_defconfig"
+    - export BUILD_SH_ARGS="${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
+    - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
+    - *build-kernel
+  timeout: 60min
+  artifacts:
+    paths:
+      - linux_ubuntu_kasan_inline_defconfig.tar.gz
+      - make_logs_ubuntu_kasan_inline_defconfig.txt
+    expire_in: 3 hours
+  rules:
+    - if: '$TEST_ONLY == "yes"'
+      when: never
+    - if: '$TEST_KASAN == "yes"'
+      when: on_success
+
+package-deb:
+  extends: .deploy-deb
+  dependencies:
+    - prepare-version
+    - docker-build-defconfig
+    - docker-build-rivos-defconfig
+    - docker-build-ubuntu-defconfig
+    - docker-build-ubuntu-kasan-outline-defconfig
+    - docker-build-ubuntu-kasan-inline-defconfig
+    - sdk-linux-ubuntu-test # For TEST_ONLY to publish artifacts
+  variables:
+    PKG_ARCH: "all"
+    PKG_DESCRIPTION: "Linux kernel image for RISCV64."
+    PKG_DIRECTORIES: "${INSTALL_PATH}"
+    PKG_LICENSE: "GPL-2.0"
+    PKG_UPSTREAM_VERSION: "${GIT_TAG}"
+  before_script:
+    # clean up pre-built binaries from the rivos-sdk
+    - rm -rf "${INSTALL_PATH}"
+    - if [[ -z "$TEST_ONLY" ]]; then tar -C/ -xzf linux_rivos_defconfig.tar.gz; fi
+
+sdk-linux-ubuntu-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-defconfig
+  script:
+    - export KERNEL_CONFIG="ubuntu_defconfig"
+    - *validate-kernel
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_defconfig_output
+      - rivos/linux_ci/tests_results/
+      - linux_ubuntu_defconfig.tar.gz # used when TEST_ONLY to propagate artifacts
+    expire_in: 3h
+  rules:
+    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+
+sdk-linux-ubuntu-kasan-inline-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-kasan-inline-defconfig
+  script:
+    - export KERNEL_CONFIG="ubuntu_kasan_inline_defconfig"
+    - *validate-kernel
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_kasan_inline_defconfig_output
+      - rivos/linux_ci/tests_results/
+    expire_in: 3h
+  rules:
+    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+
+sdk-linux-ubuntu-kasan-outline-test:
+  image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
+  stage: test
+  dependencies:
+    - prepare-version
+    - docker-build-ubuntu-kasan-outline-defconfig
+  script:
+    - export KERNEL_CONFIG="ubuntu_kasan_outline_defconfig"
+    - *validate-kernel
+  timeout: 60min
+  artifacts:
+    when: always
+    paths:
+      - rivos/linux_ci/ubuntu_kasan_outline_defconfig_output
+      - rivos/linux_ci/tests_results/
+    expire_in: 3h
+  rules:
+    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+
+# Rebuild the rivos-sdk image if this is the branch the SDK is using.
+# Currently the 'latest' tag from the 'rivos/main' branch.
+update-sdk:
+  stage: deploy
+  only:
+    - rivos/main
+  except:
+    - pipelines
+  inherit:
+    variables: false
+  variables:
+    TRIGGER_ROOTFS: "true"
+  trigger: rv/it/int/rivos-sdk
