@@ -176,15 +176,6 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 	writeq(val, dpa->regs + DPA_FWQ_BASE + offset);
 }
 
-/* some random number for now */
-#define DPA_GPU_ID (1234)
-
-/* userspace is expecting version (10, 9, 9) for RIG64 ISA */
-#define DPA_HSA_GFX_VERSION (0x100909)
-
-/* For now let userspace allocate anything within a 47-bit address space */
-#define DPA_GPUVM_ADDR_LIMIT ((1ULL << 47) - 1)
-
 struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm);
 struct dpa_process *dpa_get_process_by_pasid(u32 pasid);
 irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
