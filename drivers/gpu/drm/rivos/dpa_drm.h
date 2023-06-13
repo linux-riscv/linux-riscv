@@ -54,17 +54,6 @@
 
 #define DPA_PROCESS_MAX		DPA_NUM_DB_PAGES
 
-#define DRM_IOCTL(name)						        \
-static int dpa_drm_ioctl_##name(struct drm_device *dev,			\
-	void *data, struct drm_file *file)				\
-{									\
-	struct dpa_process *p = file->driver_priv;			\
-	struct dpa_device *dpa = drm_to_dpa_dev(dev);			\
-	if (!p)								\
-		return -EINVAL;						\
-	return dpa_ioctl_##name(p, dpa, data);				\
-}									\
-
 struct dpa_fwq {
 	struct dpa_fw_queue_desc desc;
 	struct dpa_fw_queue_pkt h_ring[DPA_FW_QUEUE_SIZE];

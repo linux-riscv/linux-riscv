@@ -384,9 +384,10 @@ static void dpa_del_all_queues(struct dpa_process *p)
 	}
 }
 
-static int dpa_ioctl_create_queue(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
+static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
+				      struct drm_file *file)
 {
+	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_create_queue *args = data;
 	u64 doorbell_mmap_offset;
 	int ret = daffy_create_queue_cmd(p->dev, p, args);
@@ -406,11 +407,11 @@ static int dpa_ioctl_create_queue(struct dpa_process *p,
 	args->doorbell_offset = doorbell_mmap_offset;
 	return ret;
 }
-DRM_IOCTL(create_queue)
 
-static int dpa_ioctl_destroy_queue(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
+static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
+				       struct drm_file *file)
 {
+	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_destroy_queue *args = data;
 	int ret;
 
@@ -426,20 +427,17 @@ static int dpa_ioctl_destroy_queue(struct dpa_process *p,
 	return ret;
 }
 
-DRM_IOCTL(destroy_queue)
-
-static int dpa_ioctl_update_queue(struct dpa_process *p,
-	struct dpa_device *dpa, void *data)
+static int dpa_drm_ioctl_update_queue(struct drm_device *drm, void *data,
+				      struct drm_file *file)
 {
 	pr_warn("%s: update_queue IOCTL not implemented\n", __func__);
-	return 1;
+	return -ENOSYS;
 }
 
-DRM_IOCTL(update_queue)
-
-static int dpa_ioctl_get_info(struct dpa_process *p,
-			      struct dpa_device *dpa, void *data)
+static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
+				  struct drm_file *file)
 {
+	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_get_info *args = data;
 	int ret = daffy_get_info_cmd(p->dev, p, args);
 
@@ -450,7 +448,6 @@ static int dpa_ioctl_get_info(struct dpa_process *p,
 
 	return 0;
 }
-DRM_IOCTL(get_info);
 
 static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 					     struct drm_file *file)
