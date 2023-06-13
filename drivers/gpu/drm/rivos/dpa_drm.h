@@ -89,8 +89,6 @@ struct dpa_device {
 	struct pci_dev			*pdev;
 	struct drm_device		ddev;
 
-	int drm_minor;
-
 	void __iomem *regs;
 
 	int base_irq;
@@ -176,8 +174,8 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 	writeq(val, dpa->regs + DPA_FWQ_BASE + offset);
 }
 
-struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm);
-struct dpa_process *dpa_get_process_by_pasid(u32 pasid);
+struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
+					     u32 pasid);
 irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
 irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev);
 void dpa_release_process(struct kref *ref);

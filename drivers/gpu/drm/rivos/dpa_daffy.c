@@ -166,7 +166,7 @@ irqreturn_t daffy_process_device_queue(int irq, void *data)
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
 
-			p = dpa_get_process_by_pasid(pasid);
+			p = dpa_get_process_by_pasid(dpa, pasid);
 			if (!p) {
 				dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
 					__func__, pasid);

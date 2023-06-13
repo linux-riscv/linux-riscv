@@ -40,32 +40,7 @@
 
 static const struct drm_driver dpa_drm_driver;
 
-/* device related stuff */
-struct dpa_device *dpa;
-
-struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm)
-{
-	struct list_head *cur;
-	struct dpa_process *dpa_app;
-
-	mutex_lock(&dpa->dpa_processes_lock);
-
-	list_for_each(cur, &dpa->dpa_processes) {
-		struct dpa_process *cur_process =
-			container_of(cur, struct dpa_process,
-				     dpa_process_list);
-		if (cur_process->mm == mm) {
-			dpa_app = cur_process;
-			kref_get(&dpa_app->ref);
-			break;
-		}
-	}
-	mutex_unlock(&dpa->dpa_processes_lock);
-
-	return dpa_app;
-}
-
-struct dpa_process *dpa_get_process_by_pasid(u32 pasid)
+struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa, u32 pasid)
 {
 	struct list_head *cur;
 	struct dpa_process *dpa_app;
@@ -94,18 +69,15 @@ static const struct pci_device_id dpa_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 
-static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
+static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	struct dpa_process *p;
+	struct drm_file *file_priv = filp->private_data;
+	struct dpa_process *p = file_priv->driver_priv;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
 	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long pfn;
 	int ret = -EFAULT;
-
-	p = dpa_get_process_by_mm(current->mm);
-	if (!p)
-		return -EINVAL;
 
 	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
 			__func__, mmap_offset, size, type, (u64)vma->vm_start);
@@ -115,7 +87,6 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 		if (size != DPA_DB_PAGE_SIZE) {
 			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
 					__func__);
-			kref_put(&p->ref, dpa_release_process);
 			return -EINVAL;
 		}
 
@@ -140,7 +111,6 @@ static int dpa_drm_mmap(struct file *filep, struct vm_area_struct *vma)
 		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
 	}
 
-	kref_put(&p->ref, dpa_release_process);
 	return ret;
 }
 
@@ -180,23 +150,14 @@ static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file
 
 	if (p)
 		kref_put(&p->ref, dpa_release_process);
-	pci_set_drvdata(dpa->pdev, NULL);
 }
 
 static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 {
+	struct dpa_device *dpa = drm_to_dpa_dev(dev);
 	struct dpa_process *dpa_app = NULL;
 	struct device *dpa_dev;
 	int ret = 0;
-
-	/* Look for existing DPA process in a list */
-	dpa_app = dpa_get_process_by_mm(current->mm);
-
-	if (dpa_app) {
-		/* Using existing dpa_process */
-		dev_warn(dpa->dev, "%s: using existing dpa process\n", __func__);
-		return 0;
-	}
 
 	mutex_lock(&dpa->dpa_processes_lock);
 
@@ -264,8 +225,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	struct drm_device *ddev;
 	struct device *dev = &pdev->dev;
+	struct dpa_device *dpa;
 	struct device_node *np;
 	int err, vec, nid;
 	u16 vendor, device;
@@ -276,9 +237,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENOMEM;
 	dpa->dev = dev;
 	dpa->pdev = pdev;
-	ddev = &dpa->ddev;
-	dev_set_drvdata(dev, dpa);
-	pci_set_drvdata(pdev, ddev);
+	pci_set_drvdata(pdev, dpa);
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
@@ -306,8 +265,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = daffy_init(dpa);
 	if (err)
 		goto disable_sva;
-
-	dpa->drm_minor = ddev->render->index;
 
 	/*
 	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
@@ -352,7 +309,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_init(&dpa->dpa_processes_lock);
 
 	// init drm
-	err = drm_dev_register(ddev, id->driver_data);
+	err = drm_dev_register(&dpa->ddev, id->driver_data);
 	if (err)
 		goto free_irqs;
 
@@ -545,7 +502,7 @@ static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
 	p->signal_pages_count = num_pages;
 
 	// Tell the DUC we've allocated a new range of signal pages
-	ret = daffy_register_signal_pages_cmd(dpa, p, args, num_pages);
+	ret = daffy_register_signal_pages_cmd(p->dev, p, args, num_pages);
 	if (ret)
 		unpin_user_pages(p->signal_pages, count);
 
@@ -696,9 +653,11 @@ void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);
+	struct dpa_device *dpa = p->dev;
+
 	mutex_lock(&dpa->dpa_processes_lock);
 
-	dev_warn(p->dev->dev, "%s: freeing process %d\n", __func__,
+	dev_warn(dpa->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
 	// Unpin signal pages and inform the DUC
@@ -712,25 +671,25 @@ void dpa_release_process(struct kref *ref)
 		iommu_sva_unbind_device(p->sva);
 	list_del(&p->dpa_process_list);
 	dpa->dpa_process_count--;
-	devm_kfree(p->dev->dev, p);
+	devm_kfree(dpa->dev, p);
 	mutex_unlock(&dpa->dpa_processes_lock);
 }
 
 static void dpa_pci_remove(struct pci_dev *pdev)
 {
-	if (dpa) {
-		// XXX other stuff
-		daffy_free(dpa);
-		// Disable PASID support
-		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
-		// unmap regs
-		iounmap(dpa->regs);
-		pci_disable_device(pdev);
-		// Unregister and release DRM device
-		drm_dev_unplug(&dpa->ddev);
-		// character device_destroy();
-		devm_kfree(&pdev->dev, dpa);
-	}
+	struct dpa_device *dpa = pci_get_drvdata(pdev);
+
+	// XXX other stuff
+	daffy_free(dpa);
+	// Disable PASID support
+	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
+	// unmap regs
+	iounmap(dpa->regs);
+	pci_disable_device(pdev);
+	// Unregister and release DRM device
+	drm_dev_unplug(&dpa->ddev);
+	// character device_destroy();
+	devm_kfree(&pdev->dev, dpa);
 }
 
 static struct pci_driver dpa_pci_driver = {
