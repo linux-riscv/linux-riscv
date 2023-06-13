@@ -148,8 +148,7 @@ static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file
 {
 	struct dpa_process *p = file_priv->driver_priv;
 
-	if (p)
-		kref_put(&p->ref, dpa_release_process);
+	kref_put(&p->ref, dpa_release_process);
 }
 
 static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
@@ -177,7 +176,6 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	file_priv->driver_priv = dpa_app;
 
 	dev_warn(dpa->dev, "%s: associated with pid %d\n", __func__, current->tgid);
-	dpa_app->mm = current->mm;
 	mutex_init(&dpa_app->lock);
 	INIT_LIST_HEAD(&dpa_app->queue_list);
 	kref_init(&dpa_app->ref);
@@ -187,7 +185,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 	// Bind device and allocate PASID
 	dpa_dev = dpa_app->dev->dev;
-	dpa_app->sva = iommu_sva_bind_device(dpa_dev, dpa_app->mm);
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, current->mm);
 	if (IS_ERR(dpa_app->sva)) {
 		ret = PTR_ERR(dpa_app->sva);
 		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
@@ -216,8 +214,6 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dpa->dpa_process_count++;
 	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
 	list_add_tail(&dpa_app->dpa_process_list, &dpa->dpa_processes);
-
-	dpa_app->drm_priv = file_priv;
 
 	mutex_unlock(&dpa->dpa_processes_lock);
 	return 0;
@@ -663,12 +659,8 @@ void dpa_release_process(struct kref *ref)
 	// Unpin signal pages and inform the DUC
 	dpa_remove_signal_pages(p);
 
-	if (p->drm_file)
-		fput(p->drm_file);
-
 	dpa_del_all_queues(p);
-	if (p->sva)
-		iommu_sva_unbind_device(p->sva);
+	iommu_sva_unbind_device(p->sva);
 	list_del(&p->dpa_process_list);
 	dpa->dpa_process_count--;
 	devm_kfree(dpa->dev, p);

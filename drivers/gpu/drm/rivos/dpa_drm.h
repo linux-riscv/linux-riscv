@@ -115,25 +115,16 @@ struct dpa_process {
 	/* the DPA instance associated with this process */
 	struct dpa_device *dev;
 
-	/* XXX Do these belong here? */
-	struct file *drm_file;
-	void *drm_priv;
-
 	struct mutex lock;
 
 	// use this for multiple opens by same process
 	struct kref ref;
-
-	/* mm struct of the process */
-	void *mm;
 
 	/* IOMMU Shared Virtual Address unit */
 	struct iommu_sva *sva;
 
 	/* pasid allocated to this process */
 	u32 pasid;
-
-	unsigned int alloc_count;
 
 	// aql queues
 	struct list_head queue_list;
