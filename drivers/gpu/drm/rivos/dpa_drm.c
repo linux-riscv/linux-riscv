@@ -38,12 +38,9 @@
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
 
-#define dpa_class_name "dpa_drm"
-
 static const struct drm_driver dpa_drm_driver;
 
 /* device related stuff */
-static struct class *dpa_class;
 struct dpa_device *dpa;
 
 struct dpa_process *dpa_get_process_by_mm(const struct mm_struct *mm)
@@ -292,7 +289,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return err;
 	pci_set_master(pdev);
 
-	err = pcim_iomap_regions(pdev, 1 << 0, dpa_class_name);
+	err = pcim_iomap_regions(pdev, 1 << 0, "dpa");
 	if (err)
 		return err;
 
@@ -695,8 +692,6 @@ static const struct drm_driver dpa_drm_driver = {
 	.name = "dpa-drm",
 };
 
-static const struct drm_driver dpa_drm_driver;
-
 void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process,
@@ -745,27 +740,6 @@ static struct pci_driver dpa_pci_driver = {
 	.remove = dpa_pci_remove,
 };
 
-static int __init dpa_init(void)
-{
-	int ret;
-
-	pr_warn("%s: DPA start\n", __func__);
-	dpa_class = class_create(dpa_class_name);
-	if (IS_ERR(dpa_class)) {
-		ret = PTR_ERR(dpa_class);
-		pr_err("Error creating DPA class: %d\n", ret);
-		return ret;
-	}
-
-	return pci_register_driver(&dpa_pci_driver);
-}
-
-static void __exit dpa_exit(void)
-{
-	pci_unregister_driver(&dpa_pci_driver);
-	class_destroy(dpa_class);
-}
+module_pci_driver(dpa_pci_driver);
 
 MODULE_LICENSE("GPL");
-module_init(dpa_init);
-module_exit(dpa_exit);
