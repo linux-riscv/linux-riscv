@@ -671,17 +671,10 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 {
 	struct dpa_device *dpa = pci_get_drvdata(pdev);
 
-	// XXX other stuff
-	daffy_free(dpa);
-	// Disable PASID support
-	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
-	// unmap regs
-	iounmap(dpa->regs);
-	pci_disable_device(pdev);
-	// Unregister and release DRM device
 	drm_dev_unplug(&dpa->ddev);
-	// character device_destroy();
-	devm_kfree(&pdev->dev, dpa);
+	pci_free_irq_vectors(pdev);
+	daffy_free(dpa);
+	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 }
 
 static struct pci_driver dpa_pci_driver = {
