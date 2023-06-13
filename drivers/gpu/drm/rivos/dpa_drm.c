@@ -168,7 +168,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 		return -EBUSY;
 	}
 
-	dpa_app = devm_kzalloc(dpa->dev, sizeof(*dpa_app), GFP_KERNEL);
+	dpa_app = kzalloc(sizeof(*dpa_app), GFP_KERNEL);
 	if (!dpa_app) {
 		mutex_unlock(&dpa->dpa_processes_lock);
 		return -ENOMEM;
@@ -324,8 +324,7 @@ disable_sva:
 static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 			     u32 doorbell_offset)
 {
-	struct dpa_aql_queue *q = devm_kzalloc(p->dev->dev, sizeof(*q),
-					       GFP_KERNEL);
+	struct dpa_aql_queue *q = kzalloc(sizeof(*q), GFP_KERNEL);
 	if (!q)
 		return -ENOMEM;
 
@@ -343,40 +342,46 @@ static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 static int dpa_del_aql_queue(struct dpa_process *p, u32 queue_id)
 {
 	struct dpa_aql_queue *q, *tmp;
-	bool found = false;
 
 	mutex_lock(&p->lock);
 	list_for_each_entry_safe(q, tmp, &p->queue_list, list) {
 		if (q->id == queue_id) {
 			dev_warn(p->dev->dev, "%s: deleteing aql queue %u\n",
 				 __func__, queue_id);
-			list_del(&q->list);
-			devm_kfree(p->dev->dev, q);
-			found = true;
+			break;
 		}
 	}
 	mutex_unlock(&p->lock);
+	if (!q)
+		return -ENOENT;
 
-	return !found;
+	list_del(&q->list);
+	kfree(q);
+
+	return 0;
 }
 
 static void dpa_del_all_queues(struct dpa_process *p)
 {
-	struct dpa_aql_queue *q;
-	int ret;
+	struct list_head queues;
 
+	INIT_LIST_HEAD(&queues);
 	mutex_lock(&p->lock);
-	while (!list_empty(&p->queue_list)) {
-		q = container_of(p->queue_list.next, struct dpa_aql_queue,
-				 list);
+	list_splice_init(&p->queue_list, &queues);
+	mutex_unlock(&p->lock);
+
+	while (!list_empty(&queues)) {
+		struct dpa_aql_queue *q;
+		int ret;
+
+		q = list_first_entry(&queues, struct dpa_aql_queue, list);
 		list_del(&q->list);
 		ret = daffy_destroy_queue_cmd(p->dev, p, q->id);
 		if (ret)
 			dev_warn(p->dev->dev, "%s: failed to destroy q %u\n",
 				 __func__, q->id);
-		devm_kfree(p->dev->dev, q);
+		kfree(q);
 	}
-	mutex_unlock(&p->lock);
 }
 
 static int dpa_ioctl_create_queue(struct dpa_process *p,
@@ -660,11 +665,12 @@ void dpa_release_process(struct kref *ref)
 	dpa_remove_signal_pages(p);
 
 	dpa_del_all_queues(p);
-	iommu_sva_unbind_device(p->sva);
 	list_del(&p->dpa_process_list);
 	dpa->dpa_process_count--;
-	devm_kfree(dpa->dev, p);
 	mutex_unlock(&dpa->dpa_processes_lock);
+
+	iommu_sva_unbind_device(p->sva);
+	kfree(p);
 }
 
 static void dpa_pci_remove(struct pci_dev *pdev)
