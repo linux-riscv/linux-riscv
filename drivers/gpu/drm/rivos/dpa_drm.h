@@ -154,11 +154,10 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 	writeq(val, dpa->regs + DPA_FWQ_BASE + offset);
 }
 
-struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
-					     u32 pasid);
+int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx);
+
 irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
 irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev);
-void dpa_release_process(struct kref *ref);
 
 /* offsets to MMAP calls for different things */
 #define DRM_MMAP_TYPE_SHIFT (60)

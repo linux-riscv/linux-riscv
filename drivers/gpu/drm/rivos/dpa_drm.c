@@ -40,7 +40,10 @@
 
 static const struct drm_driver dpa_drm_driver;
 
-struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa, u32 pasid)
+static void dpa_release_process(struct kref *ref);
+
+static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
+						    u32 pasid)
 {
 	struct list_head *cur;
 	struct dpa_process *dpa_app;
@@ -60,6 +63,32 @@ struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa, u32 pasid)
 	mutex_unlock(&dpa->dpa_processes_lock);
 
 	return dpa_app;
+}
+
+int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
+{
+	struct dpa_process *p;
+	struct dpa_signal_waiter *waiter;
+	unsigned long flags;
+
+	p = dpa_get_process_by_pasid(dpa, pasid);
+	if (!p) {
+		dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
+			 __func__, pasid);
+		return -ENOENT;
+	}
+
+	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	list_for_each_entry(waiter, &p->signal_waiters, list) {
+		if (waiter->signal_idx == signal_idx) {
+			complete(&waiter->signal_done);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+	kref_put(&p->ref, dpa_release_process);
+
+	return 0;
 }
 
 static const struct pci_device_id dpa_pci_table[] = {
@@ -647,7 +676,7 @@ static const struct drm_driver dpa_drm_driver = {
 	.name = "dpa-drm",
 };
 
-void dpa_release_process(struct kref *ref)
+static void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);

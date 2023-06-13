@@ -159,31 +159,14 @@ irqreturn_t daffy_process_device_queue(int irq, void *data)
 		case UPDATE_SIGNAL: {
 			u64 signal_idx = pkt->u.dusc.signal_idx;
 			u32 pasid = pkt->u.dusc.pasid;
-			struct dpa_process *p;
-			struct dpa_signal_waiter *waiter;
-			unsigned long flags;
 			
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
-
-			p = dpa_get_process_by_pasid(dpa, pasid);
-			if (!p) {
-				dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
-					__func__, pasid);
+			if (dpa_signal_wake(dpa, pasid, signal_idx) < 0)
 				pkt->hdr.response = ERROR;
-				break;
-			}
+			else
+				pkt->hdr.response = SUCCESS;
 
-			spin_lock_irqsave(&p->signal_waiters_lock, flags);
-			list_for_each_entry(waiter, &p->signal_waiters, list) {
-				if (waiter->signal_idx == signal_idx) {
-					complete(&waiter->signal_done);
-					break;
-				}
-			}
-			spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
-			kref_put(&p->ref, dpa_release_process);
-			pkt->hdr.response = SUCCESS;
 			break;
 		}
 		default:
