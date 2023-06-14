@@ -647,7 +647,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_info(dev, "No HBM node\n");
 	}
 
-	err = pci_alloc_irq_vectors(pdev, DPA_NUM_MSIX, DPA_NUM_MSIX,
+	err = pci_alloc_irq_vectors(pdev, DPA_NUM_MSI, DPA_NUM_MSI,
 				    PCI_IRQ_MSIX);
 	if (err < 0) {
 		dev_err(dev, "Failed setting up IRQ\n");
@@ -655,7 +655,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	dpa->base_irq = pci_irq_vector(pdev, 0);
-	for (int i = 0; i < DPA_NUM_MSIX; i++) {
+	for (int i = 0; i < DPA_NUM_MSI; i++) {
 		vec = pci_irq_vector(pdev, i);
 		/* auto frees on device detach, nice */
 		err = devm_request_threaded_irq(dev, vec, NULL,

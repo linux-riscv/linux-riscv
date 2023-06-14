@@ -26,6 +26,7 @@
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 
+#include "daffy_defs.h"
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
 
@@ -43,8 +44,8 @@ int daffy_init(struct dpa_device *dpa)
 	if (!daffy->fwq)
 		return -ENOMEM;
 
-	daffy->fwq->desc.magic = DPA_FW_QUEUE_MAGIC;
-	daffy->fwq->desc.version = DPA_FW_QUEUE_DESC_VERSION;
+	daffy->fwq->desc.magic = DAFFY_QUEUE_MAGIC;
+	daffy->fwq->desc.version = DAFFY_QUEUE_DESC_VERSION;
 	daffy->fwq->desc.h_qsize = DPA_FW_QUEUE_SIZE;
 	daffy->fwq->desc.d_qsize = DPA_FW_QUEUE_SIZE;
 	daffy->fwq->desc.h_read_index = 0;
@@ -60,8 +61,8 @@ int daffy_init(struct dpa_device *dpa)
 
 	/* Invalidate all packet headers. */
 	for (i = 0; i < DPA_FW_QUEUE_SIZE; i++) {
-		daffy->fwq->h_ring[i].hdr.command = INVALID;
-		daffy->fwq->d_ring[i].hdr.command = INVALID;
+		daffy->fwq->h_ring[i].hdr.command = DAFFY_CMD_INVALID;
+		daffy->fwq->d_ring[i].hdr.command = DAFFY_CMD_INVALID;
 	}
 
 	spin_lock_init(&daffy->h_lock);
@@ -123,7 +124,7 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 
 	while (read_index != write_index) {
 		unsigned int index = read_index & (fwq->desc.d_qsize - 1);
-		struct dpa_fw_queue_pkt *pkt = &fwq->d_ring[index];
+		struct daffy_queue_pkt *pkt = &fwq->d_ring[index];
 
 		dev_dbg(dpa->dev, "%s: Daffy d_read_index: %#llx, write_index: %#llx\n",
 			__func__, read_index, write_index);
@@ -135,32 +136,32 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 		}
 
 		switch (pkt->hdr.command) {
-		case INVALID:
+		case DAFFY_CMD_INVALID:
 			dev_warn(dpa->dev, "%s: Processing invalid Daffy packet\n",
 				__func__);
-			pkt->hdr.response = ERROR;
+			pkt->hdr.response = DAFFY_RESP_ERROR;
 			break;
-		case UPDATE_SIGNAL: {
+		case DAFFY_CMD_UPDATE_SIGNAL: {
 			u64 signal_idx = pkt->u.dusc.signal_idx;
 			u32 pasid = pkt->u.dusc.pasid;
 			
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
 			if (dpa_signal_wake(dpa, pasid, signal_idx) < 0)
-				pkt->hdr.response = ERROR;
+				pkt->hdr.response = DAFFY_RESP_ERROR;
 			else
-				pkt->hdr.response = SUCCESS;
+				pkt->hdr.response = DAFFY_RESP_SUCCESS;
 
 			break;
 		}
 		default:
 			dev_warn(dpa->dev, "%s: Received unexpected Daffy command %x\n",
 				__func__, pkt->hdr.command);
-			pkt->hdr.response = ERROR;
+			pkt->hdr.response = DAFFY_RESP_ERROR;
 			break;
 		}
 
-		pkt->hdr.command = INVALID;
+		pkt->hdr.command = DAFFY_CMD_INVALID;
 		read_index++;
 
 		dma_wmb();
@@ -189,10 +190,10 @@ irqreturn_t daffy_handle_irq(int irq, void *data)
 	 * TODO: Add handling for causes that indicate an error.
 	 */
 	switch (vec) {
-	case FW_QUEUE_H2D:
+	case DPA_MSI_FW_QUEUE_H2D:
 		daffy_process_host_queue(dpa);
 		return IRQ_HANDLED;
-	case FW_QUEUE_D2H:
+	case DPA_MSI_FW_QUEUE_D2H:
 		daffy_process_device_queue(dpa);
 		return IRQ_HANDLED;
 	default:
@@ -209,12 +210,12 @@ static inline bool daffy_host_queue_full(struct dpa_daffy *daffy)
 }
 
 static int daffy_submit_sync(struct dpa_device *dpa,
-			     struct dpa_fw_queue_pkt *pkt)
+			     struct daffy_queue_pkt *pkt)
 {
 	struct dpa_daffy *daffy = &dpa->daffy;
 	struct dpa_fwq *fwq = daffy->fwq;
 	struct dpa_fwq_waiter waiter;
-	struct dpa_fw_queue_pkt *head;
+	struct daffy_queue_pkt *head;
 	unsigned int index;
 	int ret;
 
@@ -231,7 +232,7 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 
 	index = fwq->desc.h_write_index & (fwq->desc.h_qsize - 1);
 	head = &fwq->h_ring[index];
-	if (head->hdr.command != INVALID) {
+	if (head->hdr.command != DAFFY_CMD_INVALID) {
 		dev_warn(dpa->dev, "%s: head packet not invalid 0x%x\n",
 			 __func__, head->hdr.command);
 		ret = -EIO;
@@ -259,7 +260,7 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 	}
 	dev_dbg(dpa->dev, "pkt id %llu completed, cmd: %#x, resp: %#x\n",
 		pkt->hdr.id, pkt->hdr.command, pkt->hdr.response);
-	if (pkt->hdr.response != SUCCESS)
+	if (pkt->hdr.response != DAFFY_RESP_SUCCESS)
 		return -EIO;
 	return 0;
 
@@ -271,11 +272,11 @@ out:
 int daffy_get_info_cmd(struct dpa_device *dpa,
 		       struct drm_dpa_get_info *args)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = GET_INFO;
+	pkt.hdr.command = DAFFY_CMD_GET_INFO;
 	ret = daffy_submit_sync(dpa, &pkt);
 	if (ret < 0)
 		return ret;
@@ -287,10 +288,10 @@ int daffy_get_info_cmd(struct dpa_device *dpa,
 
 int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = DESTROY_QUEUE;
+	pkt.hdr.command = DAFFY_CMD_DESTROY_QUEUE;
 	pkt.u.ddqc.queue_id = queue_id;
 
 	return daffy_submit_sync(dpa, &pkt);
@@ -300,12 +301,12 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 	struct daffy_create_queue_cmd *cmd;
 	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = CREATE_QUEUE;
+	pkt.hdr.command = DAFFY_CMD_CREATE_QUEUE;
 	cmd = &pkt.u.dcqc;
 	cmd->pasid = p->pasid;
 	cmd->ring_base_address = args->ring_base_address;
@@ -328,15 +329,16 @@ int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
 				    struct drm_dpa_create_signal_pages *args,
 				    u32 num_pages)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 	struct daffy_register_signal_pages_cmd *cmd;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = REGISTER_SIGNAL_PAGES;
+	pkt.hdr.command = DAFFY_CMD_REGISTER_SIGNAL_PAGES;
 	cmd = &pkt.u.drspc;
 	cmd->base_address = args->va;
 	cmd->num_pages = num_pages;
-	cmd->type = SIGNAL;	// Only support default signal type for now
+	/* Only support default signal type for now. */
+	cmd->type = DAFFY_SIGNAL_EVENT;
 	cmd->pasid = p->pasid;
 
 	return daffy_submit_sync(dpa, &pkt);
@@ -345,11 +347,11 @@ int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
 int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
 				      struct dpa_process *p)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 	struct daffy_unregister_signal_pages_cmd *cmd;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = UNREGISTER_SIGNAL_PAGES;
+	pkt.hdr.command = DAFFY_CMD_UNREGISTER_SIGNAL_PAGES;
 	cmd = &pkt.u.durspc;
 	cmd->pasid = p->pasid;
 
@@ -359,18 +361,18 @@ int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
 int daffy_subscribe_signal_cmd(struct dpa_device *dpa,
 				struct dpa_process *p, u64 signal_idx)
 {
-	struct dpa_fw_queue_pkt pkt;
+	struct daffy_queue_pkt pkt;
 	struct daffy_subscribe_signal_cmd *cmd;
 	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = SUBSCRIBE_SIGNAL;
+	pkt.hdr.command = DAFFY_CMD_SUBSCRIBE_SIGNAL;
 	cmd = &pkt.u.dssc;
 	cmd->signal_idx = signal_idx;
 	cmd->pasid = p->pasid;
 
 	ret = daffy_submit_sync(dpa, &pkt);
-	if (ret < 0 && pkt.hdr.response == ALREADY_SIGNALED)
+	if (ret < 0 && pkt.hdr.response == DAFFY_RESP_ALREADY_SIGNALED)
 		return 1;
 	return ret;
 }
