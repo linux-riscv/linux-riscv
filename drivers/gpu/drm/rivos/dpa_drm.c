@@ -647,16 +647,12 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_info(dev, "No HBM node\n");
 	}
 
-	err = pci_alloc_irq_vectors(pdev, 1, DPA_NUM_MSIX, PCI_IRQ_MSIX);
+	err = pci_alloc_irq_vectors(pdev, DPA_NUM_MSIX, DPA_NUM_MSIX,
+				    PCI_IRQ_MSIX);
 	if (err < 0) {
 		dev_err(dev, "Failed setting up IRQ\n");
 		goto free_daffy;
 	}
-
-	dev_info(dev,
-		"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
-		pdev->msi_enabled,
-		pdev->msix_enabled);
 
 	dpa->base_irq = pci_irq_vector(pdev, 0);
 	for (int i = 0; i < DPA_NUM_MSIX; i++) {
