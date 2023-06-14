@@ -38,8 +38,6 @@
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
 
-static const struct drm_driver dpa_drm_driver;
-
 static void dpa_release_process(struct kref *ref);
 
 static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
@@ -63,291 +61,6 @@ static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
 	mutex_unlock(&dpa->dpa_processes_lock);
 
 	return dpa_app;
-}
-
-int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
-{
-	struct dpa_process *p;
-	struct dpa_signal_waiter *waiter;
-	unsigned long flags;
-
-	p = dpa_get_process_by_pasid(dpa, pasid);
-	if (!p) {
-		dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
-			 __func__, pasid);
-		return -ENOENT;
-	}
-
-	spin_lock_irqsave(&p->signal_waiters_lock, flags);
-	list_for_each_entry(waiter, &p->signal_waiters, list) {
-		if (waiter->signal_idx == signal_idx) {
-			complete(&waiter->signal_done);
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
-	kref_put(&p->ref, dpa_release_process);
-
-	return 0;
-}
-
-static const struct pci_device_id dpa_pci_table[] = {
-	{ PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_DPA,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{ 0, }
-};
-MODULE_DEVICE_TABLE(pci, dpa_pci_table);
-
-static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-	struct drm_file *file_priv = filp->private_data;
-	struct dpa_process *p = file_priv->driver_priv;
-	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
-	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
-	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long pfn;
-	int ret = -EFAULT;
-
-	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
-			__func__, mmap_offset, size, type, (u64)vma->vm_start);
-	switch (type) {
-
-	case DRM_MMAP_TYPE_DOORBELL:
-		if (size != DPA_DB_PAGE_SIZE) {
-			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
-					__func__);
-			return -EINVAL;
-		}
-
-		// TODO: Right now we only support one MMIO-mapped doorbell page,
-		// expand to all 16
-		dev_warn(p->dev->dev, "%s: Mapping doorbell page\n", __func__);
-
-		mutex_lock(&p->lock);
-		pfn = p->doorbell_base;
-		pfn >>= PAGE_SHIFT;
-
-		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size,
-			vma->vm_page_prot);
-		mutex_unlock(&p->lock);
-
-		if (ret) {
-			dev_warn(p->dev->dev, "%s: failed to map doorbell page ret %d\n",
-				__func__, ret);
-		}
-		break;
-	default:
-		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
-	}
-
-	return ret;
-}
-
-long dpa_drm_ioctl(struct file *filp,
-		      unsigned int cmd, unsigned long arg)
-{
-	struct drm_file *file_priv = filp->private_data;
-	struct drm_device *dev;
-	long ret;
-
-	dev = file_priv->minor->dev;
-	ret = pm_runtime_get_sync(dev->dev);
-	if (ret < 0)
-		goto out;
-
-	ret = drm_ioctl(filp, cmd, arg);
-
-	pm_runtime_mark_last_busy(dev->dev);
-out:
-	pm_runtime_put_autosuspend(dev->dev);
-	return ret;
-}
-
-static const struct file_operations dpa_driver_kms_fops = {
-	.owner = THIS_MODULE,
-	.open = drm_open,
-	.release = drm_release,
-	.unlocked_ioctl = dpa_drm_ioctl,
-	.mmap = dpa_drm_mmap,
-	.poll = drm_poll,
-	.read = drm_read,
-};
-
-static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
-{
-	struct dpa_process *p = file_priv->driver_priv;
-
-	kref_put(&p->ref, dpa_release_process);
-}
-
-static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
-{
-	struct dpa_device *dpa = drm_to_dpa_dev(dev);
-	struct dpa_process *dpa_app = NULL;
-	struct device *dpa_dev;
-	int ret = 0;
-
-	mutex_lock(&dpa->dpa_processes_lock);
-
-	/* Allocate a new DPA process */
-	if (dpa->dpa_process_count >= DPA_PROCESS_MAX) {
-		dev_warn(dpa->dev, "%s: max number of processes reached\n",
-			 __func__);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -EBUSY;
-	}
-
-	dpa_app = kzalloc(sizeof(*dpa_app), GFP_KERNEL);
-	if (!dpa_app) {
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENOMEM;
-	}
-	file_priv->driver_priv = dpa_app;
-
-	dev_warn(dpa->dev, "%s: associated with pid %d\n", __func__, current->tgid);
-	mutex_init(&dpa_app->lock);
-	INIT_LIST_HEAD(&dpa_app->queue_list);
-	kref_init(&dpa_app->ref);
-
-	// only one DPA for now
-	dpa_app->dev = dpa;
-
-	// Bind device and allocate PASID
-	dpa_dev = dpa_app->dev->dev;
-	dpa_app->sva = iommu_sva_bind_device(dpa_dev, current->mm);
-	if (IS_ERR(dpa_app->sva)) {
-		ret = PTR_ERR(dpa_app->sva);
-		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
-		kfree(dpa_app);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENODEV;
-	}
-	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
-	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
-		dev_err(dpa_dev, "PASID allocation failed\n");
-		iommu_sva_unbind_device(dpa_app->sva);
-		kfree(dpa_app);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENODEV;
-	}
-	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
-
-	// Setup doorbell register offsets
-	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
-		DPA_DB_PAGES_BASE;
-
-	// Init dpa_signal_waiter queue
-	INIT_LIST_HEAD(&dpa_app->signal_waiters);
-	spin_lock_init(&dpa_app->signal_waiters_lock);
-
-	dpa->dpa_process_count++;
-	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
-	list_add_tail(&dpa_app->dpa_process_list, &dpa->dpa_processes);
-
-	mutex_unlock(&dpa->dpa_processes_lock);
-	return 0;
-}
-
-static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
-{
-	struct device *dev = &pdev->dev;
-	struct dpa_device *dpa;
-	struct device_node *np;
-	int err, vec, nid;
-	u16 vendor, device;
-
-	dev_warn(dev, "%s: DPA start\n", __func__);
-	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
-	if (IS_ERR(dpa))
-		return -ENOMEM;
-	dpa->dev = dev;
-	dpa->pdev = pdev;
-	pci_set_drvdata(pdev, dpa);
-
-	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
-	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X\n", vendor, device);
-
-	err = pcim_enable_device(pdev);
-	if (err)
-		return err;
-	pci_set_master(pdev);
-
-	err = pcim_iomap_regions(pdev, 1 << 0, "dpa");
-	if (err)
-		return err;
-
-	// Enable PASID support
-	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
-	if (err) {
-		dev_warn(dev, "%s: Unable to turn on SVA feature\n", __func__);
-		return err;
-	}
-	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
-
-	dpa->regs = pcim_iomap_table(pdev)[0];
-
-	err = daffy_init(dpa);
-	if (err)
-		goto disable_sva;
-
-	/*
-	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
-	 * then set ourselves to be local to that node. Eventually this will
-	 * be done via ACPI.
-	 */
-	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
-	if (np) {
-		nid = of_node_to_nid(np);
-		if (nid != NUMA_NO_NODE) {
-			dev_info(dev, "HBM on node %d\n", nid);
-			set_dev_node(dev, nid);
-		}
-	} else {
-		dev_info(dev, "No HBM node\n");
-	}
-
-	err = pci_alloc_irq_vectors(pdev, 1, DPA_NUM_MSIX, PCI_IRQ_MSIX);
-	if (err < 0) {
-		dev_err(dev, "Failed setting up IRQ\n");
-		goto free_daffy;
-	}
-
-	dev_info(dev,
-		"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
-		pdev->msi_enabled,
-		pdev->msix_enabled);
-
-	dpa->base_irq = pci_irq_vector(pdev, 0);
-	for (int i = 0; i < DPA_NUM_MSIX; i++) {
-		vec = pci_irq_vector(pdev, i);
-		/* auto frees on device detach, nice */
-		err = devm_request_threaded_irq(dev, vec, daffy_handle_irq,
-			daffy_process_device_queue, IRQF_ONESHOT, "dpa-drm", dpa);
-		if (err < 0) {
-			dev_err(dev, "Failed setting up IRQ\n");
-			goto free_irqs;
-		}
-	}
-
-	INIT_LIST_HEAD(&dpa->dpa_processes);
-	mutex_init(&dpa->dpa_processes_lock);
-
-	// init drm
-	err = drm_dev_register(&dpa->ddev, id->driver_data);
-	if (err)
-		goto free_irqs;
-
-	return 0;
-
-free_irqs:
-	pci_free_irq_vectors(pdev);
-free_daffy:
-	daffy_free(dpa);
-disable_sva:
-	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
-
-	return err;
 }
 
 static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
@@ -565,6 +278,32 @@ static void dpa_remove_signal_pages(struct dpa_process *p)
 	mutex_unlock(&p->lock);
 }
 
+int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
+{
+	struct dpa_process *p;
+	struct dpa_signal_waiter *waiter;
+	unsigned long flags;
+
+	p = dpa_get_process_by_pasid(dpa, pasid);
+	if (!p) {
+		dev_warn(dpa->dev, "%s: DPA process not found for PASID %d\n",
+			 __func__, pasid);
+		return -ENOENT;
+	}
+
+	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	list_for_each_entry(waiter, &p->signal_waiters, list) {
+		if (waiter->signal_idx == signal_idx) {
+			complete(&waiter->signal_done);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+	kref_put(&p->ref, dpa_release_process);
+
+	return 0;
+}
+
 static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 				    struct drm_file *file)
 {
@@ -662,19 +401,70 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
 };
 
-static const struct drm_driver dpa_drm_driver = {
-	.driver_features =
-	    DRIVER_ATOMIC |
-	    DRIVER_GEM |
-	    DRIVER_RENDER,
-	.open = dpa_driver_open_kms,
-	.postclose = dpa_driver_release_kms,
-	.fops = &dpa_driver_kms_fops,
-	.ioctls = dpadrm_ioctls,
-	.num_ioctls = ARRAY_SIZE(dpadrm_ioctls),
+static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct dpa_process *p = file_priv->driver_priv;
+	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
+	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
+	unsigned long size = vma->vm_end - vma->vm_start;
+	unsigned long pfn;
+	int ret = -EFAULT;
 
-	.name = "dpa-drm",
-};
+	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
+			__func__, mmap_offset, size, type, (u64)vma->vm_start);
+	switch (type) {
+
+	case DRM_MMAP_TYPE_DOORBELL:
+		if (size != DPA_DB_PAGE_SIZE) {
+			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
+					__func__);
+			return -EINVAL;
+		}
+
+		// TODO: Right now we only support one MMIO-mapped doorbell page,
+		// expand to all 16
+		dev_warn(p->dev->dev, "%s: Mapping doorbell page\n", __func__);
+
+		mutex_lock(&p->lock);
+		pfn = p->doorbell_base;
+		pfn >>= PAGE_SHIFT;
+
+		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size,
+			vma->vm_page_prot);
+		mutex_unlock(&p->lock);
+
+		if (ret) {
+			dev_warn(p->dev->dev, "%s: failed to map doorbell page ret %d\n",
+				__func__, ret);
+		}
+		break;
+	default:
+		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
+	}
+
+	return ret;
+}
+
+static long dpa_drm_ioctl(struct file *filp,
+			  unsigned int cmd, unsigned long arg)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev;
+	long ret;
+
+	dev = file_priv->minor->dev;
+	ret = pm_runtime_get_sync(dev->dev);
+	if (ret < 0)
+		goto out;
+
+	ret = drm_ioctl(filp, cmd, arg);
+
+	pm_runtime_mark_last_busy(dev->dev);
+out:
+	pm_runtime_put_autosuspend(dev->dev);
+	return ret;
+}
 
 static void dpa_release_process(struct kref *ref)
 {
@@ -699,6 +489,207 @@ static void dpa_release_process(struct kref *ref)
 	kfree(p);
 }
 
+static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file_priv)
+{
+	struct dpa_process *p = file_priv->driver_priv;
+
+	kref_put(&p->ref, dpa_release_process);
+}
+
+static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
+{
+	struct dpa_device *dpa = drm_to_dpa_dev(dev);
+	struct dpa_process *dpa_app = NULL;
+	struct device *dpa_dev;
+	int ret = 0;
+
+	mutex_lock(&dpa->dpa_processes_lock);
+
+	/* Allocate a new DPA process */
+	if (dpa->dpa_process_count >= DPA_PROCESS_MAX) {
+		dev_warn(dpa->dev, "%s: max number of processes reached\n",
+			 __func__);
+		mutex_unlock(&dpa->dpa_processes_lock);
+		return -EBUSY;
+	}
+
+	dpa_app = kzalloc(sizeof(*dpa_app), GFP_KERNEL);
+	if (!dpa_app) {
+		mutex_unlock(&dpa->dpa_processes_lock);
+		return -ENOMEM;
+	}
+	file_priv->driver_priv = dpa_app;
+
+	dev_warn(dpa->dev, "%s: associated with pid %d\n", __func__, current->tgid);
+	mutex_init(&dpa_app->lock);
+	INIT_LIST_HEAD(&dpa_app->queue_list);
+	kref_init(&dpa_app->ref);
+
+	// only one DPA for now
+	dpa_app->dev = dpa;
+
+	// Bind device and allocate PASID
+	dpa_dev = dpa_app->dev->dev;
+	dpa_app->sva = iommu_sva_bind_device(dpa_dev, current->mm);
+	if (IS_ERR(dpa_app->sva)) {
+		ret = PTR_ERR(dpa_app->sva);
+		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
+		kfree(dpa_app);
+		mutex_unlock(&dpa->dpa_processes_lock);
+		return -ENODEV;
+	}
+	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
+	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
+		dev_err(dpa_dev, "PASID allocation failed\n");
+		iommu_sva_unbind_device(dpa_app->sva);
+		kfree(dpa_app);
+		mutex_unlock(&dpa->dpa_processes_lock);
+		return -ENODEV;
+	}
+	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
+
+	// Setup doorbell register offsets
+	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
+		DPA_DB_PAGES_BASE;
+
+	// Init dpa_signal_waiter queue
+	INIT_LIST_HEAD(&dpa_app->signal_waiters);
+	spin_lock_init(&dpa_app->signal_waiters_lock);
+
+	dpa->dpa_process_count++;
+	INIT_LIST_HEAD(&dpa_app->dpa_process_list);
+	list_add_tail(&dpa_app->dpa_process_list, &dpa->dpa_processes);
+
+	mutex_unlock(&dpa->dpa_processes_lock);
+	return 0;
+}
+
+static const struct file_operations dpa_driver_kms_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = dpa_drm_ioctl,
+	.mmap = dpa_drm_mmap,
+	.poll = drm_poll,
+	.read = drm_read,
+};
+
+static const struct drm_driver dpa_drm_driver = {
+	.driver_features =
+	    DRIVER_ATOMIC |
+	    DRIVER_GEM |
+	    DRIVER_RENDER,
+	.open = dpa_driver_open_kms,
+	.postclose = dpa_driver_release_kms,
+	.fops = &dpa_driver_kms_fops,
+	.ioctls = dpadrm_ioctls,
+	.num_ioctls = ARRAY_SIZE(dpadrm_ioctls),
+
+	.name = "dpa-drm",
+};
+
+static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+{
+	struct device *dev = &pdev->dev;
+	struct dpa_device *dpa;
+	struct device_node *np;
+	int err, vec, nid;
+	u16 vendor, device;
+
+	dev_warn(dev, "%s: DPA start\n", __func__);
+	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
+	if (IS_ERR(dpa))
+		return -ENOMEM;
+	dpa->dev = dev;
+	dpa->pdev = pdev;
+	pci_set_drvdata(pdev, dpa);
+
+	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
+	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
+	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+
+	err = pcim_enable_device(pdev);
+	if (err)
+		return err;
+	pci_set_master(pdev);
+
+	err = pcim_iomap_regions(pdev, 1 << 0, "dpa");
+	if (err)
+		return err;
+
+	// Enable PASID support
+	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
+	if (err) {
+		dev_warn(dev, "%s: Unable to turn on SVA feature\n", __func__);
+		return err;
+	}
+	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
+
+	dpa->regs = pcim_iomap_table(pdev)[0];
+
+	err = daffy_init(dpa);
+	if (err)
+		goto disable_sva;
+
+	/*
+	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
+	 * then set ourselves to be local to that node. Eventually this will
+	 * be done via ACPI.
+	 */
+	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
+	if (np) {
+		nid = of_node_to_nid(np);
+		if (nid != NUMA_NO_NODE) {
+			dev_info(dev, "HBM on node %d\n", nid);
+			set_dev_node(dev, nid);
+		}
+	} else {
+		dev_info(dev, "No HBM node\n");
+	}
+
+	err = pci_alloc_irq_vectors(pdev, 1, DPA_NUM_MSIX, PCI_IRQ_MSIX);
+	if (err < 0) {
+		dev_err(dev, "Failed setting up IRQ\n");
+		goto free_daffy;
+	}
+
+	dev_info(dev,
+		"Using MSI(-X) interrupts: msi_enabled:%d, msix_enabled: %d\n",
+		pdev->msi_enabled,
+		pdev->msix_enabled);
+
+	dpa->base_irq = pci_irq_vector(pdev, 0);
+	for (int i = 0; i < DPA_NUM_MSIX; i++) {
+		vec = pci_irq_vector(pdev, i);
+		/* auto frees on device detach, nice */
+		err = devm_request_threaded_irq(dev, vec, daffy_handle_irq,
+			daffy_process_device_queue, IRQF_ONESHOT, "dpa-drm", dpa);
+		if (err < 0) {
+			dev_err(dev, "Failed setting up IRQ\n");
+			goto free_irqs;
+		}
+	}
+
+	INIT_LIST_HEAD(&dpa->dpa_processes);
+	mutex_init(&dpa->dpa_processes_lock);
+
+	// init drm
+	err = drm_dev_register(&dpa->ddev, id->driver_data);
+	if (err)
+		goto free_irqs;
+
+	return 0;
+
+free_irqs:
+	pci_free_irq_vectors(pdev);
+free_daffy:
+	daffy_free(dpa);
+disable_sva:
+	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
+
+	return err;
+}
+
 static void dpa_pci_remove(struct pci_dev *pdev)
 {
 	struct dpa_device *dpa = pci_get_drvdata(pdev);
@@ -708,6 +699,13 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 	daffy_free(dpa);
 	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 }
+
+static const struct pci_device_id dpa_pci_table[] = {
+	{ PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_DPA,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{ 0, }
+};
+MODULE_DEVICE_TABLE(pci, dpa_pci_table);
 
 static struct pci_driver dpa_pci_driver = {
 	.name = "dpa",
