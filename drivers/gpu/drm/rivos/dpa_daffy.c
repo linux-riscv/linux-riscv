@@ -19,6 +19,7 @@
 
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/completion.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
@@ -27,48 +28,6 @@
 
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
-
-static int daffy_queue_has_space(struct dpa_daffy *daffy)
-{
-	return 1;
-//	return (qinfo->fw_queue->h_read_index !=
-//		qinfo->fw_queue->h_write_index);
-}
-
-// return the index of the command
-// user of this must mark it invalid after a response shows up
-// XXX this interface is insufficient for multiple users...
-// need to copy packet responses somewhere, maybe need pkt id
-static unsigned int daffy_add_to_queue(struct dpa_device *dpa,
-			 struct dpa_fw_queue_pkt *pkt)
-{
-	struct dpa_daffy *daffy = &dpa->daffy;
-	struct dpa_fwq *fwq = daffy->fwq;
-	struct dpa_fw_queue_pkt *head;
-	unsigned int index;
-
-	mutex_lock(&daffy->lock);
-
-	index = fwq->desc.h_write_index & (fwq->desc.h_qsize - 1);
-	head = &fwq->h_ring[index];
-
-	if (head->hdr.command != INVALID) {
-		dev_warn(dpa->dev, "%s: head packet not invalid 0x%x\n",
-			 __func__, head->hdr.command);
-		mutex_unlock(&daffy->lock);
-		return -1;
-	}
-	pkt->hdr.id = fwq->desc.h_write_index;
-	memcpy(head, pkt, sizeof(*pkt));
-	dma_wmb();
-	fwq->desc.h_write_index++;
-
-	mutex_unlock(&daffy->lock);
-
-	dpa_fwq_write(dpa, 1, DPA_FWQ_QUEUE_DOORBELL);
-
-	return index;
-}
 
 int daffy_init(struct dpa_device *dpa)
 {
@@ -105,8 +64,9 @@ int daffy_init(struct dpa_device *dpa)
 		daffy->fwq->d_ring[i].hdr.command = INVALID;
 	}
 
-	mutex_init(&daffy->lock);
-	init_waitqueue_head(&daffy->wq);
+	spin_lock_init(&daffy->h_lock);
+	init_waitqueue_head(&daffy->h_full_wq);
+	INIT_LIST_HEAD(&daffy->h_waiters);
 
 	dpa_fwq_write(dpa, daffy->fwq_dma_addr, DPA_FWQ_QUEUE_DESCRIPTOR);
 
@@ -123,9 +83,35 @@ void daffy_free(struct dpa_device *dpa)
 			  daffy->fwq_dma_addr);
 }
 
-irqreturn_t daffy_process_device_queue(int irq, void *data)
+static void daffy_process_host_queue(struct dpa_device *dpa)
 {
-	struct dpa_device *dpa = data;
+	struct dpa_daffy *daffy = &dpa->daffy;
+	struct dpa_fwq *fwq = daffy->fwq;
+	struct dpa_fwq_waiter *waiter, *tmp;
+	unsigned long flags;
+	u64 read_index;
+
+	read_index = fwq->desc.h_read_index;
+	spin_lock_irqsave(&daffy->h_lock, flags);
+	list_for_each_entry_safe(waiter, tmp, &daffy->h_waiters, node) {
+		unsigned int index;
+
+		if (waiter->pkt->hdr.id >= read_index)
+			break;
+
+		index = waiter->pkt->hdr.id & (fwq->desc.h_qsize - 1);
+		*waiter->pkt = fwq->h_ring[index];
+		list_del_init(&waiter->node);
+		complete(&waiter->done);
+	}
+	daffy->h_retire_index = read_index;
+	spin_unlock_irqrestore(&daffy->h_lock, flags);
+
+	wake_up_interruptible(&daffy->h_full_wq);
+}
+
+static void daffy_process_device_queue(struct dpa_device *dpa)
+{
 	struct dpa_daffy *daffy = &dpa->daffy;
 	struct dpa_fwq *fwq = daffy->fwq;
 	u64 read_index, write_index;
@@ -182,8 +168,6 @@ irqreturn_t daffy_process_device_queue(int irq, void *data)
 	}
 	dev_dbg(dpa->dev, "%s: Daffy final d_read_index: %#llx, d_write_index: %#llx\n",
 		__func__, read_index, write_index);
-
-	return IRQ_HANDLED;
 }
 
 irqreturn_t daffy_handle_irq(int irq, void *data)
@@ -192,7 +176,6 @@ irqreturn_t daffy_handle_irq(int irq, void *data)
 	void __iomem *cause_addr;
 	int vec = irq - dpa->base_irq;
 	u64 cause;
-	irqreturn_t irq_ret = IRQ_HANDLED;
 
 	cause_addr = dpa->regs + DPA_MSIX_CAUSE_BASE + vec * sizeof(u64);
 	cause = readq(cause_addr);
@@ -207,283 +190,187 @@ irqreturn_t daffy_handle_irq(int irq, void *data)
 	 */
 	switch (vec) {
 	case FW_QUEUE_H2D:
-		wake_up_interruptible(&dpa->daffy.wq);
-		break;
-
+		daffy_process_host_queue(dpa);
+		return IRQ_HANDLED;
 	case FW_QUEUE_D2H:
-		irq_ret = IRQ_WAKE_THREAD;
-		break;
-
+		daffy_process_device_queue(dpa);
+		return IRQ_HANDLED;
 	default:
 		dev_warn(dpa->dev, "%s: MSI vector %d received but not handled",
 			__func__, vec);
+		return IRQ_NONE;
 	}
-
-	return irq_ret;
 }
 
-int daffy_get_info_cmd(struct dpa_device *dev,
-					struct dpa_process *p,
-					struct drm_dpa_get_info *args)
+static inline bool daffy_host_queue_full(struct dpa_daffy *daffy)
 {
-	struct dpa_daffy *daffy = &dev->daffy;
-	struct dpa_fw_queue_pkt pkt;
-	struct dpa_fw_queue_pkt *qpkt;
+	return (daffy->fwq->desc.h_write_index - daffy->h_retire_index) >=
+		DPA_FW_QUEUE_SIZE;
+}
+
+static int daffy_submit_sync(struct dpa_device *dpa,
+			     struct dpa_fw_queue_pkt *pkt)
+{
+	struct dpa_daffy *daffy = &dpa->daffy;
+	struct dpa_fwq *fwq = daffy->fwq;
+	struct dpa_fwq_waiter waiter;
+	struct dpa_fw_queue_pkt *head;
 	unsigned int index;
-	int ret = 0;
+	int ret;
 
-	if (!daffy_queue_has_space(daffy)) {
-		// XXX wait on wait queue
-		dev_warn(dev->dev, "%s: queue is full\n", __func__);
-		return -EBUSY;
-	}
-	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = GET_INFO;
+	INIT_LIST_HEAD(&waiter.node);
+	init_completion(&waiter.done);
+	waiter.pkt = pkt;
 
-	index = daffy_add_to_queue(dev, &pkt);
-	dev_warn(dev->dev, "%s: added to queue index %u cmd = %u\n",
-		 __func__, index, pkt.hdr.command);
-	if (index == -1)
-		return -EINVAL;
-
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-	if (ret)
+	spin_lock_irq(&daffy->h_lock);
+	ret = wait_event_interruptible_lock_irq(daffy->h_full_wq,
+						!daffy_host_queue_full(daffy),
+						daffy->h_lock);
+	if (ret < 0)
 		goto out;
 
-	if (qpkt->hdr.response != SUCCESS) {
-		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
+	index = fwq->desc.h_write_index & (fwq->desc.h_qsize - 1);
+	head = &fwq->h_ring[index];
+	if (head->hdr.command != INVALID) {
+		dev_warn(dpa->dev, "%s: head packet not invalid 0x%x\n",
+			 __func__, head->hdr.command);
+		ret = -EIO;
 		goto out;
 	}
+	pkt->hdr.id = fwq->desc.h_write_index;
 
-	args->pe_grid_dim_x = qpkt->u.dgic.pe_grid_dim_x;
-	args->pe_grid_dim_y = qpkt->u.dgic.pe_grid_dim_y;
+	dev_dbg(dpa->dev, "submitting pkt id %llu, cmd: %#x\n", pkt->hdr.id,
+		pkt->hdr.command);
+	*head = *pkt;
+	dma_wmb();
+	fwq->desc.h_write_index++;
+
+	list_add_tail(&waiter.node, &daffy->h_waiters);
+	spin_unlock_irq(&daffy->h_lock);
+
+	dpa_fwq_write(dpa, 1, DPA_FWQ_QUEUE_DOORBELL);
+
+	ret = wait_for_completion_interruptible(&waiter.done);
+	if (ret < 0) {
+		spin_lock_irq(&daffy->h_lock);
+		list_del(&waiter.node);
+		spin_unlock_irq(&daffy->h_lock);
+		return ret;
+	}
+	dev_dbg(dpa->dev, "pkt id %llu completed, cmd: %#x, resp: %#x\n",
+		pkt->hdr.id, pkt->hdr.command, pkt->hdr.response);
+	if (pkt->hdr.response != SUCCESS)
+		return -EIO;
+	return 0;
+
 out:
+	spin_unlock_irq(&daffy->h_lock);
 	return ret;
 }
 
-int daffy_destroy_queue_cmd(struct dpa_device *dev,
-			    struct dpa_process *p, u32 queue_id)
+int daffy_get_info_cmd(struct dpa_device *dpa,
+		       struct drm_dpa_get_info *args)
 {
-	struct dpa_daffy *daffy = &dev->daffy;
-	struct dpa_fw_queue_pkt pkt, *qpkt;
-	struct daffy_destroy_queue_cmd *cmd;
-	unsigned int index;
-	int ret = 0;
+	struct dpa_fw_queue_pkt pkt;
+	int ret;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = GET_INFO;
+	ret = daffy_submit_sync(dpa, &pkt);
+	if (ret < 0)
+		return ret;
+
+	args->pe_grid_dim_x = pkt.u.dgic.pe_grid_dim_x;
+	args->pe_grid_dim_y = pkt.u.dgic.pe_grid_dim_y;
+	return 0;
+}
+
+int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id)
+{
+	struct dpa_fw_queue_pkt pkt;
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DESTROY_QUEUE;
-	cmd = &pkt.u.ddqc;
+	pkt.u.ddqc.queue_id = queue_id;
 
-	cmd->queue_id = queue_id;
-
-	index = daffy_add_to_queue(dev, &pkt);
-	dev_warn(dev->dev, "%s: added to queue index %u cmd = %u qid = %u\n",
-		 __func__, index, pkt.hdr.command, queue_id);
-	if (index == -1) {
-		dev_warn(dev->dev, "%s: got invalid queue index -1\n", __func__);
-		ret = -EINVAL;
-		goto out;
-	}
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-	if (ret)
-		goto out;
-
-	if (qpkt->hdr.response != SUCCESS) {
-		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
-	}
-
-out:
-	return ret;
+	return daffy_submit_sync(dpa, &pkt);
 }
 
-
-int daffy_create_queue_cmd(struct dpa_device *dev,
+int daffy_create_queue_cmd(struct dpa_device *dpa,
 			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args)
 {
-	struct dpa_daffy *daffy = &dev->daffy;
-	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct dpa_fw_queue_pkt pkt;
 	struct daffy_create_queue_cmd *cmd;
-	u64 wr_ptr = args->write_pointer_address;
-	u64 rd_ptr = args->read_pointer_address;
-	u64 ring_ptr = args->ring_base_address;
-	unsigned int index;
-	int ret = 0;
-
-	if (!daffy_queue_has_space(daffy)) {
-		// XXX wait on wait queue
-		dev_warn(dev->dev, "%s: queue is full\n", __func__);
-		return -EBUSY;
-	}
+	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = CREATE_QUEUE;
 	cmd = &pkt.u.dcqc;
-
 	cmd->pasid = p->pasid;
-	cmd->ring_base_address = ring_ptr;
-	cmd->write_pointer_address = wr_ptr;
-	cmd->read_pointer_address = rd_ptr;
+	cmd->ring_base_address = args->ring_base_address;
+	cmd->write_pointer_address = args->write_pointer_address;
+	cmd->read_pointer_address = args->read_pointer_address;
 	cmd->ring_size = args->ring_size;
 
-	index = daffy_add_to_queue(dev, &pkt);
-	dev_warn(dev->dev, "%s: added to queue index %u cmd = %u ring = 0x%llx wr 0x%llx rd 0x%llx\n",
-		__func__, index, pkt.hdr.command,
-		cmd->ring_base_address, cmd->write_pointer_address,
-		cmd->read_pointer_address);
-	if (index == -1) {
-		dev_warn(dev->dev, "%s: got invalid queue index -1\n", __func__);
-		ret = -EINVAL;
-		// goto out_unmap_rwptr;
-	}
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-	if (ret)
-		goto out;
+	ret = daffy_submit_sync(dpa, &pkt);
+	if (ret < 0)
+		return ret;
 
-	if (qpkt->hdr.response != SUCCESS) {
-		dev_warn(dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	args->queue_id = qpkt->u.dcqc.queue_id;
+	args->queue_id = pkt.u.dcqc.queue_id;
 	// doorbell_offset will get converted from page offset to something else by caller
-	args->doorbell_offset = qpkt->u.dcqc.doorbell_offset;
-out:
-	return ret;
+	args->doorbell_offset = pkt.u.dcqc.doorbell_offset;
+	return 0;
 }
 
-int daffy_register_signal_pages_cmd(struct dpa_device *dpa_dev,
-				struct dpa_process *p,
-				struct drm_dpa_create_signal_pages *args,
-				u32 num_pages)
+int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
+				    struct dpa_process *p,
+				    struct drm_dpa_create_signal_pages *args,
+				    u32 num_pages)
 {
-	struct dpa_daffy *daffy = &dpa_dev->daffy;
-	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct dpa_fw_queue_pkt pkt;
 	struct daffy_register_signal_pages_cmd *cmd;
-	unsigned int index;
-	int ret = 0;
-
-	if (!daffy_queue_has_space(daffy)) {
-		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
-		return -EBUSY;
-	}
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = REGISTER_SIGNAL_PAGES;
-
 	cmd = &pkt.u.drspc;
 	cmd->base_address = args->va;
 	cmd->num_pages = num_pages;
 	cmd->type = SIGNAL;	// Only support default signal type for now
 	cmd->pasid = p->pasid;
 
-	index = daffy_add_to_queue(dpa_dev, &pkt);
-	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
-		 __func__, index, pkt.hdr.command);
-	if (index == -1) {
-		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
-		ret = -EINVAL;
-	}
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-
-	if (qpkt->hdr.response != SUCCESS) {
-		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
-	}
-
-	return ret;
+	return daffy_submit_sync(dpa, &pkt);
 }
 
-int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa_dev,
-				struct dpa_process *p)
+int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
+				      struct dpa_process *p)
 {
-	struct dpa_daffy *daffy = &dpa_dev->daffy;
-	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct dpa_fw_queue_pkt pkt;
 	struct daffy_unregister_signal_pages_cmd *cmd;
-	unsigned int index;
-	int ret = 0;
-
-	if (!daffy_queue_has_space(daffy)) {
-		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
-		return -EBUSY;
-	}
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = UNREGISTER_SIGNAL_PAGES;
-
 	cmd = &pkt.u.durspc;
 	cmd->pasid = p->pasid;
 
-	index = daffy_add_to_queue(dpa_dev, &pkt);
-	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
-		 __func__, index, pkt.hdr.command);
-	if (index == -1) {
-		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
-		ret = -EINVAL;
-	}
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-
-	if (qpkt->hdr.response != SUCCESS) {
-		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
-	}
-
-	return ret;
+	return daffy_submit_sync(dpa, &pkt);
 }
 
-int daffy_subscribe_signal_cmd(struct dpa_device *dpa_dev,
+int daffy_subscribe_signal_cmd(struct dpa_device *dpa,
 				struct dpa_process *p, u64 signal_idx)
 {
-	struct dpa_daffy *daffy = &dpa_dev->daffy;
-	struct dpa_fw_queue_pkt pkt, *qpkt;
+	struct dpa_fw_queue_pkt pkt;
 	struct daffy_subscribe_signal_cmd *cmd;
-	unsigned int index;
-	int ret = 0;
-
-	if (!daffy_queue_has_space(daffy)) {
-		dev_warn(dpa_dev->dev, "%s: queue is full\n", __func__);
-		return -EBUSY;
-	}
+	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = SUBSCRIBE_SIGNAL;
-
 	cmd = &pkt.u.dssc;
 	cmd->signal_idx = signal_idx;
 	cmd->pasid = p->pasid;
 
-	index = daffy_add_to_queue(dpa_dev, &pkt);
-	dev_warn(dpa_dev->dev, "%s: added to queue index %u cmd = %u\n",
-		 __func__, index, pkt.hdr.command);
-	if (index == -1) {
-		dev_warn(dpa_dev->dev, "%s: got invalid queue index -1\n", __func__);
-		ret = -EINVAL;
-	}
-	qpkt = &daffy->fwq->h_ring[index];
-	ret = wait_event_interruptible(daffy->wq, qpkt->hdr.response > 0);
-
-	if (qpkt->hdr.response == ERROR) {
-		dev_warn(dpa_dev->dev, "%s: DUC did not succeed processing packet type %d at index 0x%x, got response %d",
-			__func__, qpkt->hdr.command, index, qpkt->hdr.response);
-		ret = -EINVAL;
-	} else if (qpkt->hdr.response == ALREADY_SIGNALED) {
-		dev_warn(dpa_dev->dev, "%s: DUC did not process the subscription, signal is already complete\n",
-			__func__);
-		ret = 1;
-	}
-
+	ret = daffy_submit_sync(dpa, &pkt);
+	if (ret < 0 && pkt.hdr.response == ALREADY_SIGNALED)
+		return 1;
 	return ret;
 }

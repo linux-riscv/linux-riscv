@@ -54,20 +54,6 @@
 
 #define DPA_PROCESS_MAX		DPA_NUM_DB_PAGES
 
-struct dpa_fwq {
-	struct dpa_fw_queue_desc desc;
-	struct dpa_fw_queue_pkt h_ring[DPA_FW_QUEUE_SIZE];
-	struct dpa_fw_queue_pkt d_ring[DPA_FW_QUEUE_SIZE];
-};
-
-struct dpa_daffy {
-	struct mutex lock;
-	wait_queue_head_t wq;
-
-	struct dpa_fwq *fwq;
-	dma_addr_t fwq_dma_addr;
-};
-
 struct dpa_device {
 	/* big lock for device data structures */
 	struct mutex lock;
@@ -155,9 +141,6 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 }
 
 int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx);
-
-irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
-irqreturn_t daffy_process_device_queue(int irq, void *dpa_dev);
 
 /* offsets to MMAP calls for different things */
 #define DRM_MMAP_TYPE_SHIFT (60)

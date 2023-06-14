@@ -118,7 +118,7 @@ static void dpa_del_all_queues(struct dpa_process *p)
 
 		q = list_first_entry(&queues, struct dpa_aql_queue, list);
 		list_del(&q->list);
-		ret = daffy_destroy_queue_cmd(p->dev, p, q->id);
+		ret = daffy_destroy_queue_cmd(p->dev, q->id);
 		if (ret)
 			dev_warn(p->dev->dev, "%s: failed to destroy q %u\n",
 				 __func__, q->id);
@@ -144,7 +144,7 @@ static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
 	if (ret) {
 		dev_warn(p->dev->dev, "%s: unable to add aql queue to process, destroying id %u\n",
 			__func__, args->queue_id);
-		daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
+		daffy_destroy_queue_cmd(p->dev, args->queue_id);
 	}
 	args->doorbell_offset = doorbell_mmap_offset;
 	return ret;
@@ -164,7 +164,7 @@ static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
 			 args->queue_id);
 		return -EINVAL;
 	}
-	ret = daffy_destroy_queue_cmd(p->dev, p, args->queue_id);
+	ret = daffy_destroy_queue_cmd(p->dev, args->queue_id);
 
 	return ret;
 }
@@ -181,7 +181,7 @@ static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_get_info *args = data;
-	int ret = daffy_get_info_cmd(p->dev, p, args);
+	int ret = daffy_get_info_cmd(p->dev, args);
 
 	if (ret)
 		return ret;
@@ -662,8 +662,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	for (int i = 0; i < DPA_NUM_MSIX; i++) {
 		vec = pci_irq_vector(pdev, i);
 		/* auto frees on device detach, nice */
-		err = devm_request_threaded_irq(dev, vec, daffy_handle_irq,
-			daffy_process_device_queue, IRQF_ONESHOT, "dpa-drm", dpa);
+		err = devm_request_threaded_irq(dev, vec, NULL,
+			daffy_handle_irq, IRQF_ONESHOT, "dpa-drm", dpa);
 		if (err < 0) {
 			dev_err(dev, "Failed setting up IRQ\n");
 			goto free_irqs;

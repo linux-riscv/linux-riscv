@@ -20,6 +20,13 @@
 #ifndef _DPA_DRM_DAFFY_H_
 #define _DPA_DRM_DAFFY_H_
 
+#include <linux/completion.h>
+#include <linux/interrupt.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
+#include <linux/types.h>
+#include <linux/wait.h>
+
 // don't assume the value of PAGE_SIZE
 #define DPA_FW_QUEUE_PAGE_SIZE (4 * 1024)
 
@@ -182,28 +189,49 @@ struct dpa_fw_queue_pkt {
 	} u;
 };
 
+struct dpa_fwq {
+	struct dpa_fw_queue_desc desc;
+	struct dpa_fw_queue_pkt h_ring[DPA_FW_QUEUE_SIZE];
+	struct dpa_fw_queue_pkt d_ring[DPA_FW_QUEUE_SIZE];
+};
+
+struct dpa_fwq_waiter {
+	struct dpa_fw_queue_pkt *pkt;
+	struct completion done;
+
+	struct list_head node;
+};
+
+struct dpa_daffy {
+	spinlock_t h_lock;
+	wait_queue_head_t h_full_wq;
+	u64 h_retire_index;
+	struct list_head h_waiters;
+
+	struct dpa_fwq *fwq;
+	dma_addr_t fwq_dma_addr;
+};
+
 struct dpa_device;
 struct dpa_process;
 
 int daffy_init(struct dpa_device *dpa_dev);
 void daffy_free(struct dpa_device *dpa_dev);
-int daffy_get_info_cmd(struct dpa_device *dev,
-					struct dpa_process *p,
-					struct drm_dpa_get_info *args);
-int daffy_create_queue_cmd(struct dpa_device *dev,
+irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
+
+int daffy_get_info_cmd(struct dpa_device *dpa,
+		       struct drm_dpa_get_info *args);
+int daffy_create_queue_cmd(struct dpa_device *dpa,
 			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args);
-int daffy_destroy_queue_cmd(struct dpa_device *dev,
-			    struct dpa_process *p, u32 queue_id);
-int daffy_register_signal_pages_cmd(struct dpa_device *dpa_dev,
-				struct dpa_process *p,
-				struct drm_dpa_create_signal_pages *args,
-				u32 num_pages);
-int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa_dev,
-				struct dpa_process *p);
-int daffy_subscribe_signal_cmd(struct dpa_device *dpa_dev,
-				struct dpa_process *p, u64 event_id);
-
-
+int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id);
+int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
+				    struct dpa_process *p,
+				    struct drm_dpa_create_signal_pages *args,
+				    u32 num_pages);
+int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
+				      struct dpa_process *p);
+int daffy_subscribe_signal_cmd(struct dpa_device *dpa,
+			       struct dpa_process *p, u64 event_id);
 
 #endif /* _DPA_DRM_DAFFY_H_ */
