@@ -130,8 +130,6 @@ irqreturn_t daffy_process_device_queue(int irq, void *data)
 	struct dpa_fwq *fwq = daffy->fwq;
 	u64 read_index, write_index;
 
-	mutex_lock(&daffy->lock);
-
 	read_index = fwq->desc.d_read_index;
 	write_index = fwq->desc.d_write_index;
 
@@ -185,7 +183,6 @@ irqreturn_t daffy_process_device_queue(int irq, void *data)
 	dev_dbg(dpa->dev, "%s: Daffy final d_read_index: %#llx, d_write_index: %#llx\n",
 		__func__, read_index, write_index);
 
-	mutex_unlock(&daffy->lock);
 	return IRQ_HANDLED;
 }
 
