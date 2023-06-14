@@ -19,11 +19,65 @@
 #include <linux/smp.h>
 #include <asm/hwcap.h>
 
+#include <linux/sched/debug.h>
+#include <linux/percpu-defs.h>
+
+#ifdef CONFIG_RISCV_TIMER_REGDUMP
+
+/* Enable periodic regdump by adding "dumpregs=40" to the kernel
+ * cmdline.  The number is the period between timer IRQs; 40 is
+ * about right.
+ */
+static u32 _dumpperiod = 0;
+DEFINE_PER_CPU(unsigned, _dumpnum);
+DEFINE_PER_CPU(unsigned, _dumpctr);
+
+#define DUMPREGS_DEFAULT_PERIOD	40
+
+static int __init early_dumpregs(char *p)
+{
+	if (!p)
+		/* No parameter: use default period */
+		_dumpperiod = DUMPREGS_DEFAULT_PERIOD;
+	else
+		get_option(&p, &_dumpperiod);
+
+	_dumpctr = _dumpperiod;
+
+	return 0;
+}
+
+early_param("dumpregs", early_dumpregs);
+
+static void dbg_dump(struct pt_regs *regs, unsigned long cause)
+{
+	if (!_dumpperiod || (cause != RV_IRQ_TIMER))
+		return;
+
+	// ME
+	if (__this_cpu_dec_return(_dumpctr) == 1) {
+	    this_cpu_write(_dumpctr, _dumpperiod);
+
+	    pr_err("Regs (seq %d): \n", __this_cpu_inc_return(_dumpnum) - 1);
+	    pr_err(" CPU: %d PID: %d Comm: %.20s %s\n", raw_smp_processor_id(),
+		   current->pid, current->comm, user_mode(regs) ? "USER" : "KERN");
+	    pr_err(" epc: " REG_FMT " ra: " REG_FMT " sp: " REG_FMT "\n",
+		   regs->epc, regs->ra, regs->sp);
+	}
+}
+#else
+static void dbg_dump(struct pt_regs *regs, unsigned long cause)
+{
+}
+#endif
+
 static struct irq_domain *intc_domain;
 
 static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 {
 	unsigned long cause = regs->cause & ~CAUSE_IRQ_FLAG;
+
+	dbg_dump(regs, cause);
 
 	if (unlikely(cause >= BITS_PER_LONG))
 		panic("unexpected interrupt cause");
@@ -35,9 +89,11 @@ static asmlinkage void riscv_intc_aia_irq(struct pt_regs *regs)
 {
 	unsigned long topi;
 
-	while ((topi = csr_read(CSR_TOPI)))
+	while ((topi = csr_read(CSR_TOPI))) {
+		dbg_dump(regs, topi >> TOPI_IID_SHIFT);
 		generic_handle_domain_irq(intc_domain,
 					  topi >> TOPI_IID_SHIFT);
+	}
 }
 
 /*
