@@ -712,6 +712,12 @@ config RISCV_EFFICIENT_UNALIGNED_ACCESS
 
 	  If unsure what to do here, say N.
 
+config RISCV_TIMER_REGDUMP
+        bool "Periodically dump registers"
+	default n
+	help
+	  Dump thread registers every N timer ticks
+
 endmenu # "Platform type"
 
 menu "Kernel features"
