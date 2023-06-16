@@ -231,6 +231,7 @@ int isbdm_query_gid(struct ib_device *base_dev, u32 port, int idx,
 	struct isbdm_device *sdev = to_isbdm_dev(base_dev);
 
 	memset(gid, 0, sizeof(*gid));
+	gid->global.subnet_prefix = cpu_to_be64(sdev->ii->subnet_prefix);
 	gid->global.interface_id = cpu_to_be64(isbdm_gid(sdev->ii));
 	return 0;
 }
