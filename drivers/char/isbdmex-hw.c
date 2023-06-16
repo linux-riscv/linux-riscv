@@ -1074,6 +1074,7 @@ void isbdm_free_all_rmbs(struct isbdm *ii, struct file *file)
 /* Reap any completed RX descriptors. */
 void isbdm_process_rx_done(struct isbdm *ii)
 {
+	bool send_handshake_ack;
 	struct isbdm_ring *ring = &ii->rx_ring;
 	u32 mask = ring->size - 1;
 	u32 hw_next = ISBDM_READQ(ii, ISBDM_RX_RING_HEAD) & mask;
@@ -1132,10 +1133,20 @@ void isbdm_process_rx_done(struct isbdm *ii)
 	if (!ISBDMEX_RX_THRESHOLD)
 		isbdm_rx_refill(ii);
 
+	send_handshake_ack = ii->send_handshake_ack;
+	ii->send_handshake_ack = false;
 	mutex_unlock(&ring->lock);
 
 	/* Let anybody blocked know there's something to get. */
 	wake_up(&ii->read_wait_queue);
+
+	/*
+	 * Send a handshake ACK if needed now that the RX queue (potentially
+	 * containing a boatload of handshake attempts) has been cleared.
+	 */
+	if (send_handshake_ack)
+		isbdm_send_handshake(ii);
+
 	return;
 }
 
@@ -1183,6 +1194,9 @@ static void isbdm_connect(struct isbdm *ii)
 	isbdm_enable(ii);
 	/* Refill RX since it was drained on disconnect. */
 	isbdm_rx_threshold(ii);
+	/* Start the handshake procedure. */
+	ii->handshake_retry_count = ISBDM_HANDSHAKE_RETRIES;
+	isbdm_handshake_work(&ii->handshake_work.work);
 }
 
 /* Cancel and flush all pending TX transfers. */
@@ -1374,6 +1388,7 @@ static void isbdm_disconnect(struct isbdm *ii)
 
 	/* Set link down first to keep new things from piling in. */
 	ii->link_status = ISBDM_LINK_DOWN;
+	ii->peer_interface_id = 0;
 	isbdm_port_status_change(ii);
 
 	/* Stop the hardware. */
@@ -1430,7 +1445,27 @@ static void isbdm_check_link(struct isbdm *ii)
 
 	ii->link_status = link_status;
 	isbdm_connect(ii);
-	isbdm_port_status_change(ii);
+
+	/*
+	 * The upstream link can come up right away. The downstream link has to
+	 * wait until the handshake packet comes in and it can figure out its
+	 * subnet prefix.
+	 */
+	if ((link_status == ISBDM_LINK_UPSTREAM) ||
+	    (ii->peer_interface_id != 0)) {
+
+		if (!ii->ib_device) {
+			ii->ib_device = isbdm_device_create(ii);
+			if (!ii->ib_device) {
+				dev_err(&ii->pdev->dev,
+					"Can't create IB device\n");
+
+				return;
+			}
+		}
+
+		isbdm_port_status_change(ii);
+	}
 }
 
 void isbdm_start(struct isbdm *ii)
