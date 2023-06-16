@@ -116,7 +116,7 @@ def userspace_install_kernel(c, version):
 
     # Install the kernel to test.
     # FIXME even if only one deb is published, looping here is dirty.
-    for f in Path("/rivos/sysroot/riscv/boot/{}".format(version)).glob("*.deb"):
+    for f in Path("/rivos/sysroot/riscv/boot").glob("*.deb"):
         basename = os.path.basename(f)
         c.put(f)
         c.sudo("sudo dpkg -i {}".format(basename))
