@@ -383,6 +383,31 @@ static const struct file_operations isbdmex_fops = {
 	.unlocked_ioctl = isbdmex_ioctl,
 };
 
+/*
+ * Called when the timer expires, or the first time, to send a handshake packet.
+ */
+void isbdm_handshake_work(struct work_struct *work)
+{
+	struct isbdm *ii = container_of(work, struct isbdm, handshake_work.work);
+	int rc;
+
+	rc = isbdm_send_handshake(ii);
+	if (rc) {
+		dev_warn(&ii->pdev->dev, "Failed to send handshake: %d\n", rc);
+		return;
+	}
+
+	/* Re-arm the timer to send the handshake again. */
+	if (ii->handshake_retry_count) {
+		ii->handshake_retry_count -= 1;
+		schedule_delayed_work(&ii->handshake_work,
+				      msecs_to_jiffies(1000));
+
+	} else {
+		dev_warn(&ii->pdev->dev, "Handshake timeout\n");
+	}
+}
+
 /******************************************************************************/
 /* Probe, and PCI plumbing */
 
@@ -440,6 +465,19 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto deinit;
 	}
 
+	/*
+	 * The device doesn't have a unique ID, so create a random one to try
+	 * and avoid ID collisions with peers. Avoid 0 so it can be used as
+	 * "unset".
+	 */
+	get_random_bytes(&ii->rand_id, sizeof(ii->rand_id));
+	if (ii->rand_id == 0)
+		ii->rand_id = 1;
+
+	get_random_bytes(&ii->subnet_prefix, sizeof(ii->subnet_prefix));
+	if (ii->subnet_prefix == 0)
+		ii->subnet_prefix = 1;
+
 	ii->inline_pool = dma_pool_create("isbdm-inline",
 					  &ii->pdev->dev,
 					  ISBDM_MAX_INLINE,
@@ -458,6 +496,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto release_pool;
 	}
 
+	INIT_DELAYED_WORK(&ii->handshake_work, isbdm_handshake_work);
 	ret = isbdmex_new_instance(ii);
 	if (ret < 0) {
 		dev_err_probe(dev, ret, "Too many ISBDMs!\n");
@@ -465,9 +504,6 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	dev_info(dev, "isbdm%d at %px, irq %d\n", ii->instance, ii->base, ii->irq);
-
-	/* Get the hardware running! */
-	isbdm_start(ii);
 
 	/* Register a misc device */
 	ii->misc.minor = MISC_DYNAMIC_MINOR;
@@ -478,29 +514,17 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto unget_instance;
 	}
 
+	/* Get the hardware running! */
+	isbdm_start(ii);
 	ret = misc_register(&ii->misc);
 	if (ret < 0) {
 		dev_err_probe(dev, ret, "Can't register miscdev\n");
 		goto free_misc_name;
 	}
 
-	/*
-	 * The device doesn't have a unique ID, so create a random one to try
-	 * and avoid ID collisions with peers.
-	 */
-	get_random_bytes(&ii->rand_id, sizeof(ii->rand_id));
-	ii->ib_device = isbdm_device_create(ii);
-	if (!ii->ib_device) {
-		dev_err_probe(dev, ret, "Can't create IB device\n");
-		goto unregister_misc;
-	}
-
 	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware location */
 
 	return 0;
-
-unregister_misc:
-	misc_deregister(&ii->misc);
 
 free_misc_name:
 	kfree(ii->misc.name);

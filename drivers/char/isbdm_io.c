@@ -200,7 +200,8 @@ out:
 
 static struct isbdm_packet_header *
 isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type, u8 flags,
-			 u16 src_lid, u32 src_qp, u32 dest_qp, u32 imm_or_rkey)
+			 u16 src_lid, u16 dest_lid, u32 src_qp, u32 dest_qp,
+			 u32 imm_or_rkey)
 {
 	struct isbdm_packet_header *hdr = buf->buf + buf->size;
 
@@ -212,11 +213,64 @@ isbdm_fill_packet_header(struct isbdm_buf *buf, u8 type, u8 flags,
 	hdr->type = type;
 	hdr->flags = flags;
 	hdr->src_lid = cpu_to_le16(src_lid);
+	hdr->dest_lid = cpu_to_le16(dest_lid);
 	hdr->src_qp = cpu_to_le32(src_qp);
 	hdr->dest_qp = cpu_to_le32(dest_qp);
 	hdr->imm_data = cpu_to_le32(imm_or_rkey);
 	buf->size += sizeof(*hdr);
 	return hdr;
+}
+
+/*
+ * Turn a direct write() from usermode into a set of buffers, and enqueue it
+ * onto the hardware or a software waiting list.
+ */
+int isbdm_send_handshake(struct isbdm *ii)
+{
+	struct isbdm_buf *buf;
+	struct isbdm_handshake_packet *hs;
+	ssize_t rc;
+
+	mutex_lock(&ii->tx_ring.lock);
+	if (ii->link_status == ISBDM_LINK_DOWN) {
+		rc = -ENOTCONN;
+		goto out;
+	}
+
+	/* The first iteration has a header on it. */
+	buf = get_buf(ii, &ii->tx_ring);
+	if (!buf) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	buf->flags = ISBDM_DESC_FS | ISBDM_DESC_LS;
+	isbdm_fill_packet_header(buf, ISBDM_PACKET_HANDSHAKE, 0, 0, 0, 0, 0, 0);
+	hs = buf->buf + buf->size;
+	memset(hs, 0, sizeof(*hs));
+	if (ii->link_status == ISBDM_LINK_UPSTREAM) {
+		hs->subnet_prefix = cpu_to_le64(ii->subnet_prefix);
+		hs->flags = cpu_to_le16(ISBDM_HANDSHAKE_UPSTREAM);
+	}
+
+	if (ii->peer_interface_id)
+		hs->flags |= cpu_to_le16(ISBDM_HANDSHAKE_ACK);
+
+	hs->interface_id = cpu_to_le64(isbdm_gid(ii));
+	buf->size += sizeof(*hs);
+	dev_dbg(&ii->pdev->dev,
+		"Sending handshake: Flags %x subnet %llx ID %llx",
+		le16_to_cpu(hs->flags),
+		le64_to_cpu(hs->subnet_prefix),
+		le64_to_cpu(hs->interface_id));
+
+	list_add_tail(&buf->node, &ii->tx_ring.wait_list);
+	isbdm_tx_enqueue(ii);
+	rc = 0;
+
+out:
+	mutex_unlock(&ii->tx_ring.lock);
+	return rc;
 }
 
 /*
@@ -246,7 +300,7 @@ ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size)
 	}
 
 	buf->flags = ISBDM_DESC_FS;
-	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0, 0, 0);
+	isbdm_fill_packet_header(buf, ISBDM_PACKET_RAW, 0, 0, 0, 0, 0, 0);
 
 	/* Loop creating packets and queueing them on to our local list. */
 	while (remaining != 0) {
@@ -333,6 +387,7 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	u8 hdr_type;
 	struct isbdm_buf *buf, *tmp;
 	void *dst;
+	u16 dest_lid = 0;
 	u32 dest_qp;
 	struct isbdm *ii = qp->sdev->ii;
 	u32 imm_or_rkey = 0;
@@ -363,6 +418,7 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 	    (qp->base_qp.qp_type == IB_QPT_GSI)) {
 
 		dest_qp = wqe->sqe.ud.remote_qpn;
+		dest_lid = wqe->sqe.ud.dlid;
 
 	} else {
 		dest_qp = qp->attrs.dest_qp_num;
@@ -399,6 +455,7 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 				       hdr_type,
 				       hdr_flags,
 				       qp->sdev->lid,
+				       dest_lid,
 				       qp->base_qp.qp_num,
 				       dest_qp,
 				       imm_or_rkey);
@@ -1739,6 +1796,18 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 	struct ib_grh grh;
 	int rv;
 
+	if ((qp->base_qp.qp_type == IB_QPT_UD) ||
+	    (qp->base_qp.qp_type == IB_QPT_GSI)) {
+
+		if (le16_to_cpu(hdr->dest_lid) != sdev->lid) {
+			dev_warn(&ii->pdev->dev,
+				 "Dropping packet whose dest lid %x is not my lid %x\n",
+				 le16_to_cpu(hdr->dest_lid), sdev->lid);
+
+			goto out;
+		}
+	}
+
 	if (!qp) {
 		dev_warn(&ii->pdev->dev,
 			 "Dropping RX packet with unknown QP %x\n",
@@ -1759,12 +1828,17 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 
 	if (has_grh) {
 		memset(&grh, 0, sizeof(grh));
+		grh.dgid.global.subnet_prefix =
+			cpu_to_be64(sdev->ii->subnet_prefix);
+
+		grh.sgid.global.subnet_prefix = grh.dgid.global.subnet_prefix;
 		grh.dgid.global.interface_id = cpu_to_be64(isbdm_gid(sdev->ii));
 		if (is_loopback)
-			grh.sgid = grh.dgid;
+			grh.sgid.global.interface_id =
+				grh.dgid.global.interface_id;
 		else
 			grh.sgid.global.interface_id =
-					cpu_to_be64(hdr->src_lid);
+				cpu_to_be64(sdev->ii->peer_interface_id);
 	}
 
 	wqe = &qp->rx_ctx.wqe_active;
@@ -1909,6 +1983,83 @@ out:
 	return;
 }
 
+static void isbdm_handle_handshake(struct isbdm *ii, struct isbdm_buf *buf)
+{
+	struct isbdm_handshake_packet *hs;
+	u64 old_peer_id = ii->peer_interface_id;
+	u16 flags;
+
+	if ((buf->flags & (ISBDM_DESC_FS | ISBDM_DESC_LS)) !=
+	    (ISBDM_DESC_FS | ISBDM_DESC_LS)) {
+
+		dev_warn(&ii->pdev->dev, "Ignoring split handshake\n");
+		return;
+	}
+
+	if (buf->size < (sizeof(struct isbdm_packet_header) + sizeof(*hs))) {
+		dev_warn(&ii->pdev->dev, "Handshake too small\n");
+		return;
+	}
+
+	hs = buf->buf + sizeof(struct isbdm_packet_header);
+	dev_dbg(&ii->pdev->dev,
+		"Got handshake from ID %llx subnet %llx flags %x\n",
+		le64_to_cpu(hs->interface_id),
+		le64_to_cpu(hs->subnet_prefix),
+		hs->flags);
+
+	flags = le16_to_cpu(hs->flags);
+	old_peer_id = ii->peer_interface_id;
+	ii->peer_interface_id = le64_to_cpu(hs->interface_id);
+	if (ii->link_status == ISBDM_LINK_UPSTREAM) {
+		if (flags & ISBDM_HANDSHAKE_UPSTREAM) {
+			dev_warn(&ii->pdev->dev,
+				 "We both think we're upstream\n");
+
+			return;
+		}
+
+	} else if (ii->link_status == ISBDM_LINK_DOWNSTREAM) {
+		if (!(flags & ISBDM_HANDSHAKE_UPSTREAM)) {
+			dev_warn(&ii->pdev->dev,
+				 "We both think we're downstream\n");
+
+			return;
+		}
+
+		/* Use upstream's subnet prefix. */
+		ii->subnet_prefix = le64_to_cpu(hs->subnet_prefix);
+		dev_dbg(&ii->pdev->dev,
+			"Using subnet prefix %llx\n",
+			ii->subnet_prefix);
+
+		if (!old_peer_id) {
+			/* Make the IB link come up. Create it if needed. */
+			if (!ii->ib_device) {
+				ii->ib_device = isbdm_device_create(ii);
+				if (!ii->ib_device) {
+					dev_err(&ii->pdev->dev,
+						"Can't create IB device\n");
+
+					return;
+				}
+			}
+
+			isbdm_port_status_change(ii);
+		}
+
+	} else {
+		dev_warn(&ii->pdev->dev, "Got handshake while offline\n");
+		return;
+	}
+
+	cancel_delayed_work_sync(&ii->handshake_work);
+	ii->handshake_retry_count = 0;
+
+	/* Send one more handshake if the other side hasn't seen us yet. */
+	ii->send_handshake_ack = !(flags & ISBDM_HANDSHAKE_ACK);
+}
+
 /* Process a complete received packet. The RX ring lock is already held. */
 void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 			     struct isbdm_buf *end)
@@ -1959,6 +2110,10 @@ void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 	case ISBDM_PACKET_IB_SEND_INVALIDATE:
 	case ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE:
 		isbdm_process_ib_recv(ii, hdr, &packet_list, false);
+		break;
+
+	case ISBDM_PACKET_HANDSHAKE:
+		isbdm_handle_handshake(ii, start);
 		break;
 
 	default:
