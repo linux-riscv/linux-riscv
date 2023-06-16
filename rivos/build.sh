@@ -32,10 +32,10 @@ kernel_build() {
     time make LOCALVERSION=$local_version ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} -j $(nproc)
 
     # Prepare installation for packaging
-    mkdir -p "${INSTALL_PATH}/${config}"
+    mkdir -p "${INSTALL_PATH}"
 
     # Compile and install the kernel (for legacy)
-    time make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}/${config}" install
+    time make LOCALVERSION=${local_version} ARCH=riscv CC="${CC}" CROSS_COMPILE="${COMPILE}" O=build_${config} INSTALL_PATH="${INSTALL_PATH}" install
 
     # Create the debian package with kernel + modules
     # INSTALL_MOD_STRIP will fix the module size issue caused by relocations
@@ -44,11 +44,11 @@ kernel_build() {
 
     # FIXME dirty
     rm -f linux-image*dbg*.deb
-    cp linux-image*${local_version}*.deb ${INSTALL_PATH}/${config}
+    cp linux-image*${local_version}*.deb ${INSTALL_PATH}
 
     # For debugging purposes
-    cp build_${config}/vmlinux ${INSTALL_PATH}/${config}
-    cp build_${config}/arch/riscv/boot/Image ${INSTALL_PATH}/${config}
+    cp build_${config}/vmlinux ${INSTALL_PATH}
+    cp build_${config}/arch/riscv/boot/Image ${INSTALL_PATH}
 }
 
 kernel_tar() {
