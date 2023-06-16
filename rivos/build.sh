@@ -44,11 +44,6 @@ kernel_build() {
 
     # FIXME dirty
     rm -f linux-image*dbg*.deb
-    cp linux-image*${local_version}*.deb ${INSTALL_PATH}
-
-    # For debugging purposes
-    cp build_${config}/vmlinux ${INSTALL_PATH}
-    cp build_${config}/arch/riscv/boot/Image ${INSTALL_PATH}
 }
 
 kernel_tar() {
