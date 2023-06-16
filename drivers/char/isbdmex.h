@@ -14,6 +14,7 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 #include <linux/wait.h>
+#include <linux/workqueue.h>
 
 #include <rdma/isbdm-abi.h>
 #include "isbdm-ib.h"
@@ -302,6 +303,8 @@ struct isbdm_rdma_command {
 #define ISBDM_PACKET_IB_SEND_INVALIDATE 0x03
 /* Infiniband send with immediate. */
 #define ISBDM_PACKET_IB_SEND_WITH_IMMEDIATE 0x04
+/* Initial handshake packet for exchanging info. */
+#define ISBDM_PACKET_HANDSHAKE 0x05
 
 /* Set if this is a Solicited Event. */
 #define ISBDM_PACKET_FLAG_SOLICITED 0x01
@@ -316,6 +319,8 @@ struct isbdm_packet_header {
 	u8 flags;
 	/* Source LID for IB UD sends. */
 	__le16 src_lid;
+	/* Destination LID for IB UD sends. */
+	__le16 dest_lid;
 	/* Source Queue Pair number for IB UD sends. */
 	__le32 src_qp;
 	/* Destination Queue Pair number for IB sends. */
@@ -327,6 +332,35 @@ struct isbdm_packet_header {
 		__le32 imm_data;
 	};
 };
+
+/* Set if this port is the upstream port. */
+#define ISBDM_HANDSHAKE_UPSTREAM 0x01
+/* Set if we successfully received a handshake from the remote. */
+#define ISBDM_HANDSHAKE_ACK 0x02
+
+struct isbdm_handshake_packet {
+	/* Header, with type set to ISBDM_PACKET_HANDSHAKE. */
+	struct isbdm_packet_header header;
+	/*
+	 * Upstream nodes send the subnet mask they're using, downstream nodes
+	 * receive it and adopt it for themselves.
+	 */
+	__le64 subnet_prefix;
+	/*
+	 * The interface ID of the sender. The lower 16 bits of this are the
+	 * LID. In case of a conflict, downstream should generate a new LID.
+	 */
+	__le64 interface_id;
+	/* Flags: see ISBDM_HANDSHAKE_* definitions. */
+	__le16 flags;
+};
+
+/*
+ * Retry once per second for a little while. Since both sides send a handshake
+ * when they come up this doesn't have to cover the gap of the remote fully
+ * booting. It just covers the region of the driver futzing around a bit.
+ */
+#define ISBDM_HANDSHAKE_RETRIES 20
 
 /*
  * Use this bit in software to poison a descriptor of a partially cut off
@@ -553,6 +587,20 @@ struct isbdm {
 	enum isbdm_link_status link_status;
 	/* Some random bits created to give the device a unique GID. */
 	u32 rand_id;
+	/* A random subnet prefix, which gets decided by the upstream port. */
+	u64 subnet_prefix;
+	/* The remote side's interface ID. */
+	u64 peer_interface_id;
+	/* A delayed work struct used to resend the handshake packet. */
+	struct delayed_work handshake_work;
+	/* The number of times to retry sending the handshake. */
+	int handshake_retry_count;
+	/*
+	 * Indicates we should send an ACK after RX processing. This is handled
+	 * at the end of RX rather than at the end of each packet to avoid
+	 * sending a million responses if we receive a million handshakes.
+	 */
+	bool send_handshake_ack;
 };
 
 /* Drivers support routines */
@@ -573,6 +621,7 @@ int isbdm_init_hw(struct isbdm *ii);
 void isbdm_deinit_hw(struct isbdm *ii);
 void isbdm_disable(struct isbdm *ii);
 void isbdm_hw_reset(struct isbdm *ii);
+int isbdm_send_handshake(struct isbdm *ii);
 ssize_t isbdmex_raw_send(struct isbdm *ii, const void __user *va, size_t size);
 int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 			 const void __user *user_cmd);
@@ -605,6 +654,7 @@ void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 void isbdm_process_rx_packet(struct isbdm *ii, struct isbdm_buf *start,
 			     struct isbdm_buf *end);
 
+void isbdm_handshake_work(struct work_struct *work);
 static inline u64 isbdm_gid(struct isbdm *ii)
 {
 	return ((u64)ii->rand_id << 8) | (ii->instance + 0x10);
