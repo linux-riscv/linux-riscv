@@ -35,6 +35,9 @@ prepare-version:
     paths:
       - linux_*_defconfig.tar.gz
       - make_logs_*_defconfig.txt
+      - linux-image*.deb
+      - build_*/vmlinux
+      - build_*/arch/riscv/boot/Image
     expire_in: 3 hours
 
 .validate-kernel: &validate-kernel
@@ -58,7 +61,6 @@ prepare-version:
           exit -1
         fi
       fi
-      tar -C/ -xzf linux_${KERNEL_CONFIG}.tar.gz
     - apt update
     - pip install fabric decorator
     - cd rivos/linux_ci
