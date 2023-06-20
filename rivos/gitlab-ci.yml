@@ -22,7 +22,16 @@ prepare-version:
   tags: ['docker-cpu-xl']
   needs: ['prepare-version']
   extends: .build-caching
+  variables:
+    ARTIFACTS_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/artifacts/${CI_COMMIT_REF_NAME}/download?job=${CI_JOB_NAME_SLUG}"
   script:
+    - |
+      if [[ "$TEST_ONLY" == "yes" ]]; then
+        echo "TEST_ONLY mode, download previously built binaries on the same branch"
+        curl --output artifacts.zip -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "${ARTIFACTS_URL}"
+        unzip artifacts.zip && test -f linux-image*.deb && exit 0
+        echo "kernel package not found, falling back to build"
+      fi
     - sudo apt update && sudo apt install -y kmod debhelper
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
     - test ! -x /usr/bin/sccache || sccache --show-stats
@@ -31,6 +40,8 @@ prepare-version:
     - date
     - test ! -x /usr/bin/sccache || sccache --show-stats
   timeout: 60min
+  rules:
+      - if: '$CI_COMMIT_BRANCH'
   artifacts:
     paths:
       - linux_*_defconfig.tar.gz
@@ -49,18 +60,9 @@ prepare-version:
     paths:
       - rivos/linux_ci/*_defconfig_output
       - rivos/linux_ci/tests_results/
-      - linux_*_defconfig.tar.gz # used when TEST_ONLY to propagate artifacts
     expire_in: 3h
   script:
     - rm -rf "${INSTALL_DIR}"
-    - |
-      if [[ "$TEST_ONLY" == "yes" ]]; then
-        curl --output artifacts.zip -L --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.ba.rivosinc.com/api/v4/projects/38/jobs/artifacts/${CI_COMMIT_REF_NAME//\//%2F}/download?job=docker-build-${KERNEL_CONFIG//_/-}"
-        if ! unzip artifacts.zip; then
-          echo "Artifacts not found!"
-          exit -1
-        fi
-      fi
     - apt update
     - pip install fabric decorator
     - cd rivos/linux_ci
@@ -78,26 +80,25 @@ prepare-version:
             long_valid=""
         fi
         timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/ubuntu_images/1/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
+  rules:
+    - if: '$UBUNTU_ARCH == "riscv64"'
+      when: never
+    - if: '$TEST_ONLY == "true" && $CI_COMMIT_BRANCH'
+      when: always
+      allow_failure: true
+    - if: '$CI_COMMIT_BRANCH'
 
 docker-build-rivos-defconfig:
   extends: .build-kernel
   variables:
     KERNEL_CONFIG: "rivos_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ${KERNEL_CONFIG}"
-  rules:
-      - if: '$TEST_ONLY == "yes"'
-        when: never
-      - if: '$CI_COMMIT_BRANCH'
 
 docker-build-ubuntu-defconfig:
   extends: .build-kernel
   variables:
     KERNEL_CONFIG: "ubuntu_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ${KERNEL_CONFIG}"
-  rules:
-      - if: '$TEST_ONLY == "yes"'
-        when: never
-      - if: '$CI_COMMIT_BRANCH'
 
 .kasan-conf-generic: &kasan-conf-generic
     - echo "CONFIG_KASAN=y" > kasan.conf
@@ -114,8 +115,6 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - *kasan-conf-generic
     - !reference [.build-kernel, script]
   rules:
-    - if: '$TEST_ONLY == "yes"'
-      when: never
     - if: '$TEST_KASAN == "yes"'
       when: on_success
 
@@ -129,8 +128,6 @@ docker-build-ubuntu-kasan-inline-defconfig:
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
     - !reference [.build-kernel, script]
   rules:
-    - if: '$TEST_ONLY == "yes"'
-      when: never
     - if: '$TEST_KASAN == "yes"'
       when: on_success
 
@@ -146,15 +143,13 @@ package-deb:
   before_script:
     # clean up pre-built binaries from the rivos-sdk
     - rm -rf "${INSTALL_PATH}"
-    - if [[ -z "$TEST_ONLY" ]]; then tar -C/ -xzf linux_rivos_defconfig.tar.gz; fi
+    - tar -C/ -xzf linux_rivos_defconfig.tar.gz
 
 sdk-linux-ubuntu-test:
   extends: .validate-kernel
   needs: ['prepare-version', 'docker-build-ubuntu-defconfig']
   variables:
     KERNEL_CONFIG: "ubuntu_defconfig"
-  rules:
-    - if: '$UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
 
 sdk-linux-ubuntu-kasan-inline-test:
   extends: .validate-kernel
@@ -162,7 +157,9 @@ sdk-linux-ubuntu-kasan-inline-test:
   variables:
     KERNEL_CONFIG: "ubuntu_kasan_inline_defconfig"
   rules:
-    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+    - if: '$TEST_KASAN != "yes"'
+      when: never
+    - !reference [.validate-kernel, rules]
 
 sdk-linux-ubuntu-kasan-outline-test:
   extends: .validate-kernel
@@ -170,7 +167,9 @@ sdk-linux-ubuntu-kasan-outline-test:
   variables:
     KERNEL_CONFIG: "ubuntu_kasan_outline_defconfig"
   rules:
-    - if: '$TEST_KASAN == "yes" && $UBUNTU_ARCH != "riscv64" && $CI_COMMIT_BRANCH'
+    - if: '$TEST_KASAN != "yes"'
+      when: never
+    - !reference [.validate-kernel, rules]
 
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
