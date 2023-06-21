@@ -685,6 +685,10 @@ void isbdm_reap_tx(struct isbdm *ii)
 			/* TODO: Do something about this, reset tx ring? */
 		}
 
+		if (buf->flags & ISBDM_DESC_LS)
+			ii->tx_stats.msg_count++;
+
+		ii->tx_stats.byte_count += buf->size;
 		list_del(&buf->node);
 		list_add(&buf->node, &ring->free_list);
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
@@ -701,6 +705,20 @@ static void isbdm_complete_cmd(struct isbdm *ii, struct isbdm_command *command,
 			       u32 status)
 {
 	struct isbdm_user_ctx *user_ctx = command->user_ctx;
+	u64 cmd = (command->cmd.rmbi_command >> ISBDM_RDMA_COMMAND_SHIFT) &
+		  ISBDM_RDMA_COMMAND_MASK;
+	u64 size = command->cmd.size_pasid_flags & ISBDM_RDMA_SIZE_MASK;
+
+	/* Tally the stats. */
+	ii->cmd_stats.rdma_total++;
+	if (cmd < ISBDM_COMMAND_COUNT)
+		ii->cmd_stats.rdma_count[cmd]++;
+
+	if (cmd == ISBDM_COMMAND_READ)
+		ii->cmd_stats.read_bytes += size;
+
+	else if (cmd == ISBDM_COMMAND_WRITE)
+		ii->cmd_stats.write_bytes += size;
 
 	if (user_ctx) {
 		/* Shuttle the notify result back to the file context. */
@@ -1116,14 +1134,23 @@ void isbdm_process_rx_done(struct isbdm *ii)
 				buf->capacity);
 		}
 
+		ii->rx_stats.byte_count += buf->size;
 		list_del(&buf->node);
 		list_add_tail(&buf->node, &ring->wait_list);
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
 		if (buf->flags & ISBDM_DESC_FS) {
+			if (ii->packet_start) {
+				dev_warn(&ii->pdev->dev,
+					 "Got FS without preceding LS\n");
+
+				ii->rx_sequence_errors++;
+			}
+
 			ii->packet_start = buf;
 		}
 
 		if (buf->flags & ISBDM_DESC_LS) {
+			ii->rx_stats.msg_count++;
 			isbdm_process_rx_packet(ii, ii->packet_start, buf);
 			ii->packet_start = NULL;
 		}
