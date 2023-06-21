@@ -174,13 +174,6 @@ sdk-linux-ubuntu-kasan-outline-test:
 # Rebuild the rivos-sdk image if this is the branch the SDK is using.
 # Currently the 'latest' tag from the 'rivos/main' branch.
 update-sdk:
-  stage: deploy
-  only:
-    - rivos/main
-  except:
-    - pipelines
-  inherit:
-    variables: false
+  extends: .update-sdk
   variables:
     TRIGGER_ROOTFS: "true"
-  trigger: rv/it/int/rivos-sdk
