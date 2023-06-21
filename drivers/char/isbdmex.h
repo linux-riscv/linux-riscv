@@ -263,6 +263,9 @@ struct isbdm_remote_buffer {
 /* Fetch and add */
 #define ISBDM_COMMAND_FETCH_ADD 4ull
 
+/* This should always be one higher than the highest command. */
+#define ISBDM_COMMAND_COUNT 5
+
 /* Fields within the fifth qword of the command descriptor */
 /* Offset within the remote memory buffer */
 #define ISBDM_RDMA_RMB_OFFSET_MASK 0xffffffffffffULL
@@ -531,6 +534,26 @@ enum isbdm_link_status {
 	ISBDM_LINK_DOWNSTREAM
 };
 
+/* Command statistics, protected by the cmd ring mutex. */
+struct isbdm_cmd_stats {
+	/* The total number of RDMA descriptors processed. */
+	u64 rdma_total;
+	/* The number of RDMA descriptors processed of each type. */
+	u64 rdma_count[ISBDM_COMMAND_COUNT];
+	/* The cumulative number of bytes read for READ commands. */
+	u64 read_bytes;
+	/* The cumulative number of bytes written for WRITE commands. */
+	u64 write_bytes;
+};
+
+/* Transmit or receive statistics, protected by the respective ring mutex. */
+struct isbdm_txrx_stats {
+	/* The total number of messages sent or received. */
+	u64 msg_count;
+	/* The cumulative number of bytes sent or received. */
+	u64 byte_count;
+};
+
 /* Per-instance hardware info */
 struct isbdm {
 	struct pci_dev 		*pdev;
@@ -601,6 +624,20 @@ struct isbdm {
 	 * sending a million responses if we receive a million handshakes.
 	 */
 	bool send_handshake_ack;
+
+	/* Command statistics, protected under the command ring mutex. */
+	struct isbdm_cmd_stats cmd_stats;
+	/* Transmit statistics, protected under the tx ring mutex. */
+	struct isbdm_txrx_stats tx_stats;
+	/* RX statistics, protected under the rx ring mutex. */
+	struct isbdm_txrx_stats rx_stats;
+	/*
+	 * The number of FS=1 segments received without a preceding LS=1
+	 * segment. Protected under the rx ring mutex.
+	 */
+	u64 rx_sequence_errors;
+	/* A pointer to the root of the debugfs directory, for cleanup. */
+	struct dentry *debugfs_dir;
 };
 
 /* Drivers support routines */
@@ -660,4 +697,9 @@ static inline u64 isbdm_gid(struct isbdm *ii)
 	return ((u64)ii->rand_id << 8) | (ii->instance + 0x10);
 }
 
+/* Debugfs support */
+void isbdm_debugfs_init(struct isbdm *ii);
+void isbdm_debugfs_cleanup(struct isbdm *ii);
+void isbdm_init_debugfs(void);
+void isbdm_remove_debugfs(void);
 #endif
