@@ -522,6 +522,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto free_misc_name;
 	}
 
+	isbdm_debugfs_init(ii);
 	/* FIXME: sysfs: somehow expose enough info to map a /dev/isbdmexN to a PCS/hardware location */
 
 	return 0;
@@ -548,6 +549,8 @@ static void isbdmex_remove(struct pci_dev *pdev)
 {
 	struct isbdm *ii = (struct isbdm *)pci_get_drvdata(pdev);
 
+	isbdm_debugfs_cleanup(ii);
+
 	/* TODO: Are we allowed to touch hardware in this routine? */
 	isbdm_disable(ii);
 
@@ -573,6 +576,20 @@ static struct pci_driver isbdmex_pci_driver = {
 
 MODULE_DEVICE_TABLE(pci, isbdmex_ids);
 module_pci_driver(isbdmex_pci_driver);
+
+static int __init isbdm_init_module(void)
+{
+	isbdm_init_debugfs();
+	return 0;
+}
+
+static void __exit isbdm_exit_module(void)
+{
+	isbdm_remove_debugfs();
+}
+
+module_init(isbdm_init_module);
+module_exit(isbdm_exit_module);
 
 MODULE_AUTHOR("mev");
 MODULE_LICENSE("GPL v2");
