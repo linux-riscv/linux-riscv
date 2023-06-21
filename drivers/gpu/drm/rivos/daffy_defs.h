@@ -63,15 +63,17 @@ enum {
 enum {
 	DAFFY_CMD_INVALID = 1,
 	DAFFY_CMD_GET_INFO = 2,
-	DAFFY_CMD_CREATE_QUEUE = 3,
-	DAFFY_CMD_MODIFY_QUEUE = 4,
-	DAFFY_CMD_PAUSE_QUEUE = 5,
-	DAFFY_CMD_QUIESCE_QUEUE = 6,
-	DAFFY_CMD_DESTROY_QUEUE = 7,
-	DAFFY_CMD_REGISTER_SIGNAL_PAGES = 8,
-	DAFFY_CMD_UNREGISTER_SIGNAL_PAGES = 9,
-	DAFFY_CMD_SUBSCRIBE_SIGNAL = 10,
-	DAFFY_CMD_UPDATE_SIGNAL = 11,
+	DAFFY_CMD_REGISTER_PASID = 3,
+	DAFFY_CMD_UNREGISTER_PASID = 4,
+	DAFFY_CMD_CREATE_QUEUE = 5,
+	DAFFY_CMD_MODIFY_QUEUE = 6,
+	DAFFY_CMD_PAUSE_QUEUE = 7,
+	DAFFY_CMD_QUIESCE_QUEUE = 8,
+	DAFFY_CMD_DESTROY_QUEUE = 9,
+	DAFFY_CMD_REGISTER_SIGNAL_PAGES = 10,
+	DAFFY_CMD_UNREGISTER_SIGNAL_PAGES = 11,
+	DAFFY_CMD_SUBSCRIBE_SIGNAL = 12,
+	DAFFY_CMD_UPDATE_SIGNAL = 13,
 };
 
 enum {
@@ -90,6 +92,14 @@ struct daffy_get_info_cmd {
 	/* out */
 	uint32_t pe_grid_dim_x;
 	uint32_t pe_grid_dim_y;
+};
+
+struct daffy_register_pasid_cmd {
+	uint32_t pasid;
+};
+
+struct daffy_unregister_pasid_cmd {
+	uint32_t pasid;
 };
 
 struct daffy_create_queue_cmd {
@@ -158,6 +168,8 @@ struct daffy_queue_pkt {
 	struct daffy_pkt_header hdr;
 	union {
 		struct daffy_get_info_cmd dgic;
+		struct daffy_register_pasid_cmd drpc;
+		struct daffy_unregister_pasid_cmd durpc;
 		struct daffy_create_queue_cmd dcqc;
 		struct daffy_modify_queue_cmd dmqc;
 		struct daffy_pause_queue_cmd dpqc;

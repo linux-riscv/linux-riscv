@@ -144,7 +144,7 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 		case DAFFY_CMD_UPDATE_SIGNAL: {
 			u64 signal_idx = pkt->u.dusc.signal_idx;
 			u32 pasid = pkt->u.dusc.pasid;
-			
+
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
 			if (dpa_signal_wake(dpa, pasid, signal_idx) < 0)
@@ -284,6 +284,32 @@ int daffy_get_info_cmd(struct dpa_device *dpa,
 	args->pe_grid_dim_x = pkt.u.dgic.pe_grid_dim_x;
 	args->pe_grid_dim_y = pkt.u.dgic.pe_grid_dim_y;
 	return 0;
+}
+
+int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid)
+{
+	struct daffy_queue_pkt pkt;
+	struct daffy_register_pasid_cmd *cmd;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DAFFY_CMD_REGISTER_PASID;
+	cmd = &pkt.u.drpc;
+	cmd->pasid = pasid;
+
+	return daffy_submit_sync(dpa, &pkt);
+}
+
+int daffy_unregister_pasid_cmd(struct dpa_device *dpa, u32 pasid)
+{
+	struct daffy_queue_pkt pkt;
+	struct daffy_unregister_pasid_cmd *cmd;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DAFFY_CMD_UNREGISTER_PASID;
+	cmd = &pkt.u.durpc;
+	cmd->pasid = pasid;
+
+	return daffy_submit_sync(dpa, &pkt);
 }
 
 int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id)

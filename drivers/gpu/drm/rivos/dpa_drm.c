@@ -67,6 +67,7 @@ static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 			     u32 doorbell_offset)
 {
 	struct dpa_aql_queue *q = kzalloc(sizeof(*q), GFP_KERNEL);
+
 	if (!q)
 		return -ENOMEM;
 
@@ -471,6 +472,7 @@ static void dpa_release_process(struct kref *ref)
 	struct dpa_process *p = container_of(ref, struct dpa_process,
 						 ref);
 	struct dpa_device *dpa = p->dev;
+	int ret;
 
 	mutex_lock(&dpa->dpa_processes_lock);
 
@@ -484,6 +486,12 @@ static void dpa_release_process(struct kref *ref)
 	list_del(&p->dpa_process_list);
 	dpa->dpa_process_count--;
 	mutex_unlock(&dpa->dpa_processes_lock);
+
+	ret = daffy_unregister_pasid_cmd(p->dev, p->pasid);
+	if (ret) {
+		dev_warn(dpa->dev, "%s: Failed to unregister pasid %d from DUC\n",
+			__func__, p->pasid);
+	}
 
 	iommu_sva_unbind_device(p->sva);
 	kfree(p);
@@ -501,7 +509,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	struct dpa_device *dpa = drm_to_dpa_dev(dev);
 	struct dpa_process *dpa_app = NULL;
 	struct device *dpa_dev;
-	int ret = 0;
+	int err;
 
 	mutex_lock(&dpa->dpa_processes_lock);
 
@@ -509,14 +517,14 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	if (dpa->dpa_process_count >= DPA_PROCESS_MAX) {
 		dev_warn(dpa->dev, "%s: max number of processes reached\n",
 			 __func__);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -EBUSY;
+		err = -EBUSY;
+		goto out_unlock;
 	}
 
 	dpa_app = kzalloc(sizeof(*dpa_app), GFP_KERNEL);
 	if (!dpa_app) {
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto out_unlock;
 	}
 	file_priv->driver_priv = dpa_app;
 
@@ -525,34 +533,38 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	INIT_LIST_HEAD(&dpa_app->queue_list);
 	kref_init(&dpa_app->ref);
 
-	// only one DPA for now
+	/* Only one DPA device for now */
 	dpa_app->dev = dpa;
 
-	// Bind device and allocate PASID
+	/* Bind device and allocate PASID */
 	dpa_dev = dpa_app->dev->dev;
 	dpa_app->sva = iommu_sva_bind_device(dpa_dev, current->mm);
 	if (IS_ERR(dpa_app->sva)) {
-		ret = PTR_ERR(dpa_app->sva);
-		dev_err(dpa_dev, "SVA allocation failed: %d\n", ret);
-		kfree(dpa_app);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENODEV;
+		dev_err(dpa_dev, "%s: SVA bind device failed: %ld\n", __func__,
+			PTR_ERR(dpa_app->sva));
+		err = -ENODEV;
+		goto free_proc;
 	}
 	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
 	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
-		dev_err(dpa_dev, "PASID allocation failed\n");
-		iommu_sva_unbind_device(dpa_app->sva);
-		kfree(dpa_app);
-		mutex_unlock(&dpa->dpa_processes_lock);
-		return -ENODEV;
+		dev_err(dpa_dev, "%s: PASID allocation failed\n", __func__);
+		err = -ENODEV;
+		goto unbind_sva;
 	}
-	dev_warn(dpa_dev, "DPA assigned PASID value %d\n", dpa_app->pasid);
+	err = daffy_register_pasid_cmd(dpa_app->dev, dpa_app->pasid);
+	if (err) {
+		dev_warn(dpa_dev, "%s: Failed to register pasid %d with DUC\n",
+			__func__, dpa_app->pasid);
+		goto unbind_sva;
+	}
+	dev_warn(dpa_dev, "%s: DPA assigned PASID value %d\n", __func__,
+		dpa_app->pasid);
 
-	// Setup doorbell register offsets
+	/* Setup doorbell register offsets */
 	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
 		DPA_DB_PAGES_BASE;
 
-	// Init dpa_signal_waiter queue
+	/* Init dpa_signal_waiter queue */
 	INIT_LIST_HEAD(&dpa_app->signal_waiters);
 	spin_lock_init(&dpa_app->signal_waiters_lock);
 
@@ -562,6 +574,15 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 	mutex_unlock(&dpa->dpa_processes_lock);
 	return 0;
+
+unbind_sva:
+	iommu_sva_unbind_device(dpa_app->sva);
+free_proc:
+	kfree(dpa_app);
+out_unlock:
+	mutex_unlock(&dpa->dpa_processes_lock);
+
+	return err;
 }
 
 static const struct file_operations dpa_driver_kms_fops = {
