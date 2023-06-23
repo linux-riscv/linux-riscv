@@ -238,7 +238,7 @@ for package in ${packages_enabled}
 do
 	case ${package} in
 	*-dbg)
-		create_package ${package} debian/linux-image-dbg;;
+        ;;
 	linux-image-*|user-mode-linux-*)
 		create_package ${package} debian/linux-image;;
 	linux-libc-dev)
