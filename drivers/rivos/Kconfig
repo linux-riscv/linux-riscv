@@ -1,0 +1,6 @@
+
+config RIVOS_DCE
+	tristate "Rivos DCE device"
+	default y
+	help
+	  Rivos DCE device
