@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+# depend on PCI
+# MMU_NOTIFIER
+# HMM_MIRROR probably
+# DRM_TTM ?
+# DRM_TTM_HELPER ?
+# FW_LOADER ?
+
+config RIVOS_DPA
+	bool "Support for Rivos DPA device"
+	default y
+	depends on DRM=y
+	depends on PCI && MMU && RISCV
+	select DRM_BUDDY
+	select DRM_TTM_HELPER
+	select DRM_TTM
+	help
+	 This is a Rivos DPA device driver.
