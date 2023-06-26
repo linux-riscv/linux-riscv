@@ -57,14 +57,15 @@ static void open_render_fd(void)
 
 static void alloc_aligned_host_memory(void **ptr, size_t size)
 {
-	void *ret = mmap(NULL, size, PROT_READ | PROT_WRITE,
+	size_t aligned_size = ALIGN_UP_PGSZ(size, getpagesize());
+	void *ret = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE,
 			 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	if (ret == MAP_FAILED) {
 		perror("mmap");
 		exit(1);
 	}
 	*ptr = ret;
-	memset(ret, 0xff, size);
+	memset(ret, 0xff, aligned_size);
 }
 
 static void alloc_gpu_memory(void **ptr, size_t size)
@@ -124,39 +125,26 @@ static void destroy_queue(uint32_t q_id)
 	}
 }
 
-static void create_queue(void *ring_base, uint32_t ring_size, void *ctx_scratch,
-			 uint32_t ctx_scratch_size, uint32_t stack_size,
-			 uint64_t *read_ptr, uint64_t *write_ptr,
-			 uint64_t *doorbell_offset,
-			 uint32_t *q_id)
+static void create_queue(void *queue_base, uint32_t num_packets,
+			 uint64_t *doorbell_offset, uint32_t *q_id)
 {
 	int ret;
 	struct drm_dpa_create_queue args;
 
-	args.ring_base_address = (uint64_t)ring_base;
-	args.ring_size = (uint32_t)ring_size;
-	args.queue_priority = DPA_MAX_QUEUE_PRIORITY;
-	args.write_pointer_address = (uint64_t)write_ptr;
-	args.read_pointer_address = (uint64_t)read_ptr;
-
-	// This is only used for some specific AMD GPU
-	args.eop_buffer_address = 0;
-	args.eop_buffer_size = 0;
-	args.ctx_save_restore_address = (uint64_t)ctx_scratch;
-	args.ctx_save_restore_size = ctx_scratch_size;
-	args.ctl_stack_size = stack_size;
+	memset(&args, 0, sizeof(args));
+	args.ring_base_address = (uint64_t)queue_base;
+	args.ring_size = num_packets;
 
 	ret = ioctl(drm_fd, DRM_IOCTL_DPA_CREATE_QUEUE, &args);
 	if (ret) {
 		perror("ioctl create queue");
 		exit(1);
 	}
-	fprintf(stderr, "%s: q 0x%llx wptr 0x%llx rptr 0x%llx q id %d doorbell offset 0x%llx\n",
-		__func__, args.ring_base_address, args.write_pointer_address, args.read_pointer_address,
-		args.queue_id, args.doorbell_offset);
+	fprintf(stderr, "%s: q 0x%llx id %d doorbell offset 0x%llx\n",
+		__func__, args.ring_base_address, args.queue_id,
+		args.doorbell_offset);
 	*doorbell_offset = args.doorbell_offset;
 	*q_id = args.queue_id;
-
 }
 
 static void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
@@ -216,19 +204,18 @@ static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
 
 int main(int argc, char *argv[])
 {
-	void *kern_ptr, *rw_ptr, *queue_ptr = NULL;
-	//size_t doorbell_size = getpagesize() * 2; // this AMD gpu expects 2 pages
+	void *kern_ptr, *queue_ptr = NULL;
 	size_t doorbell_size = getpagesize();
-	size_t queue_size = getpagesize();
-	size_t aql_queue_size = getpagesize();
-	size_t rwptr_size = getpagesize();
+	size_t queue_packets = 64;
+	size_t queue_size = sizeof(struct queue_metadata) +
+		queue_packets * sizeof(struct hsa_kernel_dispatch_packet_s);
 	size_t kernel_size = 0;
-
-	uint64_t *q_read_ptr;
-	uint64_t *q_write_ptr;
 
 	uint64_t doorbell_offset;
 	uint32_t queue_id;
+
+	struct queue_metadata *meta = NULL;
+	void *ring = NULL;
 
 	struct Doorbell *doorbell_map = NULL;
 
@@ -255,19 +242,15 @@ int main(int argc, char *argv[])
 	alloc_gpu_memory(&queue_ptr, queue_size);
 	fprintf(stderr, "queue_ptr: 0x%lx\n", (unsigned long)queue_ptr);
 
-	alloc_gpu_memory(&rw_ptr, rwptr_size);
-	fprintf(stderr, "rw_ptr: 0x%lx\n", (unsigned long)rw_ptr);
-
-	// set read and write pointers to memory inside the queue space
-	q_read_ptr = rw_ptr;
-	q_write_ptr = q_read_ptr + (CACHELINE_SIZE/sizeof(uint64_t));
+	meta = queue_ptr;
+	ring = queue_ptr + sizeof(*meta);
 
 	// set all packets to invalid -- 1
-	memset(queue_ptr, 1, aql_queue_size);
+	memset(ring, 1, queue_packets * sizeof(*aql_packet));
 
-	*q_read_ptr = *q_write_ptr = 0;
-	create_queue(queue_ptr, aql_queue_size, NULL, 0, 0, q_read_ptr, q_write_ptr,
-			&doorbell_offset, &queue_id);
+	meta->read_index.value = 0;
+	meta->write_index.value = 0;
+	create_queue(queue_ptr, queue_packets, &doorbell_offset, &queue_id);
 
 	fprintf(stderr, "Mapping doorbell page\n");
 	doorbell_map = (struct Doorbell*) mmap_doorbell(doorbell_offset, doorbell_size);
@@ -279,13 +262,12 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 
 		// send an empty barrier packet first to test multiple packets
-		aql_barrier_packet = (hsa_barrier_and_packet_t *)queue_ptr;
+		aql_barrier_packet = (hsa_barrier_and_packet_t *)ring;
 		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
 		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
 
 		// this is the kernel dispatch packet
-		aql_packet = (hsa_kernel_dispatch_packet_t *) (queue_ptr +
-							       sizeof(hsa_kernel_dispatch_packet_t));
+		aql_packet = (hsa_kernel_dispatch_packet_t *)(ring + sizeof(*aql_barrier_packet));
 
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -310,19 +292,21 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "AQL packet address: 0x%lx\n", (unsigned long)aql_packet);
 		fprintf(stderr, "Size of AQL packet: %lu\n", sizeof(*aql_packet));
 		fprintf(stderr, "Current read index: %lu write index: %lu\n",
-			*q_read_ptr, *q_write_ptr);
-		*q_write_ptr += 2;
-		fprintf(stderr, "Incremented write index: %lu\n", *q_write_ptr);
-		doorbell_map[queue_id].doorbell_write_offset = *q_write_ptr;
+			meta->read_index.value, meta->write_index.value);
+		meta->write_index.value += 2;
+		fprintf(stderr, "Incremented write index: %lu\n",
+			meta->write_index.value);
+		doorbell_map[queue_id].doorbell_write_offset = 1;
 		fprintf(stderr, "Rang the doorbell\n");
-		while ((wait_count < 10) && (*q_read_ptr == 0)) {
+		while (wait_count < 10 && meta->read_index.value == 0) {
 			fprintf(stderr, "Waiting for read index to increment: %lu\n",
-				*q_read_ptr);
+				meta->read_index.value);
 			sleep(1);
 			wait_count++;
 		}
-		if (*q_read_ptr > 0) {
-			fprintf(stderr, "DUC read AQL Packet! read index %lu\n", *q_read_ptr);
+		if (meta->read_index.value > 0) {
+			fprintf(stderr, "DUC read AQL Packet! read index %lu\n",
+				meta->read_index.value);
 		} else {
 			fprintf(stderr, "Read index failed to increment, DUC is likely stuck parsing AQL packet\n");
 			munmap(doorbell_map, doorbell_size);
@@ -330,14 +314,13 @@ int main(int argc, char *argv[])
 		}
 
 		// Add another barrier packet with a signal attached so we can wait on that
-		aql_barrier_packet = (hsa_barrier_and_packet_t *)(queue_ptr +
-								  (*q_write_ptr *
-								   sizeof(*aql_barrier_packet)));
+		aql_barrier_packet = (hsa_barrier_and_packet_t *)
+			(ring + meta->write_index.value * sizeof(*aql_barrier_packet));
 		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
 		aql_barrier_packet->completion_signal.handle = (uint64_t)signal;
 		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
-		*q_write_ptr += 1;
-		doorbell_map[queue_id].doorbell_write_offset = *q_write_ptr;
+		meta->write_index.value += 1;
+		doorbell_map[queue_id].doorbell_write_offset = 1;
 		// wait 1 second
 		fprintf(stderr, "waiting for signal back on barrier\n");
 		if ((ret = wait_signal(0, 1000000000))) {

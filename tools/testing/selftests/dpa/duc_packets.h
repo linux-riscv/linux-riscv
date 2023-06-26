@@ -8,10 +8,19 @@
 
 // This file defines the format of DUC queue packets and signals.
 
-struct duc_signal {
-  uint64_t timestamp;
-  uint32_t value;
-};
+typedef struct queue_index {
+  uint64_t value;
+  uint64_t reserved[7];
+} queue_index_t;
+
+/*
+ * Work queue metadata. This structure must immediately precede the packet
+ * ring in memory.
+ */
+typedef struct queue_metadata {
+  queue_index_t read_index;
+  queue_index_t write_index;
+} queue_metadata_t;
 
 typedef struct hsa_signal_s {
   uint64_t handle;
@@ -43,11 +52,11 @@ typedef struct hsa_kernel_dispatch_packet_s {
   uint32_t private_segment_size_log2;  // This could be uint8.
   uint32_t kernarg_size;
   uint64_t private_mem_ptr;
-  hsa_signal_t completion_signal;
   uint8_t num_pg_barriers;
   uint8_t num_gprs_blocks;
   uint8_t scratch_mem_allocs;
   uint8_t reserved[5];
+  hsa_signal_t completion_signal;
 } hsa_kernel_dispatch_packet_t;
 
 typedef struct hsa_barrier_and_packet_s {
