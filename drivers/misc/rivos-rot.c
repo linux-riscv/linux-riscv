@@ -4,105 +4,142 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME       "rivos-rot"
-#define DRV_VERSION    "0.0.1"
+#define DRV_VERSION    "0.0.2"
 
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/cdev.h>
 #include <linux/dma-mapping.h>
-#include <linux/hashtable.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/rivos-rot.h>
 #include <linux/pci.h>
+#include <linux/pci_ids.h>
 #include <linux/pci-doe.h>
 
-/* Rivos Inc. assigned PCI Vendor and Device IDs */
-#ifndef PCI_VENDOR_ID_RIVOS
-#define PCI_VENDOR_ID_RIVOS             0x1efd
-#endif
-
-#ifndef PCI_DEVICE_ID_RIVOS_ROT
-#define PCI_DEVICE_ID_RIVOS_ROT         0x0009
-#endif
-
-struct rivos_rot_state {
+struct rivos_rot_device {
 	struct device *dev;
 	struct mutex mbox_mutex; /* Protects device mailbox and firmware */
-	struct xarray doe_mbs;
+	struct pci_doe_mb *isbdm_mb;
 };
 
-static void rivos_rot_destroy_doe(void *mbs)
-{
-	xa_destroy(mbs);
-}
+/* Store the singleton device. */
+static struct rivos_rot_device *rivos_rot_device;
+static spinlock_t rivos_rot_lock;
 
-struct rivos_rot_state *rivos_rot_state_create(struct pci_dev *pdev)
+static struct rivos_rot_device *rivos_rot_device_create(struct pci_dev *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct rivos_rot_state *rrs;
-	u16 off = 0;
+	struct rivos_rot_device *rot;
 
-	rrs = devm_kzalloc(dev, sizeof(*rrs), GFP_KERNEL);
-	if (!rrs)
+	rot = devm_kzalloc(dev, sizeof(*rot), GFP_KERNEL);
+	if (!rot)
 		return ERR_PTR(-ENOMEM);
 
-	mutex_init(&rrs->mbox_mutex);
-	rrs->dev = dev;
+	mutex_init(&rot->mbox_mutex);
+	rot->dev = dev;
+	rot->isbdm_mb = pci_find_doe_mailbox(pdev,
+					     PCI_VENDOR_ID_RIVOS,
+					     RIVOS_DOE_ISBDM);
 
-	xa_init(&rrs->doe_mbs);
-	if (devm_add_action(dev, rivos_rot_destroy_doe, &rrs->doe_mbs)) {
-		dev_err(dev, "Failed to create XArray for DOE's\n");
-		return ERR_PTR(-ENOMEM);
+	if (!rot->isbdm_mb) {
+		dev_warn(&pdev->dev, "Failed to find ISBDM mailbox\n");
 	}
 
-	dev_err(dev, "Adding mailboxes");
-	pci_doe_for_each_off(pdev, off) {
-		struct pci_doe_mb *doe_mb;
-
-		doe_mb = pcim_doe_create_mb(pdev, off);
-		if (IS_ERR(doe_mb)) {
-			dev_err(dev, "Failed to create MB object for MB @ %x\n",
-				off);
-			continue;
-		}
-
-		if (xa_insert(&rrs->doe_mbs, off, doe_mb, GFP_KERNEL)) {
-			dev_err(dev, "xa_insert failed to insert MB @ %x\n",
-				off);
-			continue;
-		}
-
-		dev_err(dev, "Created DOE mailbox @%x\n", off);
-	}
-
-	return rrs;
+	return rot;
 }
 
-static int rivos_rot_pci_probe(struct pci_dev *pdev,
-			const struct pci_device_id *ent)
+/**
+ * get_rivos_rot() - Return a pointer to the Rivos Root of Trust device
+ *
+ * Returns a pointer to the device on success, with its reference count
+ * incremented. Returns NULL if there is no device or the device failed to
+ * probe.
+ */
+struct rivos_rot_device *get_rivos_rot(void)
 {
-	int ret;
-	struct rivos_rot_state *rrs;
+	struct rivos_rot_device *rot;
+	unsigned long flags;
+
+	/* Avoid touching a potentially uninited spinlock. */
+	rot = rivos_rot_device;
+	if (!rot)
+		return NULL;
+
+	spin_lock_irqsave(&rivos_rot_lock, flags);
+	rot = rivos_rot_device;
+	if (rot)
+		get_device(rot->dev);
+
+	spin_unlock_irqrestore(&rivos_rot_lock, flags);
+	return rot;
+}
+
+EXPORT_SYMBOL(get_rivos_rot);
+
+void put_rivos_rot(struct rivos_rot_device *rot)
+{
+	put_device(rot->dev);
+}
+
+EXPORT_SYMBOL(put_rivos_rot);
+
+int rivos_isbdm_doe(struct rivos_rot_device *rot, const void *request,
+		    size_t request_sz, void *response, size_t response_sz)
+{
+	int rc;
+
+	mutex_lock(&rot->mbox_mutex);
+	if (!rot->isbdm_mb) {
+		rc = -ENODEV;
+		goto out;
+	}
+
+	rc = pci_doe(rot->isbdm_mb, PCI_VENDOR_ID_RIVOS, RIVOS_DOE_ISBDM,
+		     request, request_sz, response, response_sz);
+
+out:
+	mutex_unlock(&rot->mbox_mutex);
+	return rc;
+}
+
+EXPORT_SYMBOL(rivos_isbdm_doe);
+
+static int rivos_rot_pci_probe(struct pci_dev *pdev,
+			       const struct pci_device_id *ent)
+{
+	unsigned long flags;
+	struct rivos_rot_device *rot;
 
 	pr_err("Probing");
+	rot = rivos_rot_device_create(pdev);
+	if (IS_ERR(rot))
+		return PTR_ERR(rot);
 
-	ret = pci_enable_device_io(pdev);
-	if (ret < 0)
-		return ret;
+	dev_set_drvdata(&pdev->dev, rot);
+	spin_lock_irqsave(&rivos_rot_lock, flags);
+	if (rivos_rot_device) {
+		dev_warn(&pdev->dev, "Expected only one RoT\n");
 
-	rrs = rivos_rot_state_create(pdev);
-	if (IS_ERR(rrs))
-		return PTR_ERR(rrs);
+	} else {
+		rivos_rot_device = rot;
+	}
 
-	dev_set_drvdata(&pdev->dev, rrs);
-
+	spin_unlock_irqrestore(&rivos_rot_lock, flags);
 	return 0;
 }
 
 static void rivos_rot_pci_remove(struct pci_dev *pdev)
 {
-	pci_disable_device(pdev);
+	unsigned long flags;
+	struct rivos_rot_device *rot = dev_get_drvdata(&pdev->dev);
+
+	spin_lock_irqsave(&rivos_rot_lock, flags);
+	if (rivos_rot_device == rot)
+		rivos_rot_device = NULL;
+
+	spin_unlock_irqrestore(&rivos_rot_lock, flags);
 }
 
 static const struct pci_device_id rivos_rot_id_table[] = {
@@ -120,6 +157,7 @@ static struct pci_driver rivos_rot_pci_driver = {
 
 static int __init rivos_rot_init_module(void)
 {
+	spin_lock_init(&rivos_rot_lock);
 	return pci_register_driver(&rivos_rot_pci_driver);
 }
 
@@ -130,3 +168,5 @@ static void __exit rivos_rot_cleanup_module(void)
 
 module_init(rivos_rot_init_module);
 module_exit(rivos_rot_cleanup_module);
+
+MODULE_LICENSE("GPL");

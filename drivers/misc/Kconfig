@@ -571,6 +571,7 @@ config RIVOS_RASD
 config RIVOS_ROT
 	tristate "Rivos Root of Trust PCI driver"
 	depends on PCI
+	select PCI_DOE
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
