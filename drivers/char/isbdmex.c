@@ -18,6 +18,7 @@
 #include <linux/pci-epf.h>
 #include <linux/pci_ids.h>
 #include <linux/random.h>
+#include <linux/rivos-rot.h>
 #include <linux/uaccess.h>
 
 #include "isbdmex.h"
@@ -416,15 +417,28 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int ret;
 	struct device *dev = &pdev->dev;
 	struct isbdm *ii;
+	struct rivos_rot_device *rot;
+
+	/*
+	 * Get the RoT first, so there's no work to undo in case it hasn't
+	 * probed yet.
+	 */
+	rot = get_rivos_rot();
+	if (!rot) {
+		dev_warn(&pdev->dev, "No RoT yet, deferring\n");
+		return -EPROBE_DEFER;
+	}
 
 	/* Allocate an instance (a struct isbdm), find resources, enable */
 	ii = devm_kzalloc(dev, sizeof(struct isbdm), GFP_KERNEL);
 	if (!ii) {
 		dev_err_probe(dev, ret, "Can't allocate device instance\n");
+		put_rivos_rot(rot);
 		return -ENOMEM;
 	}
 
 	ii->pdev = pdev;
+	ii->rot = rot;
 	pci_set_drvdata(pdev, ii);
 
 	ret = pcim_enable_device(pdev);
@@ -542,6 +556,7 @@ release_pool:
 
 deinit:
 	isbdm_deinit_hw(ii);
+	put_rivos_rot(ii->rot);
 	return ret;
 }
 
