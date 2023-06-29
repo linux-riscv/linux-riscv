@@ -144,6 +144,8 @@ package-deb:
     # clean up pre-built binaries from the rivos-sdk
     - rm -rf "${INSTALL_PATH}"
     - tar -C/ -xzf linux_rivos_defconfig.tar.gz
+  rules:
+      - if: '$CI_COMMIT_BRANCH'
 
 sdk-linux-ubuntu-test:
   extends: .validate-kernel
