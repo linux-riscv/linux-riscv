@@ -34,30 +34,6 @@ static struct ib_qp *isbdm_get_base_qp(struct ib_device *base_dev, int id)
 	return NULL;
 }
 
-/* Called when the port goes up or down. */
-void isbdm_port_status_change(struct isbdm *ii)
-{
-	struct ib_event ib_event;
-
-	if (!ii->ib_device)
-		return;
-
-	memset(&ib_event, 0, sizeof(ib_event));
-
-	ib_event.device = &ii->ib_device->base_dev;
-	ib_event.element.port_num = 1;
-	if (ii->link_status == ISBDM_LINK_DOWN) {
-		ib_event.event = IB_EVENT_PORT_ERR;
-		ii->ib_device->state = IB_PORT_DOWN;
-
-	} else {
-		ib_event.event = IB_EVENT_PORT_ACTIVE;
-		ii->ib_device->state = IB_PORT_ACTIVE;
-	}
-
-	ib_dispatch_event(&ib_event);
-}
-
 static const struct ib_device_ops isbdm_device_ops = {
 	.owner = THIS_MODULE,
 	.uverbs_abi_ver = ISBDM_ABI_VERSION,
@@ -128,7 +104,7 @@ static int isbdm_device_register(struct isbdm_device *sdev, const char *name)
 	return 0;
 }
 
-struct isbdm_device *isbdm_device_create(struct isbdm *ii)
+static struct isbdm_device *isbdm_device_create(struct isbdm *ii)
 {
 	struct isbdm_device *sdev = NULL;
 	struct ib_device *base_dev;
@@ -193,6 +169,37 @@ struct isbdm_device *isbdm_device_create(struct isbdm *ii)
 error:
 	ib_dealloc_device(base_dev);
 	return NULL;
+}
+
+/* Called when the port goes up or down. */
+void isbdm_port_status_change(struct isbdm *ii)
+{
+	struct ib_event ib_event;
+
+	if ((ii->link_status != ISBDM_LINK_DOWN) && !ii->ib_device) {
+		ii->ib_device = isbdm_device_create(ii);
+		if (!ii->ib_device) {
+			dev_err(&ii->pdev->dev,
+				"Can't create IB device\n");
+
+			return;
+		}
+	}
+
+	memset(&ib_event, 0, sizeof(ib_event));
+
+	ib_event.device = &ii->ib_device->base_dev;
+	ib_event.element.port_num = 1;
+	if (ii->link_status == ISBDM_LINK_DOWN) {
+		ib_event.event = IB_EVENT_PORT_ERR;
+		ii->ib_device->state = IB_PORT_DOWN;
+
+	} else {
+		ib_event.event = IB_EVENT_PORT_ACTIVE;
+		ii->ib_device->state = IB_PORT_ACTIVE;
+	}
+
+	ib_dispatch_event(&ib_event);
 }
 
 static void __exit isbdm_exit_module(void)
