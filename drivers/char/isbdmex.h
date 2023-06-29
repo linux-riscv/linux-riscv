@@ -12,6 +12,7 @@
 #include <linux/list.h>
 #include <linux/miscdevice.h>
 #include <linux/mutex.h>
+#include <linux/rivos-rot.h>
 #include <linux/types.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
@@ -638,6 +639,9 @@ struct isbdm {
 	u64 rx_sequence_errors;
 	/* A pointer to the root of the debugfs directory, for cleanup. */
 	struct dentry *debugfs_dir;
+
+	/* A pointer to the Root of Trust device. */
+	struct rivos_rot_device *rot;
 };
 
 /* Drivers support routines */
@@ -677,6 +681,7 @@ ssize_t isbdmex_read_one(struct isbdm *ii, void __user *va, size_t size);
 void isbdm_rx_threshold(struct isbdm *ii);
 void isbdm_start(struct isbdm *ii);
 void isbdm_process_link_status_change(struct isbdm *ii);
+void isbdm_complete_link_status_change(struct isbdm *ii);
 
 /* Hardware routines for test. */
 u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
