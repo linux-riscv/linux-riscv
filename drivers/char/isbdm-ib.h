@@ -764,6 +764,5 @@ int isbdm_create_local_mb(struct isbdm_mr *mr);
 int isbdm_process_send_qp(struct isbdm_qp *qp);
 
 void isbdm_port_status_change(struct isbdm *ii);
-struct isbdm_device *isbdm_device_create(struct isbdm *ii);
 
 #endif

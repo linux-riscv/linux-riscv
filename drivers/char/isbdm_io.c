@@ -2033,20 +2033,8 @@ static void isbdm_handle_handshake(struct isbdm *ii, struct isbdm_buf *buf)
 			"Using subnet prefix %llx\n",
 			ii->subnet_prefix);
 
-		if (!old_peer_id) {
-			/* Make the IB link come up. Create it if needed. */
-			if (!ii->ib_device) {
-				ii->ib_device = isbdm_device_create(ii);
-				if (!ii->ib_device) {
-					dev_err(&ii->pdev->dev,
-						"Can't create IB device\n");
-
-					return;
-				}
-			}
-
-			isbdm_port_status_change(ii);
-		}
+		if (!old_peer_id)
+			isbdm_complete_link_status_change(ii);
 
 	} else {
 		dev_warn(&ii->pdev->dev, "Got handshake while offline\n");

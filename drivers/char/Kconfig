@@ -426,6 +426,7 @@ config RIVOS_ISBDM_EX
 	bool "Rivos ISBDM exerciser driver"
 	depends on IOMMU_SVA
 	depends on INFINIBAND
+	depends on RIVOS_ROT
 	default n
 	help
 	  This driver exposes the ISBDM to userspace test programs.

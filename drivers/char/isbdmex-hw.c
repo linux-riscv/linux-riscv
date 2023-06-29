@@ -15,6 +15,7 @@
 #include <linux/list.h>
 #include <linux/miscdevice.h>
 #include <linux/pci.h>
+#include <linux/rivos-doe.h>
 #include <linux/sched.h>
 
 #include "isbdmex.h"
@@ -1413,7 +1414,7 @@ static void isbdm_disconnect(struct isbdm *ii)
 	/* Set link down first to keep new things from piling in. */
 	ii->link_status = ISBDM_LINK_DOWN;
 	ii->peer_interface_id = 0;
-	isbdm_port_status_change(ii);
+	isbdm_complete_link_status_change(ii);
 
 	/* Stop the hardware. */
 	isbdm_disable(ii);
@@ -1478,18 +1479,44 @@ static void isbdm_check_link(struct isbdm *ii)
 	if ((link_status == ISBDM_LINK_UPSTREAM) ||
 	    (ii->peer_interface_id != 0)) {
 
-		if (!ii->ib_device) {
-			ii->ib_device = isbdm_device_create(ii);
-			if (!ii->ib_device) {
-				dev_err(&ii->pdev->dev,
-					"Can't create IB device\n");
-
-				return;
-			}
-		}
-
-		isbdm_port_status_change(ii);
+		isbdm_complete_link_status_change(ii);
 	}
+}
+
+/* Let the Root of Trust know the link state has changed. */
+static void isbdm_update_rot_link_state(struct isbdm *ii) {
+	struct rivos_doe_isbdm_status msg;
+	int rc;
+
+	if (!ii->rot)
+		return;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.hdr.type = RIVOS_DOE_ISBDM_STATUS;
+	msg.rid = pci_dev_id(ii->pdev);
+	switch (ii->link_status) {
+	case ISBDM_LINK_UPSTREAM:
+		msg.state = RIVOS_DOE_ISBDM_STATUS_REQUESTER;
+		break;
+
+	case ISBDM_LINK_DOWNSTREAM:
+		msg.state = RIVOS_DOE_ISBDM_STATUS_RESPONDER;
+		break;
+
+	default:
+	case ISBDM_LINK_DOWN:
+		msg.state = RIVOS_DOE_ISBDM_STATUS_DISCONNECTED;
+	}
+
+	rc = rivos_isbdm_doe(ii->rot, &msg, sizeof(msg), NULL, 0);
+	if (rc)
+		dev_warn(&ii->pdev->dev, "Failed to update RoT: %d\n", rc);
+}
+
+/* Called when the link goes down or after a handshake has completed. */
+void isbdm_complete_link_status_change(struct isbdm *ii) {
+	isbdm_update_rot_link_state(ii);
+	isbdm_port_status_change(ii);
 }
 
 void isbdm_start(struct isbdm *ii)
