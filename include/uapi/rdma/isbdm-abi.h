@@ -3,8 +3,8 @@
 /* Authors: Evan Green <evan@rivosinc.com> */
 /* Copyright (c) 2023 Rivos Inc. */
 
-#ifndef _ISBDM_ABI_H
-#define _ISBDM_ABI_H
+#ifndef ISBDM_ABI_H
+#define ISBDM_ABI_H
 
 #include <linux/types.h>
 
@@ -197,4 +197,4 @@ struct isbdm_cq_ctrl {
 	__u32 pad;
 };
 
-#endif
+#endif /* ISBDM_ABI_H */
