@@ -44,14 +44,17 @@ static void free_buf(struct isbdm *ii, struct isbdm_buf *buf) {
 	return;
 }
 
-static void free_buf_list(struct isbdm *ii, struct list_head *head) {
+static u32 free_buf_list(struct isbdm *ii, struct list_head *head) {
 	struct isbdm_buf *cur, *tmp;
+	u32 count = 0;
 
 	list_for_each_entry_safe(cur, tmp, head, node) {
 		free_buf(ii, cur);
+		count++;
 	}
 
-	return;
+	INIT_LIST_HEAD(head);
+	return count;
 }
 
 static struct isbdm_command *alloc_cmd(struct isbdm *ii)
@@ -78,6 +81,7 @@ static void free_cmd_list(struct isbdm *ii, struct list_head *head)
 		free_cmd(ii, cur);
 	}
 
+	INIT_LIST_HEAD(head);
 	return;
 }
 
@@ -1231,9 +1235,9 @@ static void isbdm_abort_tx(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->tx_ring;
 	u32 mask = ring->size - 1;
-	struct isbdm_buf *buf, *tmp;
+	struct isbdm_buf *buf;
 	u32 end_idx;
-	u32 count = 0;
+	u32 count;
 
 	mutex_lock(&ring->lock);
 	end_idx = ring->prod_idx;
@@ -1271,11 +1275,7 @@ static void isbdm_abort_tx(struct isbdm *ii)
 	}
 
 	/* Also discard any TX packets that didn't make it into hardware. */
-	list_for_each_entry_safe(buf, tmp, &ring->wait_list, node) {
-		put_buf(ii, ring, buf);
-		count++;
-	}
-
+	count = free_buf_list(ii, &ring->wait_list);
 	if (count)
 		dev_info(&ii->pdev->dev, "Dropped %u TX packets\n", count);
 
@@ -1287,9 +1287,9 @@ static void isbdm_abort_tx(struct isbdm *ii)
 static void isbdm_abort_rx(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->rx_ring;
-	struct isbdm_buf *buf, *tmp;
+	struct isbdm_buf *buf;
 	u32 end_idx;
-	u32 count = 0;
+	u32 count;
 	u32 mask = ring->size - 1;
 
 	mutex_lock(&ring->lock);
@@ -1334,11 +1334,7 @@ static void isbdm_abort_rx(struct isbdm *ii)
 	}
 
 	/* Also discard any completed RX packets waiting to be read. */
-	list_for_each_entry_safe(buf, tmp, &ring->wait_list, node) {
-		put_buf(ii, ring, buf);
-		count++;
-	}
-
+	count = free_buf_list(ii, &ring->wait_list);
 	dev_dbg(&ii->pdev->dev, "Reaped %u RX descriptors\n", count);
 	mutex_unlock(&ring->lock);
 
@@ -1397,6 +1393,7 @@ static void isbdm_abort_cmds(struct isbdm *ii)
 		count++;
 	}
 
+	INIT_LIST_HEAD(&ring->wait_list);
 	if (count)
 		dev_info(&ii->pdev->dev, "Dropped %u RDMA commands\n", count);
 
