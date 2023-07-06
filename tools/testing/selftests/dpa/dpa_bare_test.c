@@ -94,13 +94,15 @@ static struct drm_dpa_signal *get_signal_page()
 	return event_page;
 }
 
-static int wait_signal(uint64_t index, uint64_t timeout)
+static int wait_signal(uint64_t index, uint64_t timeout_sec,
+		       uint64_t timeout_ns)
 {
 	struct drm_dpa_wait_signal args;
 	int ret;
 
 	args.signal_idx = index;
-	args.timeout_ns = timeout;
+	args.timeout.tv_sec = timeout_sec;
+	args.timeout.tv_nsec = timeout_ns;
 
 	ret = ioctl(drm_fd, DRM_IOCTL_DPA_WAIT_SIGNAL, &args);
 	if (ret) {
@@ -323,7 +325,7 @@ int main(int argc, char *argv[])
 		doorbell_map[queue_id].doorbell_write_offset = 1;
 		// wait 1 second
 		fprintf(stderr, "waiting for signal back on barrier\n");
-		if ((ret = wait_signal(0, 1000000000))) {
+		if ((ret = wait_signal(0, 1, 0))) {
 			fprintf(stderr, "wait for signal returned %d\n", ret);
 		}
 		fprintf(stderr, "signal value is now %" PRIu64 "\n",

@@ -7,6 +7,7 @@
 #ifndef __DRM_DPA_H__
 #define __DRM_DPA_H__
 
+#include <linux/time_types.h>
 #include "drm.h"
 
 #define DRM_DPA_GET_INFO					0x1
@@ -54,8 +55,8 @@ struct drm_dpa_register_signal_pages {
 };
 
 struct drm_dpa_wait_signal {
-	__u64 signal_idx;	/* in signal index, offset in 64B from start */
-	__u64 timeout_ns;	/* in timeout in nano seconds */
+	__u64 signal_idx;		 /* in signal index, offset in 64B from start */
+	struct __kernel_timespec timeout; /* in timeout */
 };
 
 #define DRM_IOCTL_DPA_GET_INFO \

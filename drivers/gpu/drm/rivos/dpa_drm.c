@@ -312,7 +312,9 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	struct dpa_signal_waiter waiter;
 	struct drm_dpa_wait_signal *args = data;
 	u64 signal_idx = args->signal_idx;
-	u64 timeout_ns = nsecs_to_jiffies64(args->timeout_ns);
+	struct timespec64 ts64 = { .tv_sec = args->timeout.tv_sec,
+		.tv_nsec = args->timeout.tv_nsec, };
+	unsigned long timeout = timespec64_to_jiffies(&ts64);
 	struct drm_dpa_signal *signal;
 	u64 page_index;
 	void *signal_page_buf;
@@ -364,10 +366,10 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 
 	/* Wait for the signal, timeout value of 0 means 'no timeout' */
 	mutex_unlock(&p->lock);
-	if (timeout_ns == 0)
+	if (timeout == 0)
 		wait_for_completion_interruptible(&waiter.signal_done);
 	else
-		wait_for_completion_interruptible_timeout(&waiter.signal_done, timeout_ns);
+		wait_for_completion_interruptible_timeout(&waiter.signal_done, timeout);
 	mutex_lock(&p->lock);
 
 	if (waiter.error == -EINVAL) {
