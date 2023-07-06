@@ -192,11 +192,11 @@ static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
 	return 0;
 }
 
-static int dpa_drm_ioctl_create_signal_pages(struct drm_device *dev, void *data,
-					     struct drm_file *file)
+static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *data,
+					       struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
-	struct drm_dpa_create_signal_pages *args = data;
+	struct drm_dpa_register_signal_pages *args = data;
 	u32 num_pages = args->size / PAGE_SIZE;
 	int ret = 0;
 	long count;
@@ -398,7 +398,7 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_CREATE_QUEUE, dpa_drm_ioctl_create_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_DESTROY_QUEUE, dpa_drm_ioctl_destroy_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_UPDATE_QUEUE, dpa_drm_ioctl_update_queue, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_CREATE_SIGNAL_PAGES, dpa_drm_ioctl_create_signal_pages, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_REGISTER_SIGNAL_PAGES, dpa_drm_ioctl_register_signal_pages, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
 };
 

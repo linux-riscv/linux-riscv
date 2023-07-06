@@ -350,7 +350,7 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 
 int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
 				    struct dpa_process *p,
-				    struct drm_dpa_create_signal_pages *args,
+				    struct drm_dpa_register_signal_pages *args,
 				    u32 num_pages)
 {
 	struct daffy_queue_pkt pkt;

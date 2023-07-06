@@ -13,7 +13,7 @@
 #define DRM_DPA_CREATE_QUEUE					0x2
 #define DRM_DPA_DESTROY_QUEUE					0x3
 #define DRM_DPA_UPDATE_QUEUE					0x4
-#define DRM_DPA_CREATE_SIGNAL_PAGES				0x7
+#define DRM_DPA_REGISTER_SIGNAL_PAGES				0x7
 #define DRM_DPA_WAIT_SIGNAL					0x8
 
 #define DPA_IOCTL(dir, name, str) \
@@ -47,7 +47,7 @@ struct drm_dpa_update_queue {
 	__u32 queue_priority;		/* to DPA */
 };
 
-struct drm_dpa_create_signal_pages {
+struct drm_dpa_register_signal_pages {
 	__u64 va;	/* in to be passed to mmap, must be page aligned */
 	__u32 size;	/* in multiple of page size */
 	__u32 type;	/* ignored for now, eventually different types */
@@ -66,8 +66,8 @@ struct drm_dpa_wait_signal {
 	DPA_IOCTL(IOWR, DESTROY_QUEUE, destroy_queue)
 #define DRM_IOCTL_DPA_UPDATE_QUEUE \
 	DPA_IOCTL(IOWR, UPDATE_QUEUE, update_queue)
-#define DRM_IOCTL_DPA_CREATE_SIGNAL_PAGES \
-	DPA_IOCTL(IOWR, CREATE_SIGNAL_PAGES, create_signal_pages)
+#define DRM_IOCTL_DPA_REGISTER_SIGNAL_PAGES \
+	DPA_IOCTL(IOWR, REGISTER_SIGNAL_PAGES, register_signal_pages)
 #define DRM_IOCTL_DPA_WAIT_SIGNAL \
 	DPA_IOCTL(IOWR, WAIT_SIGNAL, wait_signal)
 
