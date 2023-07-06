@@ -336,8 +336,6 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 	cmd = &pkt.u.dcqc;
 	cmd->pasid = p->pasid;
 	cmd->ring_base_address = args->ring_base_address;
-	cmd->write_pointer_address = args->write_pointer_address;
-	cmd->read_pointer_address = args->read_pointer_address;
 	cmd->ring_size = args->ring_size;
 
 	ret = daffy_submit_sync(dpa, &pkt);
