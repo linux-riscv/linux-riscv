@@ -804,7 +804,6 @@ static u32 isbdm_loopback_amo(struct isbdm *ii,
 {
 	struct page *page = NULL;
 	int gup_flags = FOLL_WRITE;
-	struct vm_area_struct *vma;
 	void *maddr;
 	void *amo_addr;
 	u32 status;
@@ -837,7 +836,7 @@ static u32 isbdm_loopback_amo(struct isbdm *ii,
 	}
 
 	ret = get_user_pages_remote(remote_mm, remote_addr, 1,
-				    gup_flags, &page, &vma, NULL);
+				    gup_flags, &page, NULL);
 
 	if (ret <= 0) {
 		dev_warn(&ii->pdev->dev,
@@ -896,7 +895,8 @@ static u32 isbdm_loopback_amo(struct isbdm *ii,
 	instrument_copy_from_user_after(amo_addr, (void __user *)remote_addr,
 					size, 0);
 
-	flush_icache_user_page(vma, page, (void __user *)remote_addr, size);
+	/* RISC-V icache flush does not accept range, flush all. */
+	flush_icache_mm(remote_mm, 0);
 	kunmap(page);
 	put_page(page);
 	status = ISBDM_STATUS_SUCCESS;
