@@ -94,7 +94,7 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 		return -EINVAL;
 
 	if (!ctx->sva) {
-		ret = pin_user_pages_fast(buf, 1, FOLL_WRITE, pages);
+		ret = pin_user_pages_fast((unsigned long)buf, 1, FOLL_WRITE, pages);
 		if (ret != 1) {
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
@@ -146,7 +146,7 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 		return -EINVAL;
 
 	if (!ctx->sva) {
-		ret = pin_user_pages_fast(buf, 1, 0, pages);
+		ret = pin_user_pages_fast((unsigned long)buf, 1, 0, pages);
 		if (ret != 1) {
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
