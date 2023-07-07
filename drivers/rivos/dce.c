@@ -117,20 +117,13 @@ void clean_up_work(struct work_struct *work)
 			curr = ring->clean_up_index;
 			spin_unlock(&wq->lock);
 
-			/* Do the actual cleaning up, right now just eventfd */
+			/* Do the actual cleaning up */
 			dev_dbg(&dce_priv->dev,
 				"Cleanup on %d, %llu->%llu", wq_num, curr, head);
 
 			while (curr < head) {
 				/* Position in queue int qi = (curr % ring->length); */
-				/* for every clean up, notify user via eventfd when applicable*/
-				/* TODO: Find out an optimal policy for eventfd */
-				if (wq->efd_ctx_valid) {
-					if (eventfd_signal(wq->efd_ctx, 1) < 1)
-						dev_warn_ratelimited(&dce_priv->dev,
-							"wq: %d, overflow on eventfd\n",
-							wq_num);
-				}
+				/* TODO: Do something on descriptors ? */
 				curr++;
 			}
 
@@ -341,12 +334,6 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 	if (ring->hti_dma) {
 		dma_free_coherent(&priv->pdev->dev, sizeof(struct HeadTailIndex),
 			ring->hti, ring->hti_dma);
-	}
-	/* Clean up the eventfd ctx */
-	if (wq->efd_ctx_valid) {
-		eventfd_ctx_put(wq->efd_ctx);
-		wq->efd_ctx_valid = false;
-		wq->efd_ctx = 0;
 	}
 
 	wq->type = DISABLED_WQ;
@@ -737,22 +724,10 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 	// Parse KernelQueueReq if provided
 	if (kqr) {
 		DSCSZ = kqr->DSCSZ;
-		if (kqr->eventfd_vld) {
-			struct eventfd_ctx *efdctx = eventfd_ctx_fdget(kqr->eventfd);
-
-			if (IS_ERR(efdctx)) {
-				err = PTR_ERR(efdctx);
-				dev_warn(&dce_priv->dev, "Unable to get eventfd\n");
-				goto efd_error;
-			}
-			wq->efd_ctx = efdctx;
-			wq->efd_ctx_valid = true;
-		}
 	}
 
 	/* TODO: Some commonality with user queue code, regroup in the same place*/
 	/* Supervisor memory setup */
-
 	/* per DCE spec: Actual ring size is computed by: 2^(DSCSZ + 12) */
 	length = 0x1000 * (1 << DSCSZ) / sizeof(struct DCEDescriptor);
 	ring->length = length;
@@ -796,15 +771,10 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 	dev_info(&dce_priv->dev, "wq %d as KERNEL_WQ\n", wq_num);
 	return 0;
 
-efd_error:
 hti_alloc_error:
 	dma_free_coherent(&dce_priv->pdev->dev, length * sizeof(struct DCEDescriptor),
 		ring->descriptors, ring->desc_dma);
 descriptor_alloc_error:
-	if (wq->efd_ctx_valid) {
-		eventfd_ctx_put(wq->efd_ctx);
-		wq->efd_ctx_valid = false;
-	}
 type_error:
 	return err;
 }
@@ -841,6 +811,9 @@ static int request_kernel_wq(struct dce_submitter_ctx *ctx,
 	/* WQ shouldn't have been assigned at this point */
 	if (ctx->wq_num != -1)
 		return -EFAULT;
+	if (kqr->eventfd_vld)
+		dev_warn(&ctx->priv->dev,
+			 "Support for eventfd notifications deprecated\n");
 
 	dev_info(&ctx->priv->dev, "Requesting kernel WQ\n");
 	/* allocate a queue to context or fallback to wq 0*/
