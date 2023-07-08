@@ -7044,7 +7044,7 @@ static int __init pci_realloc_setup_params(void)
 }
 pure_initcall(pci_realloc_setup_params);
 
-#if defined(CONFIG_ARM64)
+#if defined(CONFIG_ARM64) || (CONFIG_RISCV)
 
 /*
  * raw_pci_read/write - Platform-specific PCI config space access.

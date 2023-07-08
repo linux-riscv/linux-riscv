@@ -15,7 +15,6 @@
 
 #include <linux/acpi.h>
 #include <linux/io.h>
-#include <linux/pci.h>
 #include <linux/efi.h>
 #include <linux/memblock.h>
 
@@ -303,33 +302,3 @@ void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
 
 	return ioremap_prot(phys, size, pgprot_val(prot));
 }
-
-#ifdef CONFIG_PCI
-
-/*
- * These interfaces are defined just to enable building ACPI core.
- * TODO: Update it with actual implementation when external interrupt
- * controller support is added in RISC-V ACPI.
- */
-int raw_pci_read(unsigned int domain, unsigned int bus, unsigned int devfn,
-		 int reg, int len, u32 *val)
-{
-	return PCIBIOS_DEVICE_NOT_FOUND;
-}
-
-int raw_pci_write(unsigned int domain, unsigned int bus, unsigned int devfn,
-		  int reg, int len, u32 val)
-{
-	return PCIBIOS_DEVICE_NOT_FOUND;
-}
-
-int acpi_pci_bus_find_domain_nr(struct pci_bus *bus)
-{
-	return -1;
-}
-
-struct pci_bus *pci_acpi_scan_root(struct acpi_pci_root *root)
-{
-	return NULL;
-}
-#endif	/* CONFIG_PCI */
