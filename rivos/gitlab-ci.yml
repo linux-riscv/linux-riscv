@@ -8,6 +8,14 @@ variables:
   KUBERNETES_CPU_REQUEST: "32"
   KUBERNETES_CPU_LIMIT: "32"
 
+# Trigger downstream FS-Sim run if job was triggered by upstream DPA pipeline
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      variables:
+        TEST_DOWNSTREAM: "true"
+    - if: $CI_COMMIT_BRANCH
+
 # Override some variable from 'prepare-version' included from gitlab-ci-packaging-helper
 prepare-version:
   after_script:
@@ -82,6 +90,8 @@ prepare-version:
         fi
         timeout ${timeout} python3 linux_ci.py --dl-prepared-vm https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/ubuntu_images/1/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz --version ${KERNEL_CONFIG} ${long_valid} $qemu_valid_option 2>&1 | tee -a -i ${KERNEL_CONFIG}_output
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      when: never
     - if: '$UBUNTU_ARCH == "riscv64"'
       when: never
     - if: '$TEST_ONLY == "true" && $CI_COMMIT_BRANCH'
@@ -100,6 +110,10 @@ docker-build-ubuntu-defconfig:
   variables:
     KERNEL_CONFIG: "ubuntu_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ${KERNEL_CONFIG}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      when: never
+    - when: on_success
 
 .kasan-conf-generic: &kasan-conf-generic
     - echo "CONFIG_KASAN=y" > kasan.conf
@@ -116,6 +130,8 @@ docker-build-ubuntu-kasan-outline-defconfig:
     - *kasan-conf-generic
     - !reference [.build-kernel, script]
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      when: never
     - if: '$TEST_KASAN == "yes"'
       when: on_success
 
@@ -129,6 +145,8 @@ docker-build-ubuntu-kasan-inline-defconfig:
     - echo "CONFIG_KASAN_INLINE=y" >> kasan.conf
     - !reference [.build-kernel, script]
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      when: never
     - if: '$TEST_KASAN == "yes"'
       when: on_success
 
@@ -146,7 +164,7 @@ package-deb:
     - rm -rf "${INSTALL_PATH}"
     - tar -C/ -xzf linux_rivos_defconfig.tar.gz
   rules:
-      - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH'
 
 sdk-linux-ubuntu-test:
   extends: .validate-kernel
