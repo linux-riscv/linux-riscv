@@ -877,7 +877,7 @@ static int dce_sync(struct dce_submitter_ctx *ctx)
 	spin_lock(&wq->lock);
 	dev_dbg(&priv->dev, "Sync on wq %d to job 0x%llx\n",
 		ctx->wq_num, ctx->clean_treshold);
-	if (wq->type != KERNEL_WQ || wq->type != SHARED_KERNEL_WQ) {
+	if (!(wq->type == KERNEL_WQ || wq->type == SHARED_KERNEL_WQ)) {
 		spin_unlock(&wq->lock);
 		return -EBADFD;
 	}
