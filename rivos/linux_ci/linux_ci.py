@@ -41,6 +41,9 @@ def parse_args():
     parser.add_argument("--long-valid", action = 'store_true',
             help = 'Launch the long validation (LTP and other long testsuites): by default, only a short validation is done')
 
+    parser.add_argument("--gitlab-token", default = "",
+            help = 'Launch the CI locally with the given token')
+
     return parser.parse_args()
 
 def launch_external_wait(cmd):
@@ -64,18 +67,30 @@ def host_finish_prepare_vm():
 def host_dl_prepared_vm():
     print("* Downloading prepared VM...", end = "")
     sys.stdout.flush()
-    launch_external_wait("curl -O --header JOB-TOKEN:{} {}".format(os.environ["CI_JOB_TOKEN"], args.dl_prepared_vm).split(" "))
+
+    if args.gitlab_token != "":
+        header = "PRIVATE-TOKEN:{}".format(args.gitlab_token)
+    else:
+        header = "JOB-TOKEN:{}".format(os.environ["CI_JOB_TOKEN"])
+
+    launch_external_wait("curl -O --header {} {}".format(header, args.dl_prepared_vm).split(" "))
     launch_external_wait("xz -d {}".format(vm_path + ".xz").split(" "))
     print("OK")
 
 def host_dl_firmware():
     print("* Downloading firmware...", end = "")
     sys.stdout.flush()
-    launch_external_wait("curl -O --header JOB-TOKEN:{} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/u-boot".format(os.environ["CI_JOB_TOKEN"]).split(" "))
+
+    if args.gitlab_token != "":
+        header = "PRIVATE-TOKEN:{}".format(args.gitlab_token)
+    else:
+        header = "JOB-TOKEN:{}".format(os.environ["CI_JOB_TOKEN"])
+
+    launch_external_wait("curl -O --header {} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/u-boot".format(header).split(" "))
     launch_external_wait("mkdir -p usr/lib/u-boot/qemu-riscv64_smode/".split(" "))
     launch_external_wait("mv u-boot usr/lib/u-boot/qemu-riscv64_smode/uboot.elf".split(" "))
 
-    launch_external_wait("curl -O --header JOB-TOKEN:{} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/fw_dynamic.elf".format(os.environ["CI_JOB_TOKEN"]).split(" "))
+    launch_external_wait("curl -O --header {} https://gitlab.ba.rivosinc.com/api/v4/projects/38/packages/generic/firmwares/1/fw_dynamic.elf".format(header).split(" "))
     print("OK")
 
 def userspace_prepare_vm(c, kernel_version):
@@ -215,22 +230,23 @@ if __name__ == "__main__":
             "ubuntu_kasan_outline_defconfig": userspace_validate_kasan_kernel,
     }
 
-    for version in args.versions.split(","):
-        print("### Testing {} ###".format(version))
-        try:
-            if not args.no_kernel_install:
-                launch_vm_and_execute_userspace_fn(userspace_install_kernel, version)
+    if args.versions != "":
+        for version in args.versions.split(","):
+            print("### Testing {} ###".format(version))
+            try:
+                if not args.no_kernel_install:
+                    launch_vm_and_execute_userspace_fn(userspace_install_kernel, version)
 
-            if args.satp_valid:
-                for satp_mode in satp_mode_list:
-                    launch_vm_and_execute_userspace_fn(validate_fn[version], version, satp_mode)
-            else:
-                launch_vm_and_execute_userspace_fn(validate_fn[version], version)
+                if args.satp_valid:
+                    for satp_mode in satp_mode_list:
+                        launch_vm_and_execute_userspace_fn(validate_fn[version], version, satp_mode)
+                else:
+                    launch_vm_and_execute_userspace_fn(validate_fn[version], version)
 
-        except TimeoutError:
-            print("### ERROR: Timeout {} ###".format(version))
-            sys.exit(-1)
-        except Exception as e:
-            print("### ERROR: Fail {} ###".format(version))
-            print(e)
-            sys.exit(-1)
+            except TimeoutError:
+                print("### ERROR: Timeout {} ###".format(version))
+                sys.exit(-1)
+            except Exception as e:
+                print("### ERROR: Fail {} ###".format(version))
+                print(e)
+                sys.exit(-1)
