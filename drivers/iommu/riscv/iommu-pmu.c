@@ -238,7 +238,7 @@ static void riscv_iommu_pmu_del(struct perf_event *event, int flags)
 
 int riscv_iommu_pmu_register(struct riscv_iommu_device *iommu)
 {
-	riscv_iommu_writeq(iommu, RISCV_IOMMU_REG_IOCOUNTINH, 0);
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_IOCOUNTINH, 0);
 	iommu->counters_used = 0;
 	iommu->pmu.name = kasprintf(GFP_KERNEL, "riscv_iommu_%llx",
 				 iommu->reg_phys);
