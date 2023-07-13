@@ -9,6 +9,8 @@
 #include <linux/fwnode.h>
 #include <linux/irqdomain.h>
 #include <linux/list.h>
+#include <linux/msi.h>
+#include <linux/platform_device.h>
 #include <linux/property.h>
 #include "../../../drivers/pci/pci.h"
 
@@ -224,4 +226,115 @@ void __init acpi_init_irqchip_fwnodes(void)
 	acpi_table_parse_madt(ACPI_MADT_TYPE_RINTC, rintc_parse_madt_swnode, 0);
 	acpi_table_parse_madt(ACPI_MADT_TYPE_IMSIC, imsic_parse_madt_fwnode, 1);
 	acpi_table_parse_madt(ACPI_MADT_TYPE_APLIC, aplic_parse_madt_fwnode, 0);
+}
+
+static struct fwnode_handle *aplic_get_gsi_domain_id(u32 gsi)
+{
+	struct riscv_irqchip_list *aplic_element;
+	struct list_head *i, *tmp;
+	struct fwnode_handle *fwnode;
+	int rc;
+	u32 gsi_base;
+	u32 nr_irqs;
+
+	list_for_each_safe(i, tmp, &aplic_list) {
+		aplic_element = list_entry(i, struct riscv_irqchip_list, list);
+		fwnode = aplic_element->fwnode;
+		rc = fwnode_property_read_u32_array(fwnode, "riscv,gsi-base", &gsi_base, 1);
+		rc = fwnode_property_read_u32_array(fwnode, "riscv,num-sources", &nr_irqs, 1);
+		if ((!rc) && (gsi >= gsi_base && gsi < gsi_base + nr_irqs))
+			return fwnode;
+	}
+
+	return NULL;
+}
+
+static u32 aplic_gsi_to_irq(u32 gsi)
+{
+	return acpi_register_gsi(NULL, gsi, ACPI_LEVEL_SENSITIVE, ACPI_ACTIVE_HIGH);
+}
+
+static int __init aplic_create_platform_device(struct fwnode_handle *fwnode)
+{
+	struct platform_device *pdev;
+	struct irq_domain *msi_domain = NULL;
+	struct fwnode_handle *msi_fwnode;
+	struct resource *res;
+	u64 aplic_base;
+	u32 aplic_size, aplic_id;
+	int ret;
+
+	if (!fwnode)
+		return -ENODEV;
+
+	ret = fwnode_property_read_u64_array(fwnode, "riscv,aplic-base", &aplic_base, 1);
+	if (ret)
+		return -ENODEV;
+
+	ret = fwnode_property_read_u32_array(fwnode, "riscv,aplic-size", &aplic_size, 1);
+	if (ret)
+		return -ENODEV;
+
+	ret = fwnode_property_read_u32_array(fwnode, "riscv,aplic-id", &aplic_id, 1);
+	if (ret)
+		return -ENODEV;
+
+	pdev = platform_device_alloc("riscv-aplic", aplic_id);
+	if (!pdev)
+		return -ENOMEM;
+
+	res = kcalloc(1, sizeof(*res), GFP_KERNEL);
+	if (!res) {
+		ret = -ENOMEM;
+		goto dev_put;
+	}
+
+	res->start = aplic_base;
+	res->end = res->start + aplic_size - 1;
+	res->flags = IORESOURCE_MEM;
+	ret = platform_device_add_resources(pdev, res, 1);
+	/*
+	 * Resources are duplicated in platform_device_add_resources,
+	 * free their allocated memory
+	 */
+	kfree(res);
+
+	pdev->dev.fwnode = fwnode;
+	msi_fwnode = acpi_riscv_get_msi_fwnode(&pdev->dev);
+	if (msi_fwnode)
+		msi_domain = irq_find_matching_fwnode(msi_fwnode, DOMAIN_BUS_PLATFORM_MSI);
+
+	if (msi_domain)
+		dev_set_msi_domain(&pdev->dev, msi_domain);
+	else
+		pci_no_msi();
+
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto dev_put;
+
+	return 0;
+
+dev_put:
+	if (res)
+		kfree(res);
+
+	platform_device_put(pdev);
+
+	return ret;
+}
+
+void __init riscv_acpi_aplic_platform_init(void)
+{
+	struct riscv_irqchip_list *aplic_element;
+	struct list_head *i, *tmp;
+	struct fwnode_handle *fwnode;
+
+	list_for_each_safe(i, tmp, &aplic_list) {
+		aplic_element = list_entry(i, struct riscv_irqchip_list, list);
+		fwnode = aplic_element->fwnode;
+		aplic_create_platform_device(fwnode);
+	}
+	acpi_set_irq_model(ACPI_IRQ_MODEL_APLIC, aplic_get_gsi_domain_id);
+	acpi_set_gsi_to_irq_fallback(aplic_gsi_to_irq);
 }
