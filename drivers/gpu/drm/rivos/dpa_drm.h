@@ -52,8 +52,6 @@
 
 #define DPA_NUM_MSIX		8
 
-#define DPA_PROCESS_MAX		DPA_NUM_DB_PAGES
-
 struct dpa_device {
 	/* big lock for device data structures */
 	struct mutex lock;
@@ -115,6 +113,8 @@ struct dpa_process {
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
+	u32 doorbell_offset;
+	u32 doorbell_size;
 };
 
 struct dpa_signal_waiter {

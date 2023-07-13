@@ -286,17 +286,27 @@ int daffy_get_info_cmd(struct dpa_device *dpa,
 	return 0;
 }
 
-int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid)
+int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid,
+			     u32 *db_offset,
+			     u32 *db_size)
 {
 	struct daffy_queue_pkt pkt;
 	struct daffy_register_pasid_cmd *cmd;
+	int ret;
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_REGISTER_PASID;
 	cmd = &pkt.u.drpc;
 	cmd->pasid = pasid;
 
-	return daffy_submit_sync(dpa, &pkt);
+	ret = daffy_submit_sync(dpa, &pkt);
+	if (ret)
+		return ret;
+
+	*db_offset = pkt.u.drpc.doorbell_offset;
+	*db_size = pkt.u.drpc.doorbell_size;
+
+	return 0;
 }
 
 int daffy_unregister_pasid_cmd(struct dpa_device *dpa, u32 pasid)
@@ -343,8 +353,11 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 		return ret;
 
 	args->queue_id = pkt.u.dcqc.queue_id;
-	// doorbell_offset will get converted from page offset to something else by caller
-	args->doorbell_offset = pkt.u.dcqc.doorbell_offset;
+	// fw gives us the offset into the entire 16 page region
+	// user process should get offset into the mmaped doorbell region
+	args->doorbell_offset = pkt.u.dcqc.doorbell_offset -
+		p->doorbell_offset;
+
 	return 0;
 }
 

@@ -138,9 +138,8 @@ static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
 	if (ret)
 		return ret;
 
-	// we need to convert the page offset from daffy to an offset
-	// mmap can recognize
-	doorbell_mmap_offset = DRM_MMAP_TYPE_DOORBELL << DRM_MMAP_TYPE_SHIFT;
+	doorbell_mmap_offset = (DRM_MMAP_TYPE_DOORBELL << DRM_MMAP_TYPE_SHIFT) |
+		args->doorbell_offset;
 	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
 	if (ret) {
 		dev_warn(p->dev->dev, "%s: unable to add aql queue to process, destroying id %u\n",
@@ -187,7 +186,7 @@ static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
 	if (ret)
 		return ret;
 	dev_warn(p->dev->dev, "%s: dim_x: %d dim_y: %d\n", __func__,
-		args->pe_grid_dim_x, args->pe_grid_dim_y);
+		 args->pe_grid_dim_x, args->pe_grid_dim_y);
 
 	return 0;
 }
@@ -419,20 +418,17 @@ static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
 	switch (type) {
 
 	case DRM_MMAP_TYPE_DOORBELL:
-		if (size != DPA_DB_PAGE_SIZE) {
-			dev_warn(p->dev->dev, "%s: invalid size for doorbell\n",
-					__func__);
-			return -EINVAL;
-		}
-
-		// TODO: Right now we only support one MMIO-mapped doorbell page,
-		// expand to all 16
-		dev_warn(p->dev->dev, "%s: Mapping doorbell page\n", __func__);
+		dev_warn(p->dev->dev, "%s: Mapping doorbell pages\n", __func__);
 
 		mutex_lock(&p->lock);
+		if (size > p->doorbell_size) {
+			dev_warn(p->dev->dev, "%s: doorbell mmap too large\n",
+				 __func__);
+			mutex_unlock(&p->lock);
+			return -EINVAL;
+		}
 		pfn = p->doorbell_base;
 		pfn >>= PAGE_SHIFT;
-
 		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size,
 			vma->vm_page_prot);
 		mutex_unlock(&p->lock);
@@ -511,17 +507,11 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	struct dpa_device *dpa = drm_to_dpa_dev(dev);
 	struct dpa_process *dpa_app = NULL;
 	struct device *dpa_dev;
+	u32 db_offset;
+	u32 db_size;
 	int err;
 
 	mutex_lock(&dpa->dpa_processes_lock);
-
-	/* Allocate a new DPA process */
-	if (dpa->dpa_process_count >= DPA_PROCESS_MAX) {
-		dev_warn(dpa->dev, "%s: max number of processes reached\n",
-			 __func__);
-		err = -EBUSY;
-		goto out_unlock;
-	}
 
 	dpa_app = kzalloc(sizeof(*dpa_app), GFP_KERNEL);
 	if (!dpa_app) {
@@ -553,18 +543,21 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 		err = -ENODEV;
 		goto unbind_sva;
 	}
-	err = daffy_register_pasid_cmd(dpa_app->dev, dpa_app->pasid);
+	err = daffy_register_pasid_cmd(dpa_app->dev, dpa_app->pasid,
+				       &db_offset, &db_size);
 	if (err) {
 		dev_warn(dpa_dev, "%s: Failed to register pasid %d with DUC\n",
 			__func__, dpa_app->pasid);
 		goto unbind_sva;
 	}
-	dev_warn(dpa_dev, "%s: DPA assigned PASID value %d\n", __func__,
-		dpa_app->pasid);
+	dev_warn(dpa_dev, "%s: DPA registered PASID value %d doorbell %u\n", __func__,
+		 dpa_app->pasid, db_offset);
 
 	/* Setup doorbell register offsets */
+	dpa_app->doorbell_offset = db_offset;
+	dpa_app->doorbell_size = db_size;
 	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
-		DPA_DB_PAGES_BASE;
+		dpa_app->doorbell_offset;
 
 	/* Init dpa_signal_waiter queue */
 	INIT_LIST_HEAD(&dpa_app->signal_waiters);

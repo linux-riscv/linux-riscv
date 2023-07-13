@@ -95,7 +95,11 @@ struct daffy_get_info_cmd {
 };
 
 struct daffy_register_pasid_cmd {
+	/* in */
 	uint32_t pasid;
+	/* out */
+	uint32_t doorbell_offset;
+	uint32_t doorbell_size;
 };
 
 struct daffy_unregister_pasid_cmd {
