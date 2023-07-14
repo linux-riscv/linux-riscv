@@ -1271,7 +1271,17 @@ static void dce_remove(struct pci_dev *pdev)
 	free_resources(&pdev->dev, pci_get_drvdata(pdev));
 }
 
-static SIMPLE_DEV_PM_OPS(vmd_dev_pm_ops, vmd_suspend, vmd_resume);
+static int dce_suspend(struct device *dev)
+{
+	return 0;
+}
+
+static int dce_resume(struct device *dev)
+{
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(dce_dev_pm_ops, dce_suspend, dce_resume);
 
 static const struct pci_device_id dce_id_table[] = {
 	{PCI_DEVICE(VENDOR_ID, DEVICE_ID)},
@@ -1286,7 +1296,7 @@ static struct pci_driver dce_driver = {
 	.remove   = dce_remove,
 	.sriov_configure = dev_sriov_configure,
 	.driver	= {
-		.pm = &vmd_dev_pm_ops,
+		.pm = &dce_dev_pm_ops,
 	},
 };
 
@@ -1301,7 +1311,7 @@ static struct pci_driver dcevf_driver = {
 	.probe    = dce_probe,
 	.remove   = dce_remove,
 	.driver	= {
-		.pm = &vmd_dev_pm_ops,
+		.pm = &dce_dev_pm_ops,
 	},
 };
 
