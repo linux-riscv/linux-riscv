@@ -504,6 +504,9 @@ int software_node_register(const struct software_node *node);
 void software_node_unregister(const struct software_node *node);
 
 struct fwnode_handle *
+fwnode_create_software_node_early(const struct property_entry *properties,
+				  const struct fwnode_handle *parent);
+struct fwnode_handle *
 fwnode_create_software_node(const struct property_entry *properties,
 			    const struct fwnode_handle *parent);
 void fwnode_remove_software_node(struct fwnode_handle *fwnode);
