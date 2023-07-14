@@ -4,8 +4,9 @@
 # Rivos kernel merge script.
 #
 # Run from Linux git repository with remote branches pointing to:
-# - git remote add avpatel https://github.com/avpatel/linux.git
-# - git remote add rivos https://gitlab.ba.rivosinc.com/rv/sw/ext/linux.git
+# - git remote add rivos    https://gitlab.ba.rivosinc.com/rv/sw/ext/linux.git
+# - git remote add avpatel  https://github.com/avpatel/linux.git
+# - git remote add vlsunil  https://github.com/vlsunil/linux.git
 #
 # Use upstream tag and optional dot-release, eg. target rivos/next/v6.3-rc1.1:
 # $ rivos/create-next -u v6.3-rc1 -d 1
@@ -20,7 +21,7 @@
 
 set -e
 
-VER=v6.4-rc7
+VER=v6.5-rc1
 DOT=
 ORG="rivos"
 
@@ -56,7 +57,6 @@ SRC="${ORG:+$ORG/}"
 GIT_MERGE="git merge --no-ff --log=100 --stat --no-edit --signoff"
 
 # Fetch latest remotes
-git fetch -p avpatel
 git fetch -p "$ORG"
 
 # Check target branch reference, local
@@ -79,11 +79,15 @@ test -z "${no_reset}" && git reset --hard ${VER}
 # Rivos: Internal CI rules and unsorted private patches.
 ${GIT_MERGE} "${SRC}dev/tjeznach/feature/rivos-main"
 
-# Ventana: AIA/KVM patches
-${GIT_MERGE} avpatel/riscv_kvm_aia_hwaccel_v1
-${GIT_MERGE} avpatel/riscv_sbi_dbcn_v1
+# Ventana patch series
+# 1. based on avpatel/riscv_aia_v6
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_aia"
+# 2. based on vlsunil/riscv_acpi_b2_v1
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi"
+# 3. based on avpatel/riscv_sbi_dbcn_v1
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_sbi_dbcn"
 
-# Rivos: private features
+# Rivos patch series
 ${GIT_MERGE} "${SRC}dev/tjeznach/feature/riscv-iommu"
 ${GIT_MERGE} "${SRC}dev/bend/feature/dce"
 ${GIT_MERGE} "${SRC}dev/sonny/feature/dpa"
