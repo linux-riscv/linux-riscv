@@ -23,6 +23,8 @@
 struct drm_dpa_get_info {
 	__u32 pe_grid_dim_x;
 	__u32 pe_grid_dim_y;
+	__u32 doorbell_size;
+	__u32 pad;
 };
 
 struct drm_dpa_create_queue {
