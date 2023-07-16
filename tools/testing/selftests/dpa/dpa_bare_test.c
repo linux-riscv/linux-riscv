@@ -35,7 +35,7 @@ static int drm_fd;
 // keep read and write indices one CL apart
 #define CACHELINE_SIZE (64)
 
-static void get_info(void)
+static void get_info(size_t *doorbell_size)
 {
 	struct drm_dpa_get_info args;
 	int ret = ioctl(drm_fd, DRM_IOCTL_DPA_GET_INFO, &args);
@@ -44,6 +44,7 @@ static void get_info(void)
 		perror("ioctl get info");
 		exit(1);
 	}
+	*doorbell_size = args.doorbell_size;
 }
 
 static void open_render_fd(void)
@@ -190,11 +191,10 @@ static int init_null_kernel(void **kern_ptr, size_t *kernel_size)
 	return 0;
 }
 
-static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
+static uint64_t *mmap_doorbell(size_t size)
 {
 	uint64_t *map = mmap(NULL, size, PROT_READ | PROT_WRITE,
-			     MAP_SHARED, drm_fd, doorbell_offset);
-
+			     MAP_SHARED, drm_fd, 0);
 	if (map == MAP_FAILED) {
 		perror("mmap doorbell");
 		exit(1);
@@ -207,7 +207,7 @@ static uint64_t *mmap_doorbell(uint64_t doorbell_offset, size_t size)
 int main(int argc, char *argv[])
 {
 	void *kern_ptr, *queue_ptr = NULL;
-	size_t doorbell_size = getpagesize();
+	size_t doorbell_size;
 	size_t queue_packets = 64;
 	size_t queue_size = sizeof(struct queue_metadata) +
 		queue_packets * sizeof(struct hsa_kernel_dispatch_packet_s);
@@ -219,7 +219,8 @@ int main(int argc, char *argv[])
 	struct queue_metadata *meta = NULL;
 	void *ring = NULL;
 
-	struct Doorbell *doorbell_map = NULL;
+	void *doorbell_map;
+	volatile struct Doorbell *doorbell;
 
 	hsa_kernel_dispatch_packet_t *aql_packet;
 	hsa_barrier_and_packet_t *aql_barrier_packet;
@@ -233,7 +234,10 @@ int main(int argc, char *argv[])
 	}
 
 	open_render_fd();
-	get_info();
+	get_info(&doorbell_size);
+	fprintf(stderr, "Mapping doorbell page\n");
+	doorbell_map = mmap_doorbell(doorbell_size);
+
 	signal_page = get_signal_page();
 	signal = &signal_page[0];
 
@@ -254,10 +258,10 @@ int main(int argc, char *argv[])
 	meta->write_index.value = 0;
 	create_queue(queue_ptr, queue_packets, &doorbell_offset, &queue_id);
 
-	fprintf(stderr, "Mapping doorbell page\n");
-	doorbell_map = (struct Doorbell*) mmap_doorbell(doorbell_offset, doorbell_size);
+	doorbell = (struct Doorbell *)(doorbell_map + doorbell_offset);
 
-	fprintf(stderr, "AQL Queue create succeeded, got queue id %u\n", queue_id);
+	fprintf(stderr, "AQL Queue create succeeded, got queue id %u offset 0x%lx\n",
+		queue_id, doorbell_offset);
 	if (kernel_size) {
 		int wait_count = 0;
 
@@ -298,7 +302,7 @@ int main(int argc, char *argv[])
 		meta->write_index.value += 2;
 		fprintf(stderr, "Incremented write index: %lu\n",
 			meta->write_index.value);
-		doorbell_map[queue_id].doorbell_write_offset = 1;
+		doorbell->doorbell_write_offset = 1;
 		fprintf(stderr, "Rang the doorbell\n");
 		while (wait_count < 10 && meta->read_index.value == 0) {
 			fprintf(stderr, "Waiting for read index to increment: %lu\n",
@@ -322,7 +326,7 @@ int main(int argc, char *argv[])
 		aql_barrier_packet->completion_signal.handle = (uint64_t)signal;
 		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
 		meta->write_index.value += 1;
-		doorbell_map[queue_id].doorbell_write_offset = 1;
+		doorbell->doorbell_write_offset = 1;
 		// wait 1 second
 		fprintf(stderr, "waiting for signal back on barrier\n");
 		if ((ret = wait_signal(0, 1, 0))) {
