@@ -2068,7 +2068,7 @@ void riscv_iommu_remove(struct device *dev)
 	kfree(iommu);
 }
 
-int riscv_iommu_init_common(struct riscv_iommu_device *iommu)
+int riscv_iommu_init(struct riscv_iommu_device *iommu)
 {
 	struct device *dev = iommu->dev;
 	u32 fctl = 0;

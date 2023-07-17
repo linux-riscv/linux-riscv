@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * IOMMU API for RISC-V architected Ziommu implementations.

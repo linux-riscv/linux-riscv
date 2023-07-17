@@ -49,14 +49,6 @@ enum riscv_queue_ids {
 	RISCV_IOMMU_PAGE_REQUEST_QUEUE	= 2
 };
 
-/* TODO: Readback icvec */
-enum riscv_default_virqs {
-	RISCV_IOMMU_INTR_CQ = 0,
-	RISCV_IOMMU_INTR_FQ = 1,
-	RISCV_IOMMU_INTR_PM = 2,
-	RISCV_IOMMU_INTR_PQ = 3
-};
-
 struct riscv_iommu_device {
 	struct iommu_device iommu;	/* iommu core interface */
 	struct device *dev;		/* iommu hardware */
@@ -180,7 +172,7 @@ static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu,
 	writeq_relaxed(val, iommu->reg + offset);
 }
 
-int riscv_iommu_init_common(struct riscv_iommu_device *iommu);
+int riscv_iommu_init(struct riscv_iommu_device *iommu);
 void riscv_iommu_remove(struct device *dev);
 
 int riscv_iommu_sysfs_add(struct riscv_iommu_device *iommu);
