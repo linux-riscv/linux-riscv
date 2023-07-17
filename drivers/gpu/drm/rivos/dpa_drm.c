@@ -138,8 +138,7 @@ static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
 	if (ret)
 		return ret;
 
-	doorbell_mmap_offset = (DRM_MMAP_TYPE_DOORBELL << DRM_MMAP_TYPE_SHIFT) |
-		args->doorbell_offset;
+	doorbell_mmap_offset = args->doorbell_offset;
 	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
 	if (ret) {
 		dev_warn(p->dev->dev, "%s: unable to add aql queue to process, destroying id %u\n",
@@ -409,41 +408,19 @@ static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct drm_file *file_priv = filp->private_data;
 	struct dpa_process *p = file_priv->driver_priv;
 	unsigned long mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
-	u64 type = mmap_offset >> DRM_MMAP_TYPE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	unsigned long pfn;
-	int ret = -EFAULT;
 
-	dev_warn(p->dev->dev, "%s: offset 0x%lx size 0x%lx type %llu start 0x%llx\n",
-			__func__, mmap_offset, size, type, (u64)vma->vm_start);
-	switch (type) {
+	dev_warn(p->dev->dev, "%s: Mapping doorbell pages offset 0x%lx\n",
+		 __func__, mmap_offset);
 
-	case DRM_MMAP_TYPE_DOORBELL:
-		dev_warn(p->dev->dev, "%s: Mapping doorbell pages\n", __func__);
+	if ((size + mmap_offset) > p->doorbell_size)
+		return -EINVAL;
 
-		mutex_lock(&p->lock);
-		if (size > p->doorbell_size) {
-			dev_warn(p->dev->dev, "%s: doorbell mmap too large\n",
-				 __func__);
-			mutex_unlock(&p->lock);
-			return -EINVAL;
-		}
-		pfn = p->doorbell_base;
-		pfn >>= PAGE_SHIFT;
-		ret = io_remap_pfn_range(vma, vma->vm_start, pfn, size,
-			vma->vm_page_prot);
-		mutex_unlock(&p->lock);
-
-		if (ret) {
-			dev_warn(p->dev->dev, "%s: failed to map doorbell page ret %d\n",
-				__func__, ret);
-		}
-		break;
-	default:
-		dev_warn(p->dev->dev, "%s: doing nothing\n", __func__);
-	}
-
-	return ret;
+	pfn = p->doorbell_base + mmap_offset;
+	pfn >>= PAGE_SHIFT;
+	return io_remap_pfn_range(vma, vma->vm_start, pfn, size,
+				  vma->vm_page_prot);
 }
 
 static long dpa_drm_ioctl(struct file *filp,

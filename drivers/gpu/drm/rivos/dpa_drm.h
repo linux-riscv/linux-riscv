@@ -142,8 +142,4 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 
 int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx);
 
-/* offsets to MMAP calls for different things */
-#define DRM_MMAP_TYPE_SHIFT (60)
-#define DRM_MMAP_TYPE_DOORBELL (0x1ULL)
-
 #endif /* _DPA_DRM_H_ */
