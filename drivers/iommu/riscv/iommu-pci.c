@@ -155,7 +155,7 @@ static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 
 static void riscv_iommu_pci_remove(struct pci_dev *pdev)
 {
-	riscv_iommu_remove(&pdev->dev);
+	riscv_iommu_remove(dev_get_drvdata(&pdev->dev));
 	pci_free_irq_vectors(pdev);
 	pci_clear_master(pdev);
 	pci_release_regions(pdev);

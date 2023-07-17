@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2022-2023 Rivos Inc.
  * Copyright © 2023 FORTH-ICS/CARV
@@ -13,16 +13,16 @@
 #ifndef _RISCV_IOMMU_H_
 #define _RISCV_IOMMU_H_
 
-#include <linux/types.h>
-#include <linux/iova.h>
-#include <linux/io.h>
 #include <linux/idr.h>
-#include <linux/mmu_notifier.h>
-#include <linux/list.h>
+#include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/io-pgtable.h>
+#include <linux/iova.h>
+#include <linux/list.h>
+#include <linux/mmu_notifier.h>
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
+#include <linux/types.h>
 
 #include "iommu-bits.h"
 
@@ -32,8 +32,8 @@
 #define IOMMU_PAGE_SIZE_512G	BIT_ULL(39)
 
 struct riscv_iommu_queue {
-	dma_addr_t base_dma;
-	void *base;
+	dma_addr_t base_dma;	/* ring buffer bus address */
+	void *base;		/* ring buffer pointer */
 	size_t len;		/* single item length */
 	u32 cnt;		/* items count */
 	u32 lui;		/* last used index, consumer/producer share */
@@ -55,7 +55,7 @@ struct riscv_iommu_device {
 
 	/* hardware control register space */
 	void __iomem *reg;
-	u64 reg_phys;
+	resource_size_t reg_phys;
 
 	/* IRQs for the various queues */
 	int irq_cmdq;
@@ -82,7 +82,7 @@ struct riscv_iommu_device {
 	/* I/O page fault queue */
 	struct iopf_queue *pq_work;
 
-	/* hardware ring buffers */
+	/* hardware queues */
 	struct riscv_iommu_queue cmdq;
 	struct riscv_iommu_queue fltq;
 	struct riscv_iommu_queue priq;
@@ -103,41 +103,31 @@ struct riscv_iommu_domain {
 	struct list_head endpoints;
 	struct list_head notifiers;
 	struct mutex lock;
-
-	struct mmu_notifier mn;                 /* mmu_notifier handle */
-
-	/* remove: could be a list of iommus */
+	struct mmu_notifier mn;
 	struct riscv_iommu_device *iommu;
 
-	bool g_stage;
-	struct riscv_iommu_msi_pte *msi_root;	/* INT mapping */
-	struct riscv_iommu_domain *nested;	/* G-Stage protection domain if any */
-
-	unsigned id;		/* GSCID or PSCID */
 	unsigned mode;		/* RIO_ATP_MODE_* enum */
-	ioasid_t pscid;		// this is a domain property
+	unsigned pscid;		/* RISC-V IOMMU PSCID / GSCID */
+	ioasid_t pasid;		/* IOMMU_DOMAIN_SVA: Cached PASID */
+	bool g_stage;		/* 2nd stage translation domain */
 
 	pgd_t *pgd_root;	/* page table root pointer */
 };
 
 /* Private dev_iommu_priv object, device-domain relationship. */
 struct riscv_iommu_endpoint {
-	struct device *dev;			/* owned by a device $dev */
+	struct device *dev;			/* platform or PCI endpoint device */
 	unsigned devid;      			/* PCI bus:device:function number */
 	unsigned domid;    			/* PCI domain number, segment */
-	struct rb_node node;    		/* -> iommu-device lookup by devid */
+	struct rb_node node;    		/* device tracking node (lookup by devid) */
+	struct riscv_iommu_dc *dc;		/* device context pointer */
+	struct riscv_iommu_pc *pc;		/* process context root, valid if pasid_enabled is true */
+	struct riscv_iommu_device *iommu;	/* parent iommu device */
+	struct riscv_iommu_msi_pte *msi_root;	/* interrupt re-mapping */
 
 	struct mutex lock;
-
-	struct riscv_iommu_device *iommu;	/* -> parent iommu device */
-	struct riscv_iommu_domain *domain;	/* -> attached domain, only one at a time, nesting via domain->domain */
-	struct riscv_iommu_msi_pte *msi_root;	/* -> interrupt re-mapping */
-
-	struct riscv_iommu_dc *dc;		/* -> device context pointer, can be tracked by iommu->dc(devid) */
-	struct riscv_iommu_pc *pc;		/* -> process context root, can be tracked by iommu->dc(devid)->pc(pasid) */
-
-	struct list_head regions;		// msi list
-	struct list_head domains;		/* -> collection of endpoints attached to the same domain */
+	struct list_head domain;		/* endpoint attached managed domain */
+	struct list_head regions;		/* reserved regions, interrupt remapping window */
 
 	/* end point info bits */
 	unsigned pasid_bits;
@@ -173,7 +163,7 @@ static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu,
 }
 
 int riscv_iommu_init(struct riscv_iommu_device *iommu);
-void riscv_iommu_remove(struct device *dev);
+void riscv_iommu_remove(struct riscv_iommu_device *iommu);
 
 int riscv_iommu_sysfs_add(struct riscv_iommu_device *iommu);
 
