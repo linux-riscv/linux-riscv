@@ -102,8 +102,9 @@ struct riscv_iommu_domain {
 
 	bool is_32bit;		/* SXL/GXL 32-bit modes enabled */
 	unsigned int mode;	/* RIO_ATP_MODE_* enum */
-	unsigned int pscid;	/* RISC-V IOMMU PSCID */
+	unsigned int pscid;	/* RISC-V IOMMU PSCID / GSCID */
 	ioasid_t pasid;		/* IOMMU_DOMAIN_SVA: Cached PASID */
+	bool g_stage;		/* 2nd stage translation domain */
 
 	pgd_t *pgd_root;	/* page table root pointer */
 };
