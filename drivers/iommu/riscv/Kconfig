@@ -8,6 +8,13 @@ config RISCV_IOMMU
 	select IOMMU_DMA
 	select IOMMU_IO_PGTABLE
 	select IOMMU_IOVA
+	select IOMMU_SVA
+	select IOASID
+	select PCI_MSI
+	select PCI_ATS
+	select PCI_PRI
+	select PCI_PASID
+	select MMU_NOTIFIER
 	help
 	  This option enables support for the RISC-V IOMMU hardware.
 
@@ -27,3 +34,4 @@ config RISCV_IOMMU_DEBUGFS
 	  only be enabled for debugging RISC-V IOMMU.
 
 endif # RISCV_IOMMU
+
