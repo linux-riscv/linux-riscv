@@ -20,7 +20,9 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct riscv_iommu_device *iommu = NULL;
 	struct resource *res = NULL;
+	u32 fctl = 0;
 	int ret = 0;
+	int i;
 
 	iommu = devm_kzalloc(dev, sizeof(*iommu), GFP_KERNEL);
 	if (!iommu)
@@ -52,6 +54,30 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
 			(unsigned int)(res->end - res->start));
 		goto fail;
 	}
+
+	iommu->cap = riscv_iommu_readq(iommu, RISCV_IOMMU_REG_CAP);
+
+	/* For now we only support WSIs until we have AIA support */
+	ret = FIELD_GET(RISCV_IOMMU_CAP_IGS, iommu->cap);
+	if (ret == RISCV_IOMMU_CAP_IGS_MSI) {
+		dev_err(dev, "IOMMU only supports MSIs\n");
+		goto fail;
+	}
+
+	iommu->irqs_count = platform_irq_count(pdev);
+	if (iommu->irqs_count <= 0) {
+		dev_err(dev, "no IRQ resources provided\n");
+		ret = -ENODEV;
+		goto fail;
+	}
+
+	for (i = 0; i < iommu->irqs_count; i++)
+		iommu->irqs[i] = platform_get_irq(pdev, i);
+
+	/* Make sure fctl.WSI is set */
+	fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
+	fctl |= RISCV_IOMMU_FCTL_WSI;
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_FCTL, fctl);
 
 	dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 

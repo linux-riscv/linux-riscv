@@ -51,6 +51,9 @@ static DEFINE_IDA(riscv_iommu_pscids);
 /* 1 second */
 #define RISCV_IOMMU_TIMEOUT	riscv_timebase
 
+/* Default queue lengths */
+#define RISCV_IOMMU_DEF_FQ_COUNT	 512
+
 /* RISC-V IOMMU PPN <> PHYS address conversions, PHYS <=> PPN[53:10] */
 #define phys_to_ppn(va)  (((va) >> 2) & (((1ULL << 44) - 1) << 10))
 #define ppn_to_phys(pn)	 (((pn) << 2) & (((1ULL << 44) - 1) << 12))
@@ -63,6 +66,287 @@ static DEFINE_IDA(riscv_iommu_pscids);
 
 static const struct iommu_domain_ops riscv_iommu_domain_ops;
 static const struct iommu_ops riscv_iommu_ops;
+
+/*
+ * Common queue management routines
+ */
+
+/* Note: offsets are the same for all queues */
+#define Q_HEAD(q) ((q)->qbr + (RISCV_IOMMU_REG_CQH - RISCV_IOMMU_REG_CQB))
+#define Q_TAIL(q) ((q)->qbr + (RISCV_IOMMU_REG_CQT - RISCV_IOMMU_REG_CQB))
+
+static unsigned int riscv_iommu_queue_consume(struct riscv_iommu_device *iommu,
+					      struct riscv_iommu_queue *q,
+					      unsigned int *ready)
+{
+	cycles_t end_cycles = RISCV_IOMMU_TIMEOUT + get_cycles();
+	u32 tail = riscv_iommu_readl(iommu, Q_TAIL(q));
+	*ready = q->lui;
+
+	/* retry read if tail value is not reasonable */
+	while (WARN_ON_ONCE(q->cnt <= tail) && get_cycles() < end_cycles)
+		tail = riscv_iommu_readl(iommu, Q_TAIL(q));
+
+	if (q->lui <= tail)
+		return tail - q->lui;
+	return q->cnt - q->lui;
+}
+
+static void riscv_iommu_queue_release(struct riscv_iommu_device *iommu,
+				      struct riscv_iommu_queue *q, unsigned int count)
+{
+	q->lui = (q->lui + count) & (q->cnt - 1);
+	riscv_iommu_writel(iommu, Q_HEAD(q), q->lui);
+}
+
+static u32 riscv_iommu_queue_ctrl(struct riscv_iommu_device *iommu,
+				  struct riscv_iommu_queue *q, u32 val)
+{
+	cycles_t end_cycles = RISCV_IOMMU_TIMEOUT + get_cycles();
+
+	riscv_iommu_writel(iommu, q->qcr, val);
+	do {
+		val = riscv_iommu_readl(iommu, q->qcr);
+		if (!(val & RISCV_IOMMU_QUEUE_BUSY))
+			break;
+		cpu_relax();
+	} while (get_cycles() < end_cycles);
+
+	return val;
+}
+
+static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu,
+				   struct riscv_iommu_queue *q)
+{
+	riscv_iommu_queue_ctrl(iommu, q, 0);
+	if (q->irq)
+		free_irq(q->irq, q);
+
+	/* Note: devres_release_all() will release queue resources */
+}
+
+static irqreturn_t riscv_iommu_fltq_irq_check(int irq, void *data);
+static irqreturn_t riscv_iommu_fltq_process(int irq, void *data);
+
+static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
+				  int queue_id)
+{
+	struct device *dev = iommu->dev;
+	struct riscv_iommu_queue *q = NULL;
+	size_t queue_size;
+	size_t item_size;
+	irq_handler_t irq_check;
+	irq_handler_t irq_process;
+	const char *name;
+	unsigned int order;
+	unsigned int item_count;
+	int irq;
+	u64 qbr_val = 0;
+	u64 qbr_readback = 0;
+	u64 qbr_paddr = 0;
+	u64 ivec;
+
+	/* Read out actual cause to vector mapping */
+	ivec = riscv_iommu_readq(iommu, RISCV_IOMMU_REG_IVEC);
+
+	switch (queue_id) {
+	case RISCV_IOMMU_FAULT_QUEUE:
+		name = "fltq";
+		q = &iommu->fltq;
+		q->qbr = RISCV_IOMMU_REG_FQB;
+		q->qcr = RISCV_IOMMU_REG_FQCSR;
+		item_size = sizeof(struct riscv_iommu_fq_record);
+		item_count = q->cnt ?: RISCV_IOMMU_DEF_FQ_COUNT;
+		irq_check = riscv_iommu_fltq_irq_check;
+		irq_process = riscv_iommu_fltq_process;
+		irq = iommu->irqs[FIELD_GET(RISCV_IOMMU_IVEC_FIV, ivec) %
+				  RISCV_IOMMU_INTR_COUNT];
+		break;
+	default:
+		dev_err(dev, "invalid queue index %i\n", queue_id);
+		return -EINVAL;
+	}
+
+	/* Polling not implemented */
+	if (!irq)
+		return -ENODEV;
+
+	/* Allocate queue in memory and set the base register */
+	order = ilog2(item_count);
+	do {
+		queue_size = item_size << order;
+		q->base = dmam_alloc_coherent(dev, queue_size, &q->base_dma, GFP_KERNEL);
+		if (q->base || queue_size < PAGE_SIZE)
+			break;
+
+		order--;
+	} while (1);
+
+	if (!q->base) {
+		dev_err(dev, "failed to allocate %s queue (cnt: %u)\n",
+			name, item_count);
+		return -ENOMEM;
+	}
+
+	qbr_val = phys_to_ppn(q->base_dma) |
+	    FIELD_PREP(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, order - 1);
+
+	riscv_iommu_writeq(iommu, q->qbr, qbr_val);
+
+	/*
+	 * Queue base registers are WARL, so it's possible that whatever we wrote
+	 * there was illegal/not supported by the hw in which case we need to make
+	 * sure we set a supported PPN and/or queue size.
+	 */
+	qbr_readback = riscv_iommu_readq(iommu, q->qbr);
+	if (qbr_readback == qbr_val) {
+		q->cnt = 1UL << order;
+		goto irq;
+	}
+
+	dmam_free_coherent(dev, queue_size, q->base, q->base_dma);
+
+	/* Get supported queue size */
+	order = FIELD_GET(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, qbr_readback) + 1;
+	item_count = 1UL << order;
+	queue_size = item_size << order;
+
+	/*
+	 * In case we also failed to set PPN, it means the field is hardcoded and the
+	 * queue resides in I/O memory instead, so get its physical address and
+	 * ioremap it.
+	 */
+	qbr_paddr = ppn_to_phys(qbr_readback);
+	if (qbr_paddr != q->base_dma) {
+		dev_dbg(dev,
+			"hardcoded ppn in %s base register, using io memory for the queue\n",
+			name);
+		dev_dbg(dev, "queue length for %s set to %u\n", name, item_count);
+		q->in_iomem = true;
+		q->base = devm_ioremap(dev, qbr_paddr, queue_size);
+		if (!q->base) {
+			dev_err(dev, "failed to map %s queue (cnt: %u)\n", name, item_count);
+			return -ENOMEM;
+		}
+		q->cnt = item_count;
+		q->base_dma = qbr_paddr;
+	} else {
+		/*
+		 * We only failed to set the queue size, re-try to allocate memory with
+		 * the queue size supported by the hw.
+		 */
+		dev_dbg(dev, "hardcoded queue size in %s base register\n", name);
+		dev_dbg(dev, "retrying with queue length: %u\n", item_count);
+		q->base = dmam_alloc_coherent(dev, queue_size, &q->base_dma, GFP_KERNEL);
+		if (!q->base) {
+			dev_err(dev, "failed to allocate %s queue (cnt: %u)\n",
+				name, item_count);
+			return -ENOMEM;
+		}
+		q->cnt = item_count;
+	}
+
+	qbr_val = phys_to_ppn(q->base_dma) |
+		  FIELD_PREP(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, order - 1);
+	riscv_iommu_writeq(iommu, q->qbr, qbr_val);
+
+	/* Final check to make sure hw accepted our write */
+	qbr_readback = riscv_iommu_readq(iommu, q->qbr);
+	if (qbr_readback != qbr_val) {
+		dev_err(dev, "failed to set base register for %s\n", name);
+		riscv_iommu_queue_free(iommu, q);
+		return -ENODEV;
+	}
+
+ irq:
+	if (request_threaded_irq(irq, irq_check, irq_process, IRQF_ONESHOT | IRQF_SHARED,
+				 dev_name(dev), q)) {
+		dev_err(dev, "fail to request irq %d for %s\n", irq, name);
+		riscv_iommu_queue_free(iommu, q);
+		return -ENODEV;
+	}
+
+	q->irq = irq;
+
+	/* Note: All RIO_xQ_EN/IE fields are in the same offsets */
+	if (riscv_iommu_queue_ctrl(iommu, q,
+				   RISCV_IOMMU_QUEUE_ENABLE |
+				   RISCV_IOMMU_QUEUE_INTR_ENABLE) &
+				   RISCV_IOMMU_QUEUE_BUSY) {
+		dev_err(dev, "%s init timeout\n", name);
+		riscv_iommu_queue_free(iommu, q);
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+/*
+ * Fault/event queue, chapter 3.2
+ */
+
+static void riscv_iommu_fault_report(struct riscv_iommu_device *iommu,
+				     struct riscv_iommu_fq_record *event)
+{
+	unsigned int err, devid;
+
+	err = FIELD_GET(RISCV_IOMMU_FQ_HDR_CAUSE, event->hdr);
+	devid = FIELD_GET(RISCV_IOMMU_FQ_HDR_DID, event->hdr);
+
+	dev_warn_ratelimited(iommu->dev,
+			     "Fault %d devid: %d iotval: %llx iotval2: %llx\n", err,
+			     devid, event->iotval, event->iotval2);
+}
+
+/* Fault/event queue primary interrupt handler */
+static irqreturn_t riscv_iommu_fltq_irq_check(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu =
+	    container_of(q, struct riscv_iommu_device, fltq);
+	u32 ipsr = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_IPSR);
+
+	if (ipsr & RISCV_IOMMU_IPSR_FIP)
+		return IRQ_WAKE_THREAD;
+	return IRQ_NONE;
+}
+
+/* Fault queue interrupt hanlder thread function */
+static irqreturn_t riscv_iommu_fltq_process(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu;
+	struct riscv_iommu_fq_record *events;
+	unsigned int cnt, len, idx, ctrl;
+
+	iommu = container_of(q, struct riscv_iommu_device, fltq);
+	events = (struct riscv_iommu_fq_record *)q->base;
+
+	/* Error reporting, clear error reports if any. */
+	ctrl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FQCSR);
+	if (ctrl & (RISCV_IOMMU_FQCSR_FQMF | RISCV_IOMMU_FQCSR_FQOF)) {
+		riscv_iommu_queue_ctrl(iommu, &iommu->fltq, ctrl);
+		dev_warn_ratelimited(iommu->dev,
+				     "Fault queue error: fault: %d full: %d\n",
+				     !!(ctrl & RISCV_IOMMU_FQCSR_FQMF),
+				     !!(ctrl & RISCV_IOMMU_FQCSR_FQOF));
+	}
+
+	/* Clear fault interrupt pending. */
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_IPSR, RISCV_IOMMU_IPSR_FIP);
+
+	/* Report fault events. */
+	do {
+		cnt = riscv_iommu_queue_consume(iommu, q, &idx);
+		if (!cnt)
+			break;
+		for (len = 0; len < cnt; idx++, len++)
+			riscv_iommu_fault_report(iommu, &events[idx]);
+		riscv_iommu_queue_release(iommu, q, cnt);
+	} while (1);
+
+	return IRQ_HANDLED;
+}
 
 /*
  * Register device for IOMMU tracking.
@@ -156,8 +440,8 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 	ep->iommu = iommu;
 	ep->dev = dev;
 
-	dev_info(iommu->dev, "adding device to iommu with devid %i in domain %i\n",
-		 ep->devid, ep->domid);
+	dev_dbg(iommu->dev, "adding device %s with domid:devid %i:%i\n",
+		dev_name(dev), ep->domid, ep->devid);
 
 	dev_iommu_priv_set(dev, ep);
 	riscv_iommu_add_device(iommu, dev);
@@ -176,7 +460,8 @@ static void riscv_iommu_release_device(struct device *dev)
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
 	struct riscv_iommu_device *iommu = ep->iommu;
 
-	dev_info(dev, "device with devid %i released\n", ep->devid);
+	dev_dbg(iommu->dev, "release device %s with domid:devid %i:%i\n",
+		dev_name(dev), ep->domid, ep->devid);
 
 	mutex_lock(&ep->lock);
 	list_del(&ep->domain);
@@ -341,7 +626,6 @@ static void riscv_iommu_flush_iotlb_range(struct iommu_domain *iommu_domain,
 					  unsigned long *start, unsigned long *end,
 					  size_t *pgsize)
 {
-	/* Command interface not implemented */
 }
 
 static void riscv_iommu_flush_iotlb_all(struct iommu_domain *iommu_domain)
@@ -588,12 +872,14 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 	iommu_device_sysfs_remove(&iommu->iommu);
 	iommu_device_unregister(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
+	riscv_iommu_queue_free(iommu, &iommu->fltq);
 }
 
 int riscv_iommu_init(struct riscv_iommu_device *iommu)
 {
 	struct device *dev = iommu->dev;
 	u32 fctl = 0;
+	u64 ivec = 0;
 	int ret;
 
 	iommu->eps = RB_ROOT;
@@ -615,8 +901,22 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 			   RISCV_IOMMU_IPSR_CIP |
 			   RISCV_IOMMU_IPSR_FIP |
 			   RISCV_IOMMU_IPSR_PMIP | RISCV_IOMMU_IPSR_PIP);
-	spin_lock_init(&iommu->cq_lock);
+
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_FCTL, fctl);
+
+	/* Set 1:1 mapping for interrupt vectors if available */
+	if (iommu->irqs_count >= 4) {
+		ivec = FIELD_PREP(RISCV_IOMMU_IVEC_CIV,  0) |
+		       FIELD_PREP(RISCV_IOMMU_IVEC_FIV,  1) |
+		       FIELD_PREP(RISCV_IOMMU_IVEC_PMIV, 2) |
+		       FIELD_PREP(RISCV_IOMMU_IVEC_PIV,  3);
+	}
+	riscv_iommu_writeq(iommu, RISCV_IOMMU_REG_IVEC, ivec);
+
 	mutex_init(&iommu->eps_mutex);
+	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_FAULT_QUEUE);
+	if (ret)
+		goto fail;
 
 	ret = riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_BARE);
 	if (ret) {
@@ -644,5 +944,6 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	return 0;
  fail:
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
+	riscv_iommu_queue_free(iommu, &iommu->fltq);
 	return ret;
 }

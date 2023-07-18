@@ -35,6 +35,7 @@ static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 	struct device *dev = &pdev->dev;
 	struct riscv_iommu_device *iommu;
 	int ret;
+	int i;
 
 	ret = pci_enable_device_mem(pdev);
 	if (ret < 0)
@@ -67,14 +68,47 @@ static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 	iommu->dev = dev;
 	dev_set_drvdata(dev, iommu);
 
+	/* Check device reported capabilities. */
+	iommu->cap = riscv_iommu_readq(iommu, RISCV_IOMMU_REG_CAP);
+
+	/* The PCI driver only uses MSIs, make sure the IOMMU supports this */
+	switch (FIELD_GET(RISCV_IOMMU_CAP_IGS, iommu->cap)) {
+	case RISCV_IOMMU_CAP_IGS_MSI:
+	case RISCV_IOMMU_CAP_IGS_BOTH:
+		break;
+	default:
+		dev_err(dev, "unable to use message-signaled interrupts\n");
+		ret = -ENODEV;
+		goto fail;
+	}
+
 	dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	pci_set_master(pdev);
+
+	/* Allocate and assign IRQ vectors for the various events */
+	ret = pci_alloc_irq_vectors(pdev, 1, RISCV_IOMMU_INTR_COUNT,
+				    PCI_IRQ_MSIX | PCI_IRQ_MSI);
+	if (ret < 0) {
+		dev_err(dev, "unable to allocate irq vectors\n");
+		goto fail;
+	}
+
+	iommu->irqs_count = ret;
+	for (i = 0; i < iommu->irqs_count; i++) {
+		ret = msi_get_virq(dev, i);
+		if (ret < 0) {
+			dev_warn(dev, "no MSI vector %i available\n", i);
+			goto fail;
+		}
+		iommu->irqs[i] = ret;
+	}
 
 	ret = riscv_iommu_init(iommu);
 	if (!ret)
 		return ret;
 
  fail:
+	pci_free_irq_vectors(pdev);
 	pci_clear_master(pdev);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
@@ -85,6 +119,7 @@ static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 static void riscv_iommu_pci_remove(struct pci_dev *pdev)
 {
 	riscv_iommu_remove(dev_get_drvdata(&pdev->dev));
+	pci_free_irq_vectors(pdev);
 	pci_clear_master(pdev);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
