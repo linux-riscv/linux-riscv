@@ -13,16 +13,16 @@
 #ifndef _RISCV_IOMMU_H_
 #define _RISCV_IOMMU_H_
 
-#include <linux/idr.h>
+#include <linux/types.h>
+#include <linux/iova.h>
 #include <linux/io.h>
+#include <linux/idr.h>
+#include <linux/mmu_notifier.h>
+#include <linux/list.h>
 #include <linux/iommu.h>
 #include <linux/io-pgtable.h>
-#include <linux/iova.h>
-#include <linux/list.h>
-#include <linux/mmu_notifier.h>
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
-#include <linux/types.h>
 
 #include "iommu-bits.h"
 

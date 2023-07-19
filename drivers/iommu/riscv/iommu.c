@@ -225,7 +225,7 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu, int queue_id
 	q->cnt = 1ULL << order;
 
 	qbr_val = phys_to_ppn(q->base_dma) |
-	    FIELD_PREP(RISCV_IOMMU_QUEUE_SIZE_FIELD, order - 1);
+	    FIELD_PREP(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, order - 1);
 
 	riscv_iommu_writeq(iommu, q->qbr, qbr_val);
 
@@ -241,7 +241,7 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu, int queue_id
 	dmam_free_coherent(dev, queue_size, q->base, q->base_dma);
 
 	/* Get supported queue size */
-	order = FIELD_GET(RISCV_IOMMU_QUEUE_SIZE_FIELD, qbr_readback) + 1;
+	order = FIELD_GET(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, qbr_readback) + 1;
 	q->cnt = 1ULL << order;
 	queue_size = q->len * q->cnt;
 
@@ -279,7 +279,7 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu, int queue_id
 	}
 
 	qbr_val = phys_to_ppn(q->base_dma) |
-	    FIELD_PREP(RISCV_IOMMU_QUEUE_SIZE_FIELD, order - 1);
+	    FIELD_PREP(RISCV_IOMMU_QUEUE_LOGSZ_FIELD, order - 1);
 	riscv_iommu_writeq(iommu, q->qbr, qbr_val);
 
 	/* Final check to make sure hw accepted our write */
@@ -419,7 +419,9 @@ static void riscv_iommu_cmd_ats_set_pid(struct riscv_iommu_command *cmd, u32 pid
 
 static void riscv_iommu_cmd_ats_set_dseg(struct riscv_iommu_command *cmd, u8 seg)
 {
-	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_ATS_DSEG, seg) | RISCV_IOMMU_CMD_ATS_DSV;
+	// Segments aren't properly supported by the RISC-V IOMMU in QEMU.
+	// We comment the following code until this is resolved.
+	// cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_ATS_DSEG, seg) | RISCV_IOMMU_CMD_ATS_DSV;
 }
 
 static void riscv_iommu_cmd_ats_set_payload(struct riscv_iommu_command *cmd, u64 payload)
@@ -700,12 +702,12 @@ static irqreturn_t riscv_iommu_fltq_process(int irq, void *data)
 
 	/* Error reporting, clear error reports if any. */
 	ctrl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FQCSR);
-	if (ctrl & (RISCV_IOMMU_FQCSR_FQMF | RISCV_IOMMU_FQCSR_FWOF)) {
+	if (ctrl & (RISCV_IOMMU_FQCSR_FQMF | RISCV_IOMMU_FQCSR_FQOF)) {
 		riscv_iommu_queue_ctrl(iommu, &iommu->fltq, ctrl);
 		dev_warn_ratelimited(iommu->dev,
 				     "Fault queue error: fault: %d full: %d\n",
 				     !!(ctrl & RISCV_IOMMU_FQCSR_FQMF),
-				     !!(ctrl & RISCV_IOMMU_FQCSR_FWOF));
+				     !!(ctrl & RISCV_IOMMU_FQCSR_FQOF));
 	}
 
 	/* Clear fault interrupt pending. */
@@ -1526,9 +1528,6 @@ static int riscv_iommu_attach_dev(struct iommu_domain *iommu_domain, struct devi
 	int ret;
 	u64 val;
 
-	if (!dc)
-		return -ENODEV;
-
 	/* PSCID not valid */
 	if ((int)domain->pscid < 0)
 		return -ENOMEM;
@@ -1549,6 +1548,16 @@ static int riscv_iommu_attach_dev(struct iommu_domain *iommu_domain, struct devi
 		mutex_unlock(&domain->lock);
 		return ret;
 	}
+
+	if (ep->iommu->ddt_mode == RISCV_IOMMU_DDTP_MODE_BARE &&
+	    domain->domain.type == IOMMU_DOMAIN_IDENTITY) {
+		dev_info(dev, "domain type %d attached w/ PSCID %u\n",
+		    domain->domain.type, domain->pscid);
+		return 0;
+	}
+
+	if (!dc)
+		return -ENODEV;
 
 	if (domain->g_stage) {
 		/*
@@ -2022,7 +2031,6 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 	riscv_iommu_queue_free(iommu, &iommu->fltq);
 	riscv_iommu_queue_free(iommu, &iommu->priq);
 	iopf_queue_free(iommu->pq_work);
-	kfree(iommu);
 }
 
 int riscv_iommu_init(struct riscv_iommu_device *iommu)
@@ -2033,14 +2041,13 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 
 	iommu->eps = RB_ROOT;
 
-	/* TODO: Version check */
-
 	fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
+
 #ifdef CONFIG_CPU_BIG_ENDIAN
 	if (!(cap & RISCV_IOMMU_CAP_END)) {
 		dev_err(dev, "IOMMU doesn't support Big Endian\n");
 		return -EIO;
-	} else if (!(fctl & RISCV_IOMMU_FCTL_BE) {
+	} else if (!(fctl & RISCV_IOMMU_FCTL_BE)) {
 		fctl |= FIELD_PREP(RISCV_IOMMU_FCTL_BE, 1);
 		riscv_iommu_writel(iommu, RISCV_IOMMU_REG_FCTL, fctl);
 	}
@@ -2052,8 +2059,6 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 		iommu->iommu.max_pasids = 1u << 17;
 	else if (iommu->cap & RISCV_IOMMU_CAP_PD8)
 		iommu->iommu.max_pasids = 1u << 8;
-
-
 	/*
 	 * Assign queue lengths from module parameters if not already
 	 * set on the device tree.
@@ -2064,28 +2069,21 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 		iommu->fltq_len = fltq_length;
 	if (!iommu->priq_len)
 		iommu->priq_len = priq_length;
-
 	/* Clear any pending interrupt flag. */
 	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_IPSR,
-			   	  RISCV_IOMMU_IPSR_CIP |
-			   	  RISCV_IOMMU_IPSR_FIP |
-			   	  RISCV_IOMMU_IPSR_PMIP |
-			   	  RISCV_IOMMU_IPSR_PIP);
-
+			   RISCV_IOMMU_IPSR_CIP |
+			   RISCV_IOMMU_IPSR_FIP |
+			   RISCV_IOMMU_IPSR_PMIP | RISCV_IOMMU_IPSR_PIP);
 	spin_lock_init(&iommu->cq_lock);
 	mutex_init(&iommu->eps_mutex);
-
 	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_COMMAND_QUEUE);
 	if (ret)
 		goto fail;
-
 	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_FAULT_QUEUE);
 	if (ret)
 		goto fail;
-
 	if (!(iommu->cap & RISCV_IOMMU_CAP_ATS))
 		goto no_ats;
-
 	/* PRI functionally depends on ATS’s capabilities. */
 	iommu->pq_work = iopf_queue_alloc(dev_name(dev));
 	if (!iommu->pq_work) {
@@ -2102,8 +2100,10 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	if (iommu_default_passthrough()) {
 		dev_info(dev, "iommu set to passthrough mode\n");
 		ret = riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_BARE);
-	} else
+	} else {
 		ret = riscv_iommu_enable(iommu, ddt_mode);
+	}
+
 	if (ret) {
 		dev_err(dev, "cannot enable iommu device (%d)\n", ret);
 		goto fail;
@@ -2129,10 +2129,7 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 		goto fail;
 	}
 
-	dev_set_drvdata(dev, iommu);
-
 	return 0;
-
  fail:
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
 	riscv_iommu_queue_free(iommu, &iommu->priq);
