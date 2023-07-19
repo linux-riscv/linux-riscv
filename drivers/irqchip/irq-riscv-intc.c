@@ -206,7 +206,7 @@ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
 	if (riscv_hartid_to_cpuid(rintc->hart_id) != smp_processor_id())
 		return 0;
 
-	fn = irq_domain_alloc_named_fwnode("RISCV-INTC");
+	fn = acpi_rintc_get_fwnode(rintc->uid);
 	if (!fn) {
 		pr_err("unable to allocate INTC FW node\n");
 		return -ENOMEM;

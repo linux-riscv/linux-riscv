@@ -719,15 +719,38 @@ static int __init imsic_get_parent_hartid(struct fwnode_handle *fwnode,
 	return riscv_fw_parent_hartid(parent.fwnode, hartid);
 }
 
+static int __init acpi_imsic_get_mmio_resource(struct fwnode_handle *fwnode,
+					  u32 index, struct resource *res)
+{
+	int rc;
+	struct fwnode_reference_args parent;
+	u64 base;
+	u32 size;
+
+	rc = fwnode_property_get_reference_args(fwnode,
+			"interrupts-extended", NULL,
+			0, index, &parent);
+	if (rc)
+		return rc;
+
+	rc = fwnode_property_read_u64_array(parent.fwnode, "imsic_addr",
+					    &base, 1);
+	rc = fwnode_property_read_u32_array(parent.fwnode, "imsic_size",
+					    &size, 1);
+	if (!rc) {
+		res->start = base;
+		res->end = res->start + size - 1;
+	}
+
+	return 0;
+}
+
 static int __init imsic_get_mmio_resource(struct fwnode_handle *fwnode,
 					  u32 index, struct resource *res)
 {
-	/*
-	 * Currently, only OF fwnode is support so extend this function
-	 * for other types of fwnode for ACPI support.
-	 */
 	if (!is_of_node(fwnode))
-		return -EINVAL;
+		return acpi_imsic_get_mmio_resource(fwnode, index, res);
+
 	return of_address_to_resource(to_of_node(fwnode), index, res);
 }
 
@@ -1078,3 +1101,29 @@ static int __init imsic_dt_init(struct device_node *node,
 	return imsic_init(&node->fwnode);
 }
 IRQCHIP_DECLARE(riscv_imsic, "riscv,imsics", imsic_dt_init);
+
+#ifdef CONFIG_ACPI
+static int __init imsic_acpi_init(union acpi_subtable_headers *header,
+				  const unsigned long end)
+{
+	struct fwnode_handle *fwnode;
+	int rc;
+
+	/*
+	 * There should be only one IMSIC node.
+	 */
+	fwnode =  acpi_riscv_get_msi_fwnode(NULL);
+	if (!fwnode) {
+		pr_err("unable to allocate IMSIC FW node\n");
+		return -ENOMEM;
+	}
+
+	rc = imsic_init(fwnode);
+	if (!rc)
+		pci_msi_register_fwnode_provider(&acpi_riscv_get_msi_fwnode);
+
+	return rc;
+}
+IRQCHIP_ACPI_DECLARE(riscv_imsic, ACPI_MADT_TYPE_IMSIC,
+		     NULL, 1, imsic_acpi_init);
+#endif
