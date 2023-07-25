@@ -68,6 +68,7 @@ int acpi_get_riscv_isa(struct acpi_table_header *table,
 static inline int acpi_numa_get_nid(unsigned int cpu) { return NUMA_NO_NODE; }
 int acpi_get_cbo_block_size(struct acpi_table_header *table, unsigned int cpu, u32 *cbom_size,
 			    u32 *cboz_size, u32 *cbop_size);
+struct fwnode_handle *acpi_rintc_create_irqchip_fwnode(struct acpi_madt_rintc *rintc);
 #else
 static inline void acpi_init_rintc_map(void) { }
 static inline struct acpi_madt_rintc *acpi_cpu_get_madt_rintc(int cpu)
