@@ -225,15 +225,38 @@ static int __init imsic_get_parent_hartid(struct fwnode_handle *fwnode,
 	return riscv_get_intc_hartid(parent.fwnode, hartid);
 }
 
+static int __init imsic_acpi_get_mmio_resource(struct fwnode_handle *fwnode,
+					       u32 index, struct resource *res)
+{
+	int rc;
+	struct fwnode_reference_args parent;
+	u64 base;
+	u32 size;
+
+	rc = fwnode_property_get_reference_args(fwnode,
+						"interrupts-extended", NULL,
+						0, index, &parent);
+	if (rc)
+		return rc;
+
+	rc = fwnode_property_read_u64_array(parent.fwnode, "riscv,imsic-addr",
+					    &base, 1);
+	rc = fwnode_property_read_u32_array(parent.fwnode, "riscv,imsic-size",
+					    &size, 1);
+	if (!rc) {
+		res->start = base;
+		res->end = res->start + size - 1;
+	}
+
+	return 0;
+}
+
 static int __init imsic_get_mmio_resource(struct fwnode_handle *fwnode,
 					  u32 index, struct resource *res)
 {
-	/*
-	 * Currently, only OF fwnode is support so extend this function
-	 * for other types of fwnode for ACPI support.
-	 */
 	if (!is_of_node(fwnode))
-		return -EINVAL;
+		return imsic_acpi_get_mmio_resource(fwnode, index, res);
+
 	return of_address_to_resource(to_of_node(fwnode), index, res);
 }
 
