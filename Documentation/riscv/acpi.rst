@@ -29,3 +29,9 @@ properties are created using the data in MADT table.
 
 ``riscv,ext-intc-id`` - The unique ID of the external interrupts connected
 to this hart.
+
+2) RISC-V Advanced Platform Level Interrupt Controller (APLIC)
+-----------
+
+``riscv,gsi-base`` - The global system interrupt number where this APLIC’s
+interrupt inputs start.
