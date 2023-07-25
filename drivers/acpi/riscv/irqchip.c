@@ -9,7 +9,10 @@
 #include <linux/fwnode.h>
 #include <linux/irqdomain.h>
 #include <linux/list.h>
+#include <linux/msi.h>
+#include <linux/platform_device.h>
 #include <linux/property.h>
+#include "../../../drivers/pci/pci.h"
 
 struct riscv_irqchip_list {
 	struct fwnode_handle *fwnode;
@@ -100,4 +103,24 @@ struct fwnode_handle *acpi_imsic_create_fwnode(struct acpi_madt_imsic *imsic)
 struct fwnode_handle *acpi_riscv_get_msi_fwnode(struct device *dev)
 {
 	return imsic_acpi_fwnode;
+}
+
+void __init riscv_acpi_imsic_platform_init(void)
+{
+	struct platform_device *pdev;
+	int ret;
+
+	if (!acpi_riscv_get_msi_fwnode(NULL)) {
+		pci_no_msi();
+		return;
+	}
+
+	pdev = platform_device_alloc("riscv-imsic", 0);
+	if (!pdev)
+		return;
+
+	pdev->dev.fwnode = acpi_riscv_get_msi_fwnode(NULL);
+	ret = platform_device_add(pdev);
+	if (ret)
+		platform_device_put(pdev);
 }
