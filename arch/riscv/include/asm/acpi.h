@@ -69,6 +69,8 @@ static inline int acpi_numa_get_nid(unsigned int cpu) { return NUMA_NO_NODE; }
 int acpi_get_cbo_block_size(struct acpi_table_header *table, unsigned int cpu, u32 *cbom_size,
 			    u32 *cboz_size, u32 *cbop_size);
 struct fwnode_handle *acpi_rintc_create_irqchip_fwnode(struct acpi_madt_rintc *rintc);
+struct fwnode_handle *acpi_imsic_create_fwnode(struct acpi_madt_imsic *imsic);
+struct fwnode_handle *acpi_riscv_get_msi_fwnode(struct device *dev);
 #else
 static inline void acpi_init_rintc_map(void) { }
 static inline struct acpi_madt_rintc *acpi_cpu_get_madt_rintc(int cpu)
@@ -89,6 +91,10 @@ static inline int acpi_get_cbo_block_size(struct acpi_table_header *table,
 	return -EINVAL;
 }
 
+static inline struct fwnode_handle *acpi_riscv_get_msi_fwnode(struct device *dev)
+{
+	return NULL;
+}
 #endif /* CONFIG_ACPI */
 
 #endif /*_ASM_ACPI_H*/
