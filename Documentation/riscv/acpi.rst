@@ -35,3 +35,9 @@ to this hart.
 
 ``riscv,gsi-base`` - The global system interrupt number where this APLIC’s
 interrupt inputs start.
+
+3) RISC-V Platform Level Interrupt Controller (PLIC)
+-----------
+
+``riscv,gsi-base`` - The global system interrupt number where this PLIC’s
+interrupt inputs start.
