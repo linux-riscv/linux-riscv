@@ -1135,6 +1135,9 @@ static int __init acpi_bus_init_irq(void)
 	case ACPI_IRQ_MODEL_APLIC:
 		message = "APLIC";
 		break;
+	case ACPI_IRQ_MODEL_PLIC:
+		message = "PLIC";
+		break;
 	default:
 		pr_info("Unknown interrupt routing model\n");
 		return -ENODEV;
