@@ -12,4 +12,5 @@ void __init acpi_riscv_init(void)
 {
 	riscv_acpi_imsic_platform_init();
 	riscv_acpi_aplic_platform_init();
+	riscv_acpi_plic_platform_init();
 }
