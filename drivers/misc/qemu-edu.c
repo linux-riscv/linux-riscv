@@ -116,9 +116,8 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	writeq(cnt, dev->reg + 0x90);
 	writeq(cmd, dev->reg + 0x98);
 
-	do {
-		cpu_relax();
-	} while (readq(dev->reg + 0x98) & 1);
+	while ((readq(dev->reg + 0x98) & 1) && !signal_pending(current))
+		schedule_timeout_interruptible(msecs_to_jiffies(10));
 	mutex_unlock(&dev->lock);
 
 	if (!ctx->sva) {
@@ -167,9 +166,8 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	writeq(dst, dev->reg + 0x88);
 	writeq(cnt, dev->reg + 0x90);
 	writeq(cmd, dev->reg + 0x98);
-	do {
-		cpu_relax();
-	} while (readq(dev->reg + 0x98) & 1);
+	while ((readq(dev->reg + 0x98) & 1) && !signal_pending(current))
+		schedule_timeout_interruptible(msecs_to_jiffies(10));
 	mutex_unlock(&dev->lock);
 
 	if (!ctx->sva) {
