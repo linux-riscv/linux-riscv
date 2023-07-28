@@ -10,30 +10,40 @@
 #include <linux/types.h>
 
 /* Define Rivos vendor-specific DOE protocols/features. */
-#define RIVOS_DOE_ISBDM 0x01
+/* FIDL interface */
+#define RIVOS_DOE_ROT_FIDL 0x01
 
-/* Define sub-object types within the ISBDM feature. */
-#define RIVOS_DOE_ISBDM_STATUS 0x00
+/* Define FIDL ordinals */
+/* No-op ping */
+#define RIVOS_FIDL_ORD_PING 0x3ec777eba052f8c5
+/* ISBDM status message */
+#define RIVOS_FIDL_ORD_ISBDM_STATUS 0x878d212793a2ede
 
-struct rivos_doe_isbdm_header {
-        /* See RIVOS_DOE_ISBDM_* defintions */
-        u8 type;
-        u8 reserved[3];
+/* The current value for the flags and magic value. */
+#define RIVOS_FIDL_FLAGS_MAGIC 0x02000001
+
+/* FIDL wire format header. */
+struct rivos_fidl_header {
+        /* Transaction ID. */
+        __le32 txn_id;
+        /* Flags and magic value, set to RIVOS_FIDL_FLAGS_MAGIC. */
+        __le32 flags_magic;
+        /* The ordinal: a FIDL-defined 64-bit hash of the message format. */
+        __le64 ordinal;
 };
 
 /* Define the connection status. Requester/responder imply "connected". */
 #define RIVOS_DOE_ISBDM_STATUS_DISCONNECTED 0x0
-#define RIVOS_DOE_ISBDM_STATUS_REQUESTER 0x01
-#define RIVOS_DOE_ISBDM_STATUS_RESPONDER 0x02
+#define RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_UPSTREAM 0x01
+#define RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_DOWNSTREAM 0x02
 
 struct rivos_doe_isbdm_status {
-        /* Common header for the ISBDM protocol. */
-        struct rivos_doe_isbdm_header hdr;
+        /* Common FIDL header. */
+        struct rivos_fidl_header hdr;
         /* The requester ID of the ISBDM instance being described. */
-        u32 rid;
+        __le32 rid;
         /* The status of the device connection. */
-        u8 state;
-        u8 reserved[3];
+        __le32 state;
 };
 
 #endif /* __RIVOS_DOE_H */
