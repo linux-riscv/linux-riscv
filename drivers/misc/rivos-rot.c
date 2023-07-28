@@ -21,7 +21,7 @@
 struct rivos_rot_device {
 	struct device *dev;
 	struct mutex mbox_mutex; /* Protects device mailbox and firmware */
-	struct pci_doe_mb *isbdm_mb;
+	struct pci_doe_mb *fidl_mb;
 };
 
 /* Store the singleton device. */
@@ -39,11 +39,11 @@ static struct rivos_rot_device *rivos_rot_device_create(struct pci_dev *pdev)
 
 	mutex_init(&rot->mbox_mutex);
 	rot->dev = dev;
-	rot->isbdm_mb = pci_find_doe_mailbox(pdev,
-					     PCI_VENDOR_ID_RIVOS,
-					     RIVOS_DOE_ISBDM);
+	rot->fidl_mb = pci_find_doe_mailbox(pdev,
+					    PCI_VENDOR_ID_RIVOS,
+					    RIVOS_DOE_ROT_FIDL);
 
-	if (!rot->isbdm_mb) {
+	if (!rot->fidl_mb) {
 		dev_warn(&pdev->dev, "Failed to find ISBDM mailbox\n");
 	}
 
@@ -85,18 +85,27 @@ void put_rivos_rot(struct rivos_rot_device *rot)
 
 EXPORT_SYMBOL(put_rivos_rot);
 
-int rivos_isbdm_doe(struct rivos_rot_device *rot, const void *request,
-		    size_t request_sz, void *response, size_t response_sz)
+void rivos_rot_init_fidl_msg(struct rivos_fidl_header *hdr, u64 ordinal)
+{
+	hdr->txn_id = 0;
+	hdr->flags_magic = cpu_to_le32(RIVOS_FIDL_FLAGS_MAGIC);
+	hdr->ordinal = cpu_to_le64(ordinal);
+}
+
+EXPORT_SYMBOL(rivos_rot_init_fidl_msg);
+
+int rivos_fidl_doe(struct rivos_rot_device *rot, const void *request,
+		   size_t request_sz, void *response, size_t response_sz)
 {
 	int rc;
 
 	mutex_lock(&rot->mbox_mutex);
-	if (!rot->isbdm_mb) {
+	if (!rot->fidl_mb) {
 		rc = -ENODEV;
 		goto out;
 	}
 
-	rc = pci_doe(rot->isbdm_mb, PCI_VENDOR_ID_RIVOS, RIVOS_DOE_ISBDM,
+	rc = pci_doe(rot->fidl_mb, PCI_VENDOR_ID_RIVOS, RIVOS_DOE_ROT_FIDL,
 		     request, request_sz, response, response_sz);
 
 out:
@@ -104,7 +113,7 @@ out:
 	return rc;
 }
 
-EXPORT_SYMBOL(rivos_isbdm_doe);
+EXPORT_SYMBOL(rivos_fidl_doe);
 
 static int rivos_rot_pci_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *ent)
