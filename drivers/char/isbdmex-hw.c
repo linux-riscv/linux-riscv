@@ -1487,28 +1487,31 @@ static void isbdm_check_link(struct isbdm *ii)
 static void isbdm_update_rot_link_state(struct isbdm *ii) {
 	struct rivos_doe_isbdm_status msg;
 	int rc;
+	u32 state;
 
 	if (!ii->rot)
 		return;
 
 	memset(&msg, 0, sizeof(msg));
-	msg.hdr.type = RIVOS_DOE_ISBDM_STATUS;
-	msg.rid = pci_dev_id(ii->pdev);
+	rivos_rot_init_fidl_msg(&msg.hdr, RIVOS_FIDL_ORD_ISBDM_STATUS);
+	msg.rid = cpu_to_le32(pci_dev_id(ii->pdev));
 	switch (ii->link_status) {
 	case ISBDM_LINK_UPSTREAM:
-		msg.state = RIVOS_DOE_ISBDM_STATUS_REQUESTER;
+		state = RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_UPSTREAM;
 		break;
 
 	case ISBDM_LINK_DOWNSTREAM:
-		msg.state = RIVOS_DOE_ISBDM_STATUS_RESPONDER;
+		state = RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_DOWNSTREAM;
 		break;
 
 	default:
 	case ISBDM_LINK_DOWN:
-		msg.state = RIVOS_DOE_ISBDM_STATUS_DISCONNECTED;
+		state = RIVOS_DOE_ISBDM_STATUS_DISCONNECTED;
+		break;
 	}
 
-	rc = rivos_isbdm_doe(ii->rot, &msg, sizeof(msg), NULL, 0);
+	msg.state = cpu_to_le32(state);
+	rc = rivos_fidl_doe(ii->rot, &msg, sizeof(msg), NULL, 0);
 	if (rc)
 		dev_warn(&ii->pdev->dev, "Failed to update RoT: %d\n", rc);
 }
