@@ -1200,8 +1200,10 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		init_wq(drv_priv->wq+i);
 
 	/* Simple setup for key ownership, all for all for now*/
-	for (int fn = 0; fn < DCE_NR_FN; fn++)
-		dce_reg_write(drv_priv, DCE_GCS_KEYOWN(fn), ~(u64)0);
+	if (isPF) {
+		for (int fn = 0; fn < DCE_NR_FN; fn++)
+			dce_reg_write(drv_priv, DCE_GCS_KEYOWN(fn), ~(u64)0);
+	}
 
 	/* setup WQ 0 for SHARED_KERNEL usage */
 	err = setup_default_kernel_queue(drv_priv);
