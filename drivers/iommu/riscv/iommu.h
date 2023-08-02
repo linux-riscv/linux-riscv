@@ -51,6 +51,11 @@ struct riscv_iommu_device {
 	/* Connected end-points */
 	struct rb_root eps;
 	struct mutex eps_mutex;	/* protects eps access */
+
+#ifdef CONFIG_RISCV_IOMMU_DEBUGFS
+	/* DebugFS Info */
+	struct dentry *debugfs;
+#endif
 };
 
 struct riscv_iommu_domain {
@@ -120,5 +125,9 @@ static inline void riscv_iommu_writeq(struct riscv_iommu_device *iommu,
 
 int riscv_iommu_init(struct riscv_iommu_device *iommu);
 void riscv_iommu_remove(struct riscv_iommu_device *iommu);
+
+#ifdef CONFIG_RISCV_IOMMU_DEBUGFS
+void riscv_iommu_debugfs_setup(struct riscv_iommu_device *iommu);
+#endif
 
 #endif

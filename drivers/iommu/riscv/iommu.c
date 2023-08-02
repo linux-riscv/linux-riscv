@@ -16,6 +16,7 @@
 #include <linux/compiler.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/dma-map-ops.h>
 #include <linux/init.h>
 #include <linux/iommu.h>
@@ -581,6 +582,9 @@ static const struct iommu_ops riscv_iommu_ops = {
 
 void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 {
+#ifdef CONFIG_RISCV_IOMMU_DEBUGFS
+	debugfs_remove(iommu->debugfs);
+#endif
 	iommu_device_sysfs_remove(&iommu->iommu);
 	iommu_device_unregister(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
@@ -634,6 +638,9 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 		goto fail;
 	}
 
+#ifdef CONFIG_RISCV_IOMMU_DEBUGFS
+	riscv_iommu_debugfs_setup(iommu);
+#endif
 	return 0;
  fail:
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
