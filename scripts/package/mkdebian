@@ -251,17 +251,17 @@ EOF
 fi
 fi
 
-if is_enabled CONFIG_DEBUG_INFO; then
-cat <<EOF >> debian/control
-
-Package: linux-image-$version-dbg
-Section: debug
-Architecture: $debarch
-Description: Linux kernel debugging symbols for $version
- This package will come in handy if you need to debug the kernel. It provides
- all the necessary debug symbols for the kernel and its modules.
-EOF
-fi
+#if is_enabled CONFIG_DEBUG_INFO; then
+#cat <<EOF >> debian/control
+#
+#Package: linux-image-$version-dbg
+#Section: debug
+#Architecture: $debarch
+#Description: Linux kernel debugging symbols for $version
+# This package will come in handy if you need to debug the kernel. It provides
+# all the necessary debug symbols for the kernel and its modules.
+#EOF
+#fi
 
 cat <<EOF > debian/rules
 #!$(command -v $MAKE) -f
