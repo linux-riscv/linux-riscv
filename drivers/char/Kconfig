@@ -431,4 +431,11 @@ config RIVOS_ISBDM_EX
 	help
 	  This driver exposes the ISBDM to userspace test programs.
 
+config RIVOS_ISBDM_HYBRID_SIM
+	bool "Hacks for ISBDM in hybrid sim"
+	depends on RIVOS_ISBDM_EX
+	default n
+	help
+	  Turn on hacks for using and testing ISBDM in a hybrid sim environment.
+
 endmenu
