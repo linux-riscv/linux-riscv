@@ -1226,9 +1226,14 @@ static void isbdm_connect(struct isbdm *ii)
 	isbdm_enable(ii);
 	/* Refill RX since it was drained on disconnect. */
 	isbdm_rx_threshold(ii);
+/* Hybrid sim is connected to itself, so the handshake would get confused. */
+#ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
+	isbdm_complete_link_status_change(ii);
+#else
 	/* Start the handshake procedure. */
 	ii->handshake_retry_count = ISBDM_HANDSHAKE_RETRIES;
 	isbdm_handshake_work(&ii->handshake_work.work);
+#endif
 }
 
 /* Cancel and flush all pending TX transfers. */
@@ -1442,6 +1447,10 @@ static enum isbdm_link_status isbdm_query_link(struct isbdm *ii)
 		return ISBDM_LINK_DOWN;
 	}
 
+/* Hybrid sim doesn't report connection status. */
+#ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
+	return ISBDM_LINK_DOWNSTREAM;
+#else
 	crosslink = ctrlsts2 & PCIE_CTRL_STS2_CROSSLINK_MASK;
 	if (crosslink == PCIE_CTRL_STS2_CROSSLINK_DOWNSTREAM) {
 		return ISBDM_LINK_DOWNSTREAM;
@@ -1456,6 +1465,7 @@ static enum isbdm_link_status isbdm_query_link(struct isbdm *ii)
 	}
 
 	return ISBDM_LINK_DOWN;
+#endif
 }
 
 /* Query the status of the physical link and do setup/teardown. */
