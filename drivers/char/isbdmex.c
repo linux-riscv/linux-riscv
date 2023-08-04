@@ -215,6 +215,9 @@ static int isbdmex_open(struct inode *inode, struct file *file)
 	 */
 	file->private_data = ctx;
 	ctx->isbdm = ii;
+
+/* No PASIDs in hybrid sim */
+#ifndef CONFIG_RIVOS_ISBDM_HYBRID_SIM
 	ctx->sva = iommu_sva_bind_device(&ii->pdev->dev, current->mm);
 	if (IS_ERR(ctx->sva)) {
 		rc = PTR_ERR(ctx->sva);
@@ -222,6 +225,7 @@ static int isbdmex_open(struct inode *inode, struct file *file)
 		kfree(ctx);
 		return rc;
 	}
+#endif
 
 	return 0;
 }
@@ -234,7 +238,11 @@ static int isbdmex_release(struct inode *inode, struct file *file)
 
 	/* TODO: Refcounting on the device! See serio_raw_release() for ex. */
 	isbdm_free_all_rmbs(ctx->isbdm, file);
+
+/* No PASIDs in hybrid sim. */
+#ifndef CONFIG_RIVOS_ISBDM_HYBRID_SIM
 	iommu_sva_unbind_device(ctx->sva);
+#endif
 	kref_put(&ctx->ref, isbdmex_user_ctx_release);
 	file->private_data = NULL;
 	return 0;
@@ -425,8 +433,13 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 */
 	rot = get_rivos_rot();
 	if (!rot) {
+/* Switch to the disabled path once RoT changes land. */
+#if 0
 		dev_warn(&pdev->dev, "No RoT yet, deferring\n");
 		return -EPROBE_DEFER;
+#else
+		dev_warn(&pdev->dev, "No RoT yet, going anyway\n");
+#endif
 	}
 
 	/* Allocate an instance (a struct isbdm), find resources, enable */
@@ -474,10 +487,13 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	pci_set_master(pdev);
+/* No PASIDs in hybrid sim. */
+#ifndef CONFIG_RIVOS_ISBDM_HYBRID_SIM
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		dev_err_probe(dev, ret, "SVA enablement failed\n");
 		goto deinit;
 	}
+#endif
 
 	/*
 	 * The device doesn't have a unique ID, so create a random one to try
@@ -556,7 +572,9 @@ release_pool:
 
 deinit:
 	isbdm_deinit_hw(ii);
-	put_rivos_rot(ii->rot);
+	if (ii->rot)
+		put_rivos_rot(ii->rot);
+
 	return ret;
 }
 
