@@ -649,6 +649,8 @@ struct isbdm {
 
 	/* A pointer to the Root of Trust device. */
 	struct rivos_rot_device *rot;
+	/* A pointer to the RASD control BAR page. */
+	void *rasd_control;
 };
 
 /* Drivers support routines */
