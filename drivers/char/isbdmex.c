@@ -22,6 +22,7 @@
 #include <linux/uaccess.h>
 
 #include "isbdmex.h"
+#include "isbdm_rasd_horrors.h"
 
 /******************************************************************************/
 /* Multiple device/instance management */
@@ -476,6 +477,10 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ii->base = pcim_iomap_table(pdev)[BAR_0];
+	ret = isbdm_map_rasd_regions(ii);
+	if (ret)
+		return ret;
+
 	ii->dvsec_cap = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_RIVOS,
 						  ISBDM_DVSEC_ID);
 
@@ -600,6 +605,7 @@ static void isbdmex_remove(struct pci_dev *pdev)
 	isbdmex_del_instance(ii);
 	dma_pool_destroy(ii->inline_pool);
 	isbdm_deinit_hw(ii);
+	isbdm_free_rasd_control(ii);
 	return;
 }
 

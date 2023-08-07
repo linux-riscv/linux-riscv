@@ -1,0 +1,21 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2023 by Rivos Inc.
+ * Licensed under the GNU General Public License, version 2.0 (GPLv2)
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+#ifndef __ISBDM_RASD_HORRORS_H
+#define __ISBDM_RASD_HORRORS_H
+
+/* RASD BAR offsets and sizes. */
+#define RASD_CONTROL_BAR_IOVA 0x12000000000ull
+#define RASD_CONTROL_BAR_SIZE 0x40000000
+#define RASD_DDR_BAR_IOVA 0x200000000000ull
+#define RASD_DDR_BAR_SIZE 0x10000000000ull
+#define RASD_HBM_BAR_IOVA 0x10000000000ull
+#define RASD_HBM_BAR_SIZE 0x2000000000ull
+
+int isbdm_map_rasd_regions(struct isbdm *ii);
+void isbdm_free_rasd_control(struct isbdm *ii);
+
+#endif /* __ISBDM_RASD_HORRORS_H */
