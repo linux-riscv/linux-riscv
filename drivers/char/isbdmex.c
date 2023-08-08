@@ -121,6 +121,13 @@ static irqreturn_t isbdmex_irq_thread(int irq, void *data)
 	/* The summary bit should indicate a pending interrupt. */
 	WARN_ON_ONCE(!(pending & ISBDM_IPSR_IIP));
 
+	/*
+	 * Disable the RX threshold interrupt to avoid it immediately refiring
+	 * until further in this function.
+	 */
+	if (pending & ISBDM_RXRTHR_IRQ)
+		isbdm_disable_interrupt(ii, ISBDM_RXRTHR_IRQ);
+
 	/* Write 1 to clear the handled interrupts. */
 	ISBDM_WRITEQ(ii, ISBDM_IPSR, handled & pending);
 

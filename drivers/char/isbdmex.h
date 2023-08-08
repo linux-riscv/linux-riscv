@@ -655,6 +655,7 @@ void put_cmd(struct isbdm *ii, struct isbdm_ring *ring,
 	     struct isbdm_command *cmd);
 
 void isbdm_tx_enqueue(struct isbdm *ii);
+void isbdm_disable_interrupt(struct isbdm *ii, u64 mask);
 void isbdm_cmd_enqueue(struct isbdm *ii);
 void isbdm_reap_tx(struct isbdm *ii);
 void isbdm_reap_cmds(struct isbdm *ii);
