@@ -7,6 +7,7 @@
 #define pr_fmt(fmt) "riscv-imsic: " fmt
 #include <linux/bitmap.h>
 #include <linux/cpu.h>
+#include <linux/iommu.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqchip.h>
@@ -71,6 +72,7 @@ static void imsic_irq_compose_vector_msg(struct imsic_vector *vec,
 static void imsic_irq_compose_msg(struct irq_data *d, struct msi_msg *msg)
 {
 	imsic_irq_compose_vector_msg(irq_data_get_irq_chip_data(d), msg);
+	iommu_dma_compose_msi_msg(irq_data_get_msi_desc(d), msg);
 }
 
 #ifdef CONFIG_SMP
@@ -79,6 +81,7 @@ static void imsic_msi_update_msg(struct irq_data *d, struct imsic_vector *vec)
 	struct msi_msg msg[2] = { [1] = { }, };
 
 	imsic_irq_compose_vector_msg(vec, msg);
+	iommu_dma_compose_msi_msg(irq_data_get_msi_desc(d), msg);
 	irq_data_get_irq_chip(d)->irq_write_msi_msg(d, msg);
 }
 
@@ -92,6 +95,9 @@ static int imsic_irq_set_affinity(struct irq_data *d,
 	old_vec = irq_data_get_irq_chip_data(pd);
 	if (WARN_ON(old_vec == NULL))
 		return -ENOENT;
+
+	/* afinity update not available yet, just pretend we did it.*/
+	return IRQ_SET_MASK_OK_DONE;
 
 	/* Get a new vector on the desired set of CPUs */
 	new_vec = imsic_vector_alloc(old_vec->hwirq, mask_val);
@@ -133,8 +139,10 @@ static int imsic_irq_domain_alloc(struct irq_domain *domain,
 				  unsigned int virq, unsigned int nr_irqs,
 				  void *args)
 {
+	msi_alloc_info_t *info = args;
 	struct imsic_vector *vec;
-	int hwirq;
+	int hwirq, err;
+	phys_addr_t msi_addr;
 
 	/* Legacy-MSI or multi-MSI not supported yet. */
 	if (nr_irqs > 1)
@@ -149,6 +157,14 @@ static int imsic_irq_domain_alloc(struct irq_domain *domain,
 		imsic_hwirq_free(hwirq);
 		return -ENOSPC;
 	}
+
+	err = imsic_cpu_page_phys(vec->cpu, 0, &msi_addr);
+	if (WARN_ON(err))
+		return err;
+
+	err = iommu_dma_prepare_msi(info->desc, msi_addr);
+	if (WARN_ON(err))
+		return err;
 
 	irq_domain_set_info(domain, virq, hwirq,
 			    &imsic_irq_base_chip, vec,
