@@ -198,6 +198,30 @@ void isbdm_tx_enqueue(struct isbdm *ii)
 	return;
 }
 
+static void enable_interrupt(struct isbdm *ii, u64 mask)
+{
+	u64 new_mask = ii->irq_mask & ~mask;
+
+	if (ii->irq_mask != new_mask) {
+		ii->irq_mask &= ~mask;
+		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	}
+
+	return;
+}
+
+void isbdm_disable_interrupt(struct isbdm *ii, u64 mask)
+{
+	u64 new_mask = ii->irq_mask | mask;
+
+	if (ii->irq_mask != new_mask) {
+		ii->irq_mask |= mask;
+		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
+	}
+
+	return;
+}
+
 /* Start as many commands as fit in the hardware table. */
 void isbdm_cmd_enqueue(struct isbdm *ii)
 {
@@ -266,6 +290,11 @@ static void isbdm_rx_refill(struct isbdm *ii)
 	dev_dbg(&ii->pdev->dev, "%s: Added %u descriptors\n", __func__, count);
 	/* Let hardware know about all the yummy buffers. */
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_TAIL, ring->prod_idx);
+	/*
+	 * Re-enable the RX threshold interrupt, which was disabled during IRQ
+	 * handling.
+	 */
+	enable_interrupt(ii, ISBDM_RXRTHR_IRQ);
 	return;
 }
 
@@ -539,30 +568,6 @@ static void disable_cmd_ring(struct isbdm *ii)
 {
 	disable_ring(ii, ISBDM_CMD_RING_CTRL);
 	disable_ring(ii, ISBDM_RMBA_CTRL);
-}
-
-static void enable_interrupt(struct isbdm *ii, u64 mask)
-{
-	u64 new_mask = ii->irq_mask & ~mask;
-
-	if (ii->irq_mask != new_mask) {
-		ii->irq_mask &= ~mask;
-		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
-	}
-
-	return;
-}
-
-static void disable_interrupt(struct isbdm *ii, u64 mask)
-{
-	u64 new_mask = ii->irq_mask | mask;
-
-	if (ii->irq_mask != new_mask) {
-		ii->irq_mask |= mask;
-		ISBDM_WRITEQ(ii, ISBDM_IPMR, ii->irq_mask);
-	}
-
-	return;
 }
 
 /* Attempt to pull one complete packet off the wait list, if available. */
@@ -842,9 +847,9 @@ void isbdm_deinit_hw(struct isbdm *ii)
 
 static void isbdm_enable(struct isbdm *ii)
 {
+	/* Don't enable RXOVF or RXRTHR as the RX ring is empty. */
 	u64 mask = ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
-		   ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | ISBDM_RXMF_IRQ |
-		   ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
+		   ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
 
 	/* Clear out any old interrupts (except LNKSTS, we want that). */
 	ISBDM_WRITEQ(ii, ISBDM_IPSR, mask);
@@ -858,7 +863,7 @@ static void isbdm_enable(struct isbdm *ii)
 void isbdm_disable(struct isbdm *ii)
 {
 	/* Disable all interrupts except LNKSTS. */
-	disable_interrupt(ii, (ISBDM_ALL_IRQ_MASK & ~ISBDM_LNKSTS_IRQ));
+	isbdm_disable_interrupt(ii, (ISBDM_ALL_IRQ_MASK & ~ISBDM_LNKSTS_IRQ));
 	disable_rx_ring(ii);
 	disable_cmd_ring(ii);
 	disable_tx_ring(ii);
@@ -1225,6 +1230,15 @@ static void isbdm_connect(struct isbdm *ii)
 {
 	isbdm_enable(ii);
 	/* Refill RX since it was drained on disconnect. */
+	isbdm_rx_threshold(ii);
+	/* Enable RX interrupts now that RX is full of descriptors. */
+	ISBDM_WRITEQ(ii, ISBDM_IPSR, ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ);
+	enable_interrupt(ii, ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ);
+
+	/*
+	 * Refill RX again in case the remote side drained all our descriptors
+	 * and we just squashed the notification about it.
+	 */
 	isbdm_rx_threshold(ii);
 /* Hybrid sim is connected to itself, so the handshake would get confused. */
 #ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
