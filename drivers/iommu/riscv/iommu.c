@@ -131,6 +131,8 @@ static irqreturn_t riscv_iommu_cmdq_irq_check(int irq, void *data);
 static irqreturn_t riscv_iommu_cmdq_process(int irq, void *data);
 static irqreturn_t riscv_iommu_fltq_irq_check(int irq, void *data);
 static irqreturn_t riscv_iommu_fltq_process(int irq, void *data);
+static irqreturn_t riscv_iommu_priq_irq_check(int irq, void *data);
+static irqreturn_t riscv_iommu_priq_process(int irq, void *data);
 
 static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 				  int queue_id)
@@ -176,6 +178,18 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 		irq_check = riscv_iommu_cmdq_irq_check;
 		irq_process = riscv_iommu_cmdq_process;
 		irq = iommu->irqs[FIELD_GET(RISCV_IOMMU_IVEC_CIV, ivec) %
+				  RISCV_IOMMU_INTR_COUNT];
+		break;
+	case RISCV_IOMMU_PAGE_REQUEST_QUEUE:
+		name = "priq";
+		q = &iommu->priq;
+		q->qbr = RISCV_IOMMU_REG_PQB;
+		q->qcr = RISCV_IOMMU_REG_PQCSR;
+		item_size = sizeof(struct riscv_iommu_pq_record);
+		item_count = q->cnt ?: RISCV_IOMMU_DEF_PQ_COUNT;
+		irq_check = riscv_iommu_priq_irq_check;
+		irq_process = riscv_iommu_priq_process;
+		irq = iommu->irqs[FIELD_GET(RISCV_IOMMU_IVEC_PIV, ivec) %
 				  RISCV_IOMMU_INTR_COUNT];
 		break;
 	default:
@@ -573,6 +587,10 @@ static irqreturn_t riscv_iommu_fltq_process(int irq, void *data)
 }
 
 /*
+ * Page request queue, chapter 3.3
+ */
+
+/*
  * Register device for IOMMU tracking.
  */
 static void riscv_iommu_add_device(struct riscv_iommu_device *iommu, struct device *dev)
@@ -602,6 +620,55 @@ static void riscv_iommu_add_device(struct riscv_iommu_device *iommu, struct devi
 	rb_insert_color(&ep->node, &iommu->eps);
 
 	mutex_unlock(&iommu->eps_mutex);
+}
+
+/* Page request interface queue primary interrupt handler */
+static irqreturn_t riscv_iommu_priq_irq_check(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu =
+	    container_of(q, struct riscv_iommu_device, priq);
+	u32 ipsr = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_IPSR);
+
+	if (ipsr & RISCV_IOMMU_IPSR_PIP)
+		return IRQ_WAKE_THREAD;
+	return IRQ_NONE;
+}
+
+/* Page request interface queue interrupt hanlder thread function */
+static irqreturn_t riscv_iommu_priq_process(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu;
+	struct riscv_iommu_pq_record *requests;
+	unsigned int cnt, idx, ctrl;
+
+	iommu = container_of(q, struct riscv_iommu_device, priq);
+	requests = (struct riscv_iommu_pq_record *)q->base;
+
+	/* Error reporting, clear error reports if any. */
+	ctrl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_PQCSR);
+	if (ctrl & (RISCV_IOMMU_PQCSR_PQMF | RISCV_IOMMU_PQCSR_PQOF)) {
+		riscv_iommu_queue_ctrl(iommu, &iommu->priq, ctrl);
+		dev_warn_ratelimited(iommu->dev,
+				     "Page request queue error: fault: %d full: %d\n",
+				     !!(ctrl & RISCV_IOMMU_PQCSR_PQMF),
+				     !!(ctrl & RISCV_IOMMU_PQCSR_PQOF));
+	}
+
+	/* Clear page request interrupt pending. */
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_IPSR, RISCV_IOMMU_IPSR_PIP);
+
+	/* Process page requests. */
+	do {
+		cnt = riscv_iommu_queue_consume(iommu, q, &idx);
+		if (!cnt)
+			break;
+		dev_warn(iommu->dev, "unexpected %u page requests\n", cnt);
+		riscv_iommu_queue_release(iommu, q, cnt);
+	} while (1);
+
+	return IRQ_HANDLED;
 }
 
 /*
@@ -1282,6 +1349,7 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
 	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	riscv_iommu_queue_free(iommu, &iommu->fltq);
+	riscv_iommu_queue_free(iommu, &iommu->priq);
 }
 
 int riscv_iommu_init(struct riscv_iommu_device *iommu)
@@ -1330,7 +1398,13 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_FAULT_QUEUE);
 	if (ret)
 		goto fail;
+	if (!(iommu->cap & RISCV_IOMMU_CAP_ATS))
+		goto no_ats;
+	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_PAGE_REQUEST_QUEUE);
+	if (ret)
+		goto fail;
 
+ no_ats:
 	ret = riscv_iommu_enable(iommu, ddt_mode);
 	if (ret) {
 		dev_err(dev, "cannot enable iommu device (%d)\n", ret);
@@ -1357,6 +1431,7 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	return 0;
  fail:
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
+	riscv_iommu_queue_free(iommu, &iommu->priq);
 	riscv_iommu_queue_free(iommu, &iommu->fltq);
 	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	return ret;

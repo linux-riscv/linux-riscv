@@ -26,6 +26,7 @@
 enum riscv_iommu_queue_type {
 	RISCV_IOMMU_FAULT_QUEUE,
 	RISCV_IOMMU_COMMAND_QUEUE,
+	RISCV_IOMMU_PAGE_REQUEST_QUEUE,
 };
 
 #define IOMMU_PAGE_SIZE_4K     BIT_ULL(12)
@@ -60,6 +61,7 @@ struct riscv_iommu_device {
 	/* hardware queues */
 	struct riscv_iommu_queue fltq;
 	struct riscv_iommu_queue cmdq;
+	struct riscv_iommu_queue priq;
 
 	/* supported and enabled hardware capabilities */
 	u64 cap;
