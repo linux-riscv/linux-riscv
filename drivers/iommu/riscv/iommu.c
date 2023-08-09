@@ -52,7 +52,9 @@ static DEFINE_IDA(riscv_iommu_pscids);
 #define RISCV_IOMMU_TIMEOUT	riscv_timebase
 
 /* Default queue lengths */
+#define RISCV_IOMMU_DEF_CQ_COUNT	1024
 #define RISCV_IOMMU_DEF_FQ_COUNT	 512
+#define RISCV_IOMMU_DEF_PQ_COUNT	1024
 
 /* RISC-V IOMMU PPN <> PHYS address conversions, PHYS <=> PPN[53:10] */
 #define phys_to_ppn(va)  (((va) >> 2) & (((1ULL << 44) - 1) << 10))
@@ -125,6 +127,8 @@ static void riscv_iommu_queue_free(struct riscv_iommu_device *iommu,
 	/* Note: devres_release_all() will release queue resources */
 }
 
+static irqreturn_t riscv_iommu_cmdq_irq_check(int irq, void *data);
+static irqreturn_t riscv_iommu_cmdq_process(int irq, void *data);
 static irqreturn_t riscv_iommu_fltq_irq_check(int irq, void *data);
 static irqreturn_t riscv_iommu_fltq_process(int irq, void *data);
 
@@ -160,6 +164,18 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 		irq_check = riscv_iommu_fltq_irq_check;
 		irq_process = riscv_iommu_fltq_process;
 		irq = iommu->irqs[FIELD_GET(RISCV_IOMMU_IVEC_FIV, ivec) %
+				  RISCV_IOMMU_INTR_COUNT];
+		break;
+	case RISCV_IOMMU_COMMAND_QUEUE:
+		name = "cmdq";
+		q = &iommu->cmdq;
+		q->qbr = RISCV_IOMMU_REG_CQB;
+		q->qcr = RISCV_IOMMU_REG_CQCSR;
+		item_size = sizeof(struct riscv_iommu_command);
+		item_count = q->cnt ?: RISCV_IOMMU_DEF_CQ_COUNT;
+		irq_check = riscv_iommu_cmdq_irq_check;
+		irq_process = riscv_iommu_cmdq_process;
+		irq = iommu->irqs[FIELD_GET(RISCV_IOMMU_IVEC_CIV, ivec) %
 				  RISCV_IOMMU_INTR_COUNT];
 		break;
 	default:
@@ -279,6 +295,205 @@ static int riscv_iommu_queue_init(struct riscv_iommu_device *iommu,
 	}
 
 	return 0;
+}
+
+/*
+ * I/O MMU Command queue chapter 3.1
+ */
+
+static inline void riscv_iommu_cmd_inval_vma(struct riscv_iommu_command *cmd)
+{
+	cmd->dword0 = FIELD_PREP(RISCV_IOMMU_CMD_OPCODE,
+				 RISCV_IOMMU_CMD_IOTINVAL_OPCODE) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_FUNC,
+				 RISCV_IOMMU_CMD_IOTINVAL_FUNC_VMA);
+	cmd->dword1 = 0;
+}
+
+static inline void riscv_iommu_cmd_inval_set_addr(struct riscv_iommu_command *cmd,
+						  u64 addr)
+{
+	cmd->dword0 |= RISCV_IOMMU_CMD_IOTINVAL_AV;
+	cmd->dword1 = FIELD_PREP(RISCV_IOMMU_CMD_IOTINVAL_ADDR, phys_to_pfn(addr));
+}
+
+static inline void riscv_iommu_cmd_inval_set_pscid(struct riscv_iommu_command *cmd,
+						   unsigned int pscid)
+{
+	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_IOTINVAL_PSCID, pscid) |
+		       RISCV_IOMMU_CMD_IOTINVAL_PSCV;
+}
+
+static inline void riscv_iommu_cmd_inval_set_gscid(struct riscv_iommu_command *cmd,
+						   unsigned int gscid)
+{
+	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_IOTINVAL_GSCID, gscid) |
+		       RISCV_IOMMU_CMD_IOTINVAL_GV;
+}
+
+static inline void riscv_iommu_cmd_iofence(struct riscv_iommu_command *cmd)
+{
+	cmd->dword0 = FIELD_PREP(RISCV_IOMMU_CMD_OPCODE,
+				 RISCV_IOMMU_CMD_IOFENCE_OPCODE) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_FUNC,
+				 RISCV_IOMMU_CMD_IOFENCE_FUNC_C);
+	cmd->dword1 = 0;
+}
+
+static inline void riscv_iommu_cmd_iofence_set_av(struct riscv_iommu_command *cmd,
+						  u64 addr, u32 data)
+{
+	cmd->dword0 = FIELD_PREP(RISCV_IOMMU_CMD_OPCODE,
+				 RISCV_IOMMU_CMD_IOFENCE_OPCODE) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_FUNC,
+				 RISCV_IOMMU_CMD_IOFENCE_FUNC_C) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_IOFENCE_DATA, data) |
+		      RISCV_IOMMU_CMD_IOFENCE_AV;
+	cmd->dword1 = addr >> 2;
+}
+
+static inline void riscv_iommu_cmd_iodir_inval_ddt(struct riscv_iommu_command *cmd)
+{
+	cmd->dword0 = FIELD_PREP(RISCV_IOMMU_CMD_OPCODE,
+				 RISCV_IOMMU_CMD_IODIR_OPCODE) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_FUNC,
+				 RISCV_IOMMU_CMD_IODIR_FUNC_INVAL_DDT);
+	cmd->dword1 = 0;
+}
+
+static inline void riscv_iommu_cmd_iodir_inval_pdt(struct riscv_iommu_command *cmd)
+{
+	cmd->dword0 = FIELD_PREP(RISCV_IOMMU_CMD_OPCODE,
+				 RISCV_IOMMU_CMD_IODIR_OPCODE) |
+		      FIELD_PREP(RISCV_IOMMU_CMD_FUNC,
+				 RISCV_IOMMU_CMD_IODIR_FUNC_INVAL_PDT);
+	cmd->dword1 = 0;
+}
+
+static inline void riscv_iommu_cmd_iodir_set_did(struct riscv_iommu_command *cmd,
+						 unsigned int devid)
+{
+	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_IODIR_DID, devid) |
+		       RISCV_IOMMU_CMD_IODIR_DV;
+}
+
+/* TODO: Convert into lock-less MPSC implementation. */
+static bool riscv_iommu_post_sync(struct riscv_iommu_device *iommu,
+				  struct riscv_iommu_command *cmd, bool sync)
+{
+	u32 head, tail, next, last;
+	unsigned long flags;
+
+	spin_lock_irqsave(&iommu->cq_lock, flags);
+	head = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_CQH) & (iommu->cmdq.cnt - 1);
+	tail = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_CQT) & (iommu->cmdq.cnt - 1);
+	last = iommu->cmdq.lui;
+	if (tail != last) {
+		spin_unlock_irqrestore(&iommu->cq_lock, flags);
+		/*
+		 * FIXME: This is a workaround for dropped MMIO writes/reads on QEMU platform.
+		 *        While debugging of the problem is still ongoing, this provides
+		 *        a simple impolementation of try-again policy.
+		 *        Will be changed to lock-less algorithm in the feature.
+		 */
+		dev_dbg(iommu->dev, "IOMMU CQT: %x != %x (1st)\n", last, tail);
+		spin_lock_irqsave(&iommu->cq_lock, flags);
+		tail =
+		    riscv_iommu_readl(iommu, RISCV_IOMMU_REG_CQT) & (iommu->cmdq.cnt - 1);
+		last = iommu->cmdq.lui;
+		if (tail != last) {
+			spin_unlock_irqrestore(&iommu->cq_lock, flags);
+			dev_dbg(iommu->dev, "IOMMU CQT: %x != %x (2nd)\n", last, tail);
+			spin_lock_irqsave(&iommu->cq_lock, flags);
+		}
+	}
+
+	next = (last + 1) & (iommu->cmdq.cnt - 1);
+	if (next != head) {
+		struct riscv_iommu_command *ptr = iommu->cmdq.base;
+
+		ptr[last] = *cmd;
+		/* Enforce in-memory command record ordering before device doorbell write */
+		wmb();
+		riscv_iommu_writel(iommu, RISCV_IOMMU_REG_CQT, next);
+		iommu->cmdq.lui = next;
+	}
+
+	spin_unlock_irqrestore(&iommu->cq_lock, flags);
+
+	if (sync && head != next) {
+		cycles_t start_time = get_cycles();
+
+		while (1) {
+			last = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_CQH) &
+			    (iommu->cmdq.cnt - 1);
+			if (head < next && last >= next)
+				break;
+			if (head > next && last < head && last >= next)
+				break;
+			if (RISCV_IOMMU_TIMEOUT < (get_cycles() - start_time)) {
+				dev_err(iommu->dev, "IOFENCE TIMEOUT\n");
+				return false;
+			}
+			cpu_relax();
+		}
+	}
+
+	return next != head;
+}
+
+static bool riscv_iommu_post(struct riscv_iommu_device *iommu,
+			     struct riscv_iommu_command *cmd)
+{
+	return riscv_iommu_post_sync(iommu, cmd, false);
+}
+
+static bool riscv_iommu_iofence_sync(struct riscv_iommu_device *iommu)
+{
+	struct riscv_iommu_command cmd;
+
+	riscv_iommu_cmd_iofence(&cmd);
+	return riscv_iommu_post_sync(iommu, &cmd, true);
+}
+
+/* Command queue primary interrupt handler */
+static irqreturn_t riscv_iommu_cmdq_irq_check(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu =
+	    container_of(q, struct riscv_iommu_device, cmdq);
+	u32 ipsr = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_IPSR);
+
+	if (ipsr & RISCV_IOMMU_IPSR_CIP)
+		return IRQ_WAKE_THREAD;
+	return IRQ_NONE;
+}
+
+/* Command queue interrupt hanlder thread function */
+static irqreturn_t riscv_iommu_cmdq_process(int irq, void *data)
+{
+	struct riscv_iommu_queue *q = (struct riscv_iommu_queue *)data;
+	struct riscv_iommu_device *iommu;
+	unsigned int ctrl;
+
+	iommu = container_of(q, struct riscv_iommu_device, cmdq);
+
+	/* Error reporting, clear error reports if any. */
+	ctrl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_CQCSR);
+	if (ctrl & (RISCV_IOMMU_CQCSR_CQMF |
+		    RISCV_IOMMU_CQCSR_CMD_TO | RISCV_IOMMU_CQCSR_CMD_ILL)) {
+		riscv_iommu_queue_ctrl(iommu, &iommu->cmdq, ctrl);
+		dev_warn_ratelimited(iommu->dev,
+				     "Command queue error: fault: %d tout: %d err: %d\n",
+				     !!(ctrl & RISCV_IOMMU_CQCSR_CQMF),
+				     !!(ctrl & RISCV_IOMMU_CQCSR_CMD_TO),
+				     !!(ctrl & RISCV_IOMMU_CQCSR_CMD_ILL));
+	}
+
+	/* Clear fault interrupt pending. */
+	riscv_iommu_writel(iommu, RISCV_IOMMU_REG_IPSR, RISCV_IOMMU_IPSR_CIP);
+
+	return IRQ_HANDLED;
 }
 
 /*
@@ -626,6 +841,29 @@ static void riscv_iommu_flush_iotlb_range(struct iommu_domain *iommu_domain,
 					  unsigned long *start, unsigned long *end,
 					  size_t *pgsize)
 {
+	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
+	struct riscv_iommu_command cmd;
+	unsigned long iova;
+
+	if (domain->mode == RISCV_IOMMU_DC_FSC_MODE_BARE)
+		return;
+
+	/* Domain not attached to an IOMMU! */
+	BUG_ON(!domain->iommu);
+
+	riscv_iommu_cmd_inval_vma(&cmd);
+	riscv_iommu_cmd_inval_set_pscid(&cmd, domain->pscid);
+
+	if (start && end && pgsize) {
+		/* Cover only the range that is needed */
+		for (iova = *start; iova <= *end; iova += *pgsize) {
+			riscv_iommu_cmd_inval_set_addr(&cmd, iova);
+			riscv_iommu_post(domain->iommu, &cmd);
+		}
+	} else {
+		riscv_iommu_post(domain->iommu, &cmd);
+	}
+	riscv_iommu_iofence_sync(domain->iommu);
 }
 
 static void riscv_iommu_flush_iotlb_all(struct iommu_domain *iommu_domain)
@@ -872,6 +1110,7 @@ void riscv_iommu_remove(struct riscv_iommu_device *iommu)
 	iommu_device_sysfs_remove(&iommu->iommu);
 	iommu_device_unregister(&iommu->iommu);
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
+	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	riscv_iommu_queue_free(iommu, &iommu->fltq);
 }
 
@@ -913,7 +1152,11 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	}
 	riscv_iommu_writeq(iommu, RISCV_IOMMU_REG_IVEC, ivec);
 
+	spin_lock_init(&iommu->cq_lock);
 	mutex_init(&iommu->eps_mutex);
+	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_COMMAND_QUEUE);
+	if (ret)
+		goto fail;
 	ret = riscv_iommu_queue_init(iommu, RISCV_IOMMU_FAULT_QUEUE);
 	if (ret)
 		goto fail;
@@ -945,5 +1188,6 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
  fail:
 	riscv_iommu_enable(iommu, RISCV_IOMMU_DDTP_MODE_OFF);
 	riscv_iommu_queue_free(iommu, &iommu->fltq);
+	riscv_iommu_queue_free(iommu, &iommu->cmdq);
 	return ret;
 }
