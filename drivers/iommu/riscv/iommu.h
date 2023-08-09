@@ -24,7 +24,8 @@
 #include "iommu-bits.h"
 
 enum riscv_iommu_queue_type {
-	RISCV_IOMMU_FAULT_QUEUE	= 0,
+	RISCV_IOMMU_FAULT_QUEUE,
+	RISCV_IOMMU_COMMAND_QUEUE,
 };
 
 struct riscv_iommu_queue {
@@ -53,9 +54,13 @@ struct riscv_iommu_device {
 
 	/* hardware queues */
 	struct riscv_iommu_queue fltq;
+	struct riscv_iommu_queue cmdq;
 
 	/* supported and enabled hardware capabilities */
 	u64 cap;
+
+	/* global lock, to be removed */
+	spinlock_t cq_lock;
 
 	/* device directory table root pointer and mode */
 	unsigned long ddtp;
