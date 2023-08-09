@@ -1132,6 +1132,12 @@ static int __init acpi_bus_init_irq(void)
 	case ACPI_IRQ_MODEL_LPIC:
 		message = "LPIC";
 		break;
+	case ACPI_IRQ_MODEL_APLIC:
+		message = "APLIC";
+		break;
+	case ACPI_IRQ_MODEL_PLIC:
+		message = "PLIC";
+		break;
 	default:
 		pr_info("Unknown interrupt routing model\n");
 		return -ENODEV;
@@ -1388,6 +1394,7 @@ static int __init acpi_init(void)
 
 	pci_mmcfg_late_init();
 	acpi_arm_init();
+	acpi_riscv_init();
 	acpi_viot_early_init();
 	acpi_hest_init();
 	acpi_ghes_init();
