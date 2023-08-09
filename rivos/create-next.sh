@@ -80,15 +80,17 @@ test -z "${no_reset}" && git reset --hard ${VER}
 ${GIT_MERGE} "${SRC}dev/tjeznach/feature/rivos-main"
 
 # Ventana patch series
-# 1. based on avpatel/riscv_aia_v6
+# 1. based on avpatel/riscv_aia_v*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_aia"
-# 2. based on vlsunil/riscv_acpi_b2_v1
+# 2. based on vlsunil/riscv_acpi_*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi"
-# 3. based on avpatel/riscv_sbi_dbcn_v1
+# 3. based on avpatel/riscv_sbi_dbcn_*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_sbi_dbcn"
-
 # Rivos patch series
-${GIT_MERGE} "${SRC}dev/tjeznach/feature/riscv-iommu"
+# 1. based on tjeznach/riscv_iommu_v*
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_iommu"
+# Rivos Private
+${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
 ${GIT_MERGE} "${SRC}dev/bend/feature/dce"
 ${GIT_MERGE} "${SRC}dev/sonny/feature/dpa"
 ${GIT_MERGE} "${SRC}dev/evan/isbdm"
