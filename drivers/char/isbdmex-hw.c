@@ -20,6 +20,9 @@
 
 #include "isbdmex.h"
 
+#define CREATE_TRACE_POINTS
+#include "trace_isbdm.h"
+
 static struct isbdm_buf *alloc_buf(struct isbdm *ii)
 {
 	struct isbdm_buf *buf = kzalloc(sizeof(struct isbdm_buf), GFP_KERNEL);
@@ -188,12 +191,16 @@ void isbdm_tx_enqueue(struct isbdm *ii)
 
 		desc->flags = cpu_to_le32(flags);
 
-		WARN_ON_ONCE(!buf->size);
+		WARN_ON_ONCE(!(buf->size & ISBDM_DESC_SIZE_MASK));
 
 		desc->length = cpu_to_le32(buf->size & ISBDM_DESC_SIZE_MASK);
+		trace_isbdm_tx_enqueue(ii, buf->desc_idx, buf->physical,
+				       buf->size & ISBDM_DESC_SIZE_MASK, flags);
+
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
+	trace_isbdm_tx_tail(ii, ring->prod_idx);
 	ISBDM_WRITEQ(ii, ISBDM_TX_RING_TAIL, ring->prod_idx);
 	return;
 }
@@ -251,9 +258,11 @@ void isbdm_cmd_enqueue(struct isbdm *ii)
 		cmd_desc = &ring->cmds[ring->prod_idx];
 		/* Assumed to already be valid since it made it in the queue */
 		memcpy(cmd_desc, &cmd->cmd, sizeof(*cmd_desc));
+		trace_isbdm_cmd_enqueue(ii, ring->prod_idx, &cmd->cmd);
 		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
+	trace_isbdm_cmd_tail(ii, ring->prod_idx);
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
 	return;
 }
@@ -288,6 +297,8 @@ static void isbdm_rx_refill(struct isbdm *ii)
 	}
 
 	dev_dbg(&ii->pdev->dev, "%s: Added %u descriptors\n", __func__, count);
+	trace_isbdm_rx_refill(ii, count, ring->prod_idx);
+
 	/* Let hardware know about all the yummy buffers. */
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_TAIL, ring->prod_idx);
 	/*
@@ -1017,6 +1028,7 @@ int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
 		if (ii->rmb_table[idx].sw_avail == 0) {
 			memcpy(&ii->rmb_table[idx], rmb, sizeof(*rmb));
 			ii->prev_alloced_rmbi = idx;
+			trace_isbdm_rmb_alloc(ii, idx, rmb);
 			goto out;
 		}
 		idx++;
@@ -1072,6 +1084,7 @@ void isbdm_free_rmb(struct isbdm *ii, int rmbi)
 
 	wmb();
 	memset(&ii->rmb_table[rmbi], 0, sizeof(ii->rmb_table[rmbi]));
+	trace_isbdm_rmb_free(ii, rmbi);
 	mutex_unlock(&ii->rmb_table_lock);
 }
 
@@ -1147,6 +1160,9 @@ void isbdm_process_rx_done(struct isbdm *ii)
 		ii->rx_stats.byte_count += buf->size;
 		list_del(&buf->node);
 		list_add_tail(&buf->node, &ring->wait_list);
+		trace_isbdm_rx_dequeue(ii, buf->desc_idx, buf->physical,
+				       buf->size, buf->flags);
+
 		ring->cons_idx = (ring->cons_idx + 1) & mask;
 		if (buf->flags & ISBDM_DESC_FS) {
 			if (ii->packet_start) {
@@ -1433,6 +1449,7 @@ static void isbdm_disconnect(struct isbdm *ii)
 	/* Set link down first to keep new things from piling in. */
 	ii->link_status = ISBDM_LINK_DOWN;
 	ii->peer_interface_id = 0;
+	trace_isbdm_link_status(ii, ISBDM_LINK_DOWN);
 	isbdm_complete_link_status_change(ii);
 
 	/* Stop the hardware. */
@@ -1493,6 +1510,7 @@ static void isbdm_check_link(struct isbdm *ii)
 	WARN_ON_ONCE(link_status == ISBDM_LINK_DOWN);
 
 	ii->link_status = link_status;
+	trace_isbdm_link_status(ii, ii->link_status);
 	isbdm_connect(ii);
 
 	/*
