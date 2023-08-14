@@ -90,8 +90,7 @@ struct daffy_pkt_header {
 
 struct daffy_get_info_cmd {
 	/* out */
-	uint32_t pe_grid_dim_x;
-	uint32_t pe_grid_dim_y;
+	uint64_t pe_enable_mask[2];
 };
 
 struct daffy_register_pasid_cmd {

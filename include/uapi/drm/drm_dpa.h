@@ -21,8 +21,7 @@
 	DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
 
 struct drm_dpa_get_info {
-	__u32 pe_grid_dim_x;
-	__u32 pe_grid_dim_y;
+	__u64 pe_enable_mask[2];
 	__u32 doorbell_size;
 	__u32 pad;
 };

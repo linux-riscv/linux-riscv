@@ -281,8 +281,8 @@ int daffy_get_info_cmd(struct dpa_device *dpa,
 	if (ret < 0)
 		return ret;
 
-	args->pe_grid_dim_x = pkt.u.dgic.pe_grid_dim_x;
-	args->pe_grid_dim_y = pkt.u.dgic.pe_grid_dim_y;
+	memcpy(&args->pe_enable_mask, &pkt.u.dgic.pe_enable_mask,
+	       sizeof(args->pe_enable_mask));
 	return 0;
 }
 

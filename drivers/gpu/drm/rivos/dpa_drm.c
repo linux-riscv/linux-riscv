@@ -185,8 +185,6 @@ static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
 	if (ret)
 		return ret;
 	args->doorbell_size = p->doorbell_size;
-	dev_warn(p->dev->dev, "%s: dim_x: %d dim_y: %d db size %u\n", __func__,
-		 args->pe_grid_dim_x, args->pe_grid_dim_y, args->doorbell_size);
 
 	return 0;
 }
