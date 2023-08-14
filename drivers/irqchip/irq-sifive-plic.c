@@ -68,6 +68,7 @@ struct plic_priv {
 	unsigned long plic_quirks;
 	unsigned int nr_irqs;
 	unsigned long *prio_save;
+	u32 gsi_base;
 };
 
 struct plic_handler {
@@ -314,6 +315,10 @@ static int plic_irq_domain_translate(struct irq_domain *d,
 {
 	struct plic_priv *priv = d->host_data;
 
+	/* For DT, gsi_base is always zero. */
+	if (fwspec->param[0] >= priv->gsi_base)
+		fwspec->param[0] = fwspec->param[0] - priv->gsi_base;
+
 	if (test_bit(PLIC_QUIRK_EDGE_INTERRUPT, &priv->plic_quirks))
 		return irq_domain_translate_twocell(d, fwspec, hwirq, type);
 
@@ -452,6 +457,17 @@ static int plic_probe(struct platform_device *pdev)
 		dev_err(dev, "failed map MMIO registers\n");
 		return -EIO;
 	}
+
+	/*
+	 * Find out GSI base number
+	 *
+	 * Note: DT does not define "riscv,gsi-base" property so GSI
+	 * base is always zero for DT.
+	 */
+	rc = fwnode_property_read_u32_array(dev->fwnode, "riscv,gsi-base",
+					    &priv->gsi_base, 1);
+	if (rc)
+		priv->gsi_base = 0;
 
 	rc = fwnode_property_read_u32_array(dev->fwnode, "riscv,ndev",
 						&nr_irqs, 1);

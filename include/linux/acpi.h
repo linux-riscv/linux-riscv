@@ -95,6 +95,8 @@ enum acpi_irq_model_id {
 	ACPI_IRQ_MODEL_PLATFORM,
 	ACPI_IRQ_MODEL_GIC,
 	ACPI_IRQ_MODEL_LPIC,
+	ACPI_IRQ_MODEL_APLIC,
+	ACPI_IRQ_MODEL_PLIC,
 	ACPI_IRQ_MODEL_COUNT
 };
 
@@ -1509,6 +1511,12 @@ static inline int find_acpi_cpu_topology_hetero_id(unsigned int cpu)
 void acpi_arm_init(void);
 #else
 static inline void acpi_arm_init(void) { }
+#endif
+
+#ifdef CONFIG_RISCV
+void acpi_riscv_init(void);
+#else
+static inline void acpi_riscv_init(void) { }
 #endif
 
 #ifdef CONFIG_ACPI_PCC
