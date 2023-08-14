@@ -651,6 +651,10 @@ struct isbdm {
 	struct rivos_rot_device *rot;
 	/* A pointer to the RASD control BAR page. */
 	void *rasd_control;
+	/* The number of CPUs online when RASD probed. */
+	unsigned int cpu_count;
+	/* The number of guest interrupt files per cpu used. */
+	unsigned int ifiles_per_cpu;
 };
 
 /* Drivers support routines */
