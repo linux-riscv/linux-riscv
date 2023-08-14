@@ -15,6 +15,9 @@
 #define RASD_HBM_BAR_IOVA 0x10000000000ull
 #define RASD_HBM_BAR_SIZE 0x2000000000ull
 
+/* Define the number of non-admin doorbell pages. */
+#define RASD_APP_DOORBELL_PAGES 16
+
 int isbdm_map_rasd_regions(struct isbdm *ii);
 void isbdm_free_rasd_control(struct isbdm *ii);
 
