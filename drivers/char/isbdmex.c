@@ -440,12 +440,11 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 */
 	rot = get_rivos_rot();
 	if (!rot) {
-/* Switch to the disabled path once RoT changes land. */
-#if 0
+#ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
+		dev_warn(&pdev->dev, "No RoT yet, going anyway\n");
+#else
 		dev_warn(&pdev->dev, "No RoT yet, deferring\n");
 		return -EPROBE_DEFER;
-#else
-		dev_warn(&pdev->dev, "No RoT yet, going anyway\n");
 #endif
 	}
 
