@@ -655,6 +655,8 @@ struct isbdm {
 	unsigned int cpu_count;
 	/* The number of guest interrupt files per cpu used. */
 	unsigned int ifiles_per_cpu;
+	/* Interrupt number of the guest external interrupt. */
+	int hgei_irq;
 };
 
 /* Drivers support routines */
