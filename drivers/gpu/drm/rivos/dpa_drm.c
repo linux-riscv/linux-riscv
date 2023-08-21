@@ -236,7 +236,6 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 
 		goto out_unlock;
 	}
-	p->signal_pages_va = args->va;
 	p->signal_pages_count = num_pages;
 
 	// Tell the DUC we've allocated a new range of signal pages

@@ -103,7 +103,6 @@ struct dpa_process {
 	struct list_head queue_list;
 
 	/* signal related */
-	u64 signal_pages_va;
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int signal_pages_count;
 
