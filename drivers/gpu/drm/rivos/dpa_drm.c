@@ -310,13 +310,14 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	struct dpa_signal_waiter waiter;
 	struct drm_dpa_wait_signal *args = data;
 	u64 signal_idx = args->signal_idx;
-	struct timespec64 ts64 = { .tv_sec = args->timeout.tv_sec,
-		.tv_nsec = args->timeout.tv_nsec, };
-	unsigned long timeout = timespec64_to_jiffies(&ts64);
+	struct timespec64 timeout = {
+		.tv_sec = args->timeout.tv_sec,
+		.tv_nsec = args->timeout.tv_nsec,
+	};
 	struct drm_dpa_signal *signals;
 	unsigned int page, index;
 	unsigned long flags;
-	int ret = 0;
+	long ret = 0;
 
 	page = signal_idx / DPA_DRM_SIGNALS_PER_PAGE;
 	index = signal_idx % DPA_DRM_SIGNALS_PER_PAGE;
@@ -346,17 +347,13 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	if (ret)
 		goto out_remove_waiter;
 
-	/* Wait for the signal, timeout value of 0 means 'no timeout' */
-	if (timeout == 0) {
-		ret = wait_for_completion_interruptible(&waiter.signal_done);
-	} else {
-		ret = wait_for_completion_interruptible_timeout(
-			&waiter.signal_done, timeout);
-	}
-
-	if (timeout && !ret) {
+	ret = wait_for_completion_interruptible_timeout(
+		&waiter.signal_done, timespec64_to_jiffies(&timeout));
+	if (!ret) {
 		dev_warn(p->dev->dev, "%s: Timeout waiting for signal %lld\n", __func__, signal_idx);
 		ret = -ETIMEDOUT;
+	} else if (ret > 0) {
+		ret = 0;
 	}
 
 out_remove_waiter:
