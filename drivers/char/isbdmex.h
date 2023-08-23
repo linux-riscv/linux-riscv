@@ -212,7 +212,7 @@ struct isbdm_descriptor {
 #define ISBDM_REMOTE_BUF_W BIT(63)
 
 #define ISBDM_REMOTE_BUF_SIZE_MASK 0xffffffffffff
-#define ISBDM_REMOTE_BUF_RDMA_GAP_MASK 0x7F
+#define ISBDM_REMOTE_BUF_RDMA_GAP_MASK 0x7FULL
 #define ISBDM_REMOTE_BUF_RDMA_GAP_SHIFT 48
 #define ISBDM_REMOTE_BUF_NCH BIT(63)
 
@@ -251,7 +251,7 @@ struct isbdm_remote_buffer {
 /* Remote memory buffer index */
 #define ISBDM_RDMA_RMBI_MASK 0xffffffff
 #define ISBDM_RDMA_GAP_SHIFT 32
-#define ISBDM_RDMA_GAP_MASK 0x7F
+#define ISBDM_RDMA_GAP_MASK 0x7FULL
 #define ISBDM_RDMA_NCH BIT(39)
 #define ISBDM_RDMA_RO BIT(40)
 #define ISBDM_RDMA_RMBI_RESERVED_MASK (0x3ffffULL << 41)

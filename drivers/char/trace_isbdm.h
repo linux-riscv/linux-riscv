@@ -249,6 +249,6 @@ static inline u32 __isbdm_rmb_flags(struct isbdm_remote_buffer *rmb)
 
 #undef TRACE_INCLUDE_PATH
 #undef TRACE_INCLUDE_FILE
-#define TRACE_INCLUDE_PATH .
+#define TRACE_INCLUDE_PATH ../../drivers/char
 #define TRACE_INCLUDE_FILE trace_isbdm
 #include <trace/define_trace.h>
