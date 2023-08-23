@@ -198,9 +198,6 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 	int ret = 0;
 	long count;
 
-	if (!p)
-		return -EINVAL;
-
 	if ((args->size & (PAGE_SIZE - 1)) ||
 	    (num_pages > DPA_DRM_MAX_SIGNAL_PAGES) ||
 	    (args->va & (PAGE_SIZE - 1)))
@@ -316,9 +313,6 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	void *signal_page_buf;
 	unsigned long flags;
 	int ret = 0;
-
-	if (!p)
-		return -EINVAL;
 
 	mutex_lock(&p->lock);
 
