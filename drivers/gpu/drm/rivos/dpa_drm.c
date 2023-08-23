@@ -25,6 +25,7 @@
 #include <linux/dev_printk.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/hash.h>
 #include <linux/iommu.h>
 #include <linux/mm.h>
 #include <linux/pci.h>
@@ -264,7 +265,7 @@ static void dpa_remove_signal_pages(struct dpa_process *p)
 	 * We only remove signal pages when the fd is closed, so there must
 	 * not be any threads in wait_signal() at this piont.
 	 */
-	WARN_ON(!list_empty(&p->signal_waiters));
+	WARN_ON(p->num_signal_waiters);
 
 	ret = daffy_unregister_signal_pages_cmd(p->dev, p);
 	if (ret) {
@@ -280,8 +281,7 @@ static void dpa_remove_signal_pages(struct dpa_process *p)
 int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 {
 	struct dpa_process *p;
-	struct dpa_signal_waiter *waiter;
-	unsigned long flags;
+	u32 key = hash_32(signal_idx, SIGNAL_WQ_HASH_BITS);
 
 	p = dpa_get_process_by_pasid(dpa, pasid);
 	if (!p) {
@@ -290,14 +290,7 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 		return -ENOENT;
 	}
 
-	spin_lock_irqsave(&p->signal_lock, flags);
-	list_for_each_entry(waiter, &p->signal_waiters, list) {
-		if (waiter->signal_idx == signal_idx) {
-			complete(&waiter->signal_done);
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&p->signal_lock, flags);
+	wake_up_interruptible_all(&p->signal_wqs[key]);
 	kref_put(&p->ref, dpa_release_process);
 
 	return 0;
@@ -307,9 +300,9 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 				    struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
-	struct dpa_signal_waiter waiter;
 	struct drm_dpa_wait_signal *args = data;
 	u64 signal_idx = args->signal_idx;
+	u32 key = hash_32(signal_idx, SIGNAL_WQ_HASH_BITS);
 	struct timespec64 timeout = {
 		.tv_sec = args->timeout.tv_sec,
 		.tv_nsec = args->timeout.tv_nsec,
@@ -324,20 +317,16 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	spin_lock_irqsave(&p->signal_lock, flags);
 	/* Verify signal index is in bounds. */
 	if (page >= p->signal_pages_count) {
-		ret = -EINVAL;
-		goto out_unlock;
+		spin_unlock_irqrestore(&p->signal_lock, flags);
+		return -EINVAL;
 	}
-	signals = page_to_virt(p->signal_pages[page]);
+	p->num_signal_waiters++;
+	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 	/* Check if the signal has already been reset by firmware. */
+	signals = page_to_virt(p->signal_pages[page]);
 	if (!READ_ONCE(signals[index].signal_value))
-		goto out_unlock;
-
-	INIT_LIST_HEAD(&waiter.list);
-	waiter.signal_idx = signal_idx;
-	init_completion(&waiter.signal_done);
-	list_add_tail(&waiter.list, &p->signal_waiters);
-	spin_unlock_irqrestore(&p->signal_lock, flags);
+		goto done;
 
 	/*
 	 * Firmware will reject a subscription if the specified signal has already
@@ -345,10 +334,11 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	 */
 	ret = daffy_subscribe_signal_cmd(p->dev, p, signal_idx);
 	if (ret)
-		goto out_remove_waiter;
+		goto done;
 
-	ret = wait_for_completion_interruptible_timeout(
-		&waiter.signal_done, timespec64_to_jiffies(&timeout));
+	ret = wait_event_interruptible_timeout(p->signal_wqs[key],
+		READ_ONCE(signals[index].signal_value) == 0,
+		timespec64_to_jiffies(&timeout));
 	if (!ret) {
 		dev_warn(p->dev->dev, "%s: Timeout waiting for signal %lld\n", __func__, signal_idx);
 		ret = -ETIMEDOUT;
@@ -356,10 +346,9 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		ret = 0;
 	}
 
-out_remove_waiter:
+done:
 	spin_lock_irqsave(&p->signal_lock, flags);
-	list_del(&waiter.list);
-out_unlock:
+	p->num_signal_waiters--;
 	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 	return ret;
@@ -458,7 +447,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	struct device *dpa_dev;
 	u32 db_offset;
 	u32 db_size;
-	int err;
+	int err, i;
 
 	mutex_lock(&dpa->dpa_processes_lock);
 
@@ -508,8 +497,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
 		dpa_app->doorbell_offset;
 
-	/* Init dpa_signal_waiter queue */
-	INIT_LIST_HEAD(&dpa_app->signal_waiters);
+	for (i = 0; i < ARRAY_SIZE(dpa_app->signal_wqs); i++)
+		init_waitqueue_head(&dpa_app->signal_wqs[i]);
 	spin_lock_init(&dpa_app->signal_lock);
 
 	dpa->dpa_process_count++;

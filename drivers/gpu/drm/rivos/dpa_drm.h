@@ -25,7 +25,7 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/wait.h>
-#include <linux/completion.h>
+
 #include <drm/drm.h>
 #include <drm/drm_device.h>
 #include <drm/drm_dpa.h>
@@ -104,20 +104,15 @@ struct dpa_process {
 
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int signal_pages_count;
+	unsigned int num_signal_waiters;
 	spinlock_t signal_lock;
-	struct list_head signal_waiters;
+#define SIGNAL_WQ_HASH_BITS	3
+	struct wait_queue_head signal_wqs[1 << SIGNAL_WQ_HASH_BITS];
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
 	u32 doorbell_offset;
 	u32 doorbell_size;
-};
-
-struct dpa_signal_waiter {
-	struct list_head list;
-
-	u64 signal_idx;
-	struct completion signal_done;
 };
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
