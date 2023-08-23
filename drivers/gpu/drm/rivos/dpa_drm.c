@@ -194,7 +194,9 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_register_signal_pages *args = data;
+	struct page *pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	u32 num_pages = args->size / PAGE_SIZE;
+	unsigned long flags;
 	int ret = 0;
 	long count;
 
@@ -215,8 +217,8 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 	}
 
 	/* assume pages are mapped writable, if not we'll get an error */
-	count = pin_user_pages_fast(args->va, num_pages, FOLL_LONGTERM | FOLL_WRITE,
-		p->signal_pages);
+	count = pin_user_pages_fast(args->va, num_pages,
+				    FOLL_LONGTERM | FOLL_WRITE, pages);
 	if (count != num_pages) {
 		dev_warn(dev->dev, "%s: pin_user_pages() failed %ld for 0x%llx\n",
 			 __func__, count, args->va);
@@ -227,18 +229,24 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 
 		/* use -EVINAL error code if only some pages were pinned */
 		if (count >= 0) {
-			unpin_user_pages(p->signal_pages, count);
+			unpin_user_pages(pages, count);
 			ret = -EINVAL;
 		}
 
 		goto out_unlock;
 	}
-	p->signal_pages_count = num_pages;
 
 	// Tell the DUC we've allocated a new range of signal pages
 	ret = daffy_register_signal_pages_cmd(p->dev, p, args, num_pages);
-	if (ret)
-		unpin_user_pages(p->signal_pages, count);
+	if (ret) {
+		unpin_user_pages(pages, count);
+		goto out_unlock;
+	}
+
+	spin_lock_irqsave(&p->signal_lock, flags);
+	memcpy(p->signal_pages, pages, num_pages * sizeof(*p->signal_pages));
+	p->signal_pages_count = num_pages;
+	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 out_unlock:
 	mutex_unlock(&p->lock);
@@ -248,11 +256,15 @@ out_unlock:
 
 static void dpa_remove_signal_pages(struct dpa_process *p)
 {
-	struct dpa_signal_waiter *waiter;
-	unsigned long flags;
 	int ret = 0;
 
 	mutex_lock(&p->lock);
+
+	/*
+	 * We only remove signal pages when the fd is closed, so there must
+	 * not be any threads in wait_signal() at this piont.
+	 */
+	WARN_ON(!list_empty(&p->signal_waiters));
 
 	ret = daffy_unregister_signal_pages_cmd(p->dev, p);
 	if (ret) {
@@ -261,13 +273,6 @@ static void dpa_remove_signal_pages(struct dpa_process *p)
 	}
 
 	unpin_user_pages(p->signal_pages, p->signal_pages_count);
-
-	spin_lock_irqsave(&p->signal_waiters_lock, flags);
-	list_for_each_entry(waiter, &p->signal_waiters, list) {
-		waiter->error = -EINVAL;
-		complete(&waiter->signal_done);
-	}
-	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
 
 	mutex_unlock(&p->lock);
 }
@@ -285,14 +290,14 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 		return -ENOENT;
 	}
 
-	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	spin_lock_irqsave(&p->signal_lock, flags);
 	list_for_each_entry(waiter, &p->signal_waiters, list) {
 		if (waiter->signal_idx == signal_idx) {
 			complete(&waiter->signal_done);
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+	spin_unlock_irqrestore(&p->signal_lock, flags);
 	kref_put(&p->ref, dpa_release_process);
 
 	return 0;
@@ -308,43 +313,30 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	struct timespec64 ts64 = { .tv_sec = args->timeout.tv_sec,
 		.tv_nsec = args->timeout.tv_nsec, };
 	unsigned long timeout = timespec64_to_jiffies(&ts64);
-	struct drm_dpa_signal *signal;
-	u64 page_index;
-	void *signal_page_buf;
+	struct drm_dpa_signal *signals;
+	unsigned int page, index;
 	unsigned long flags;
 	int ret = 0;
 
-	mutex_lock(&p->lock);
-
+	page = signal_idx / DPA_DRM_SIGNALS_PER_PAGE;
+	index = signal_idx % DPA_DRM_SIGNALS_PER_PAGE;
+	spin_lock_irqsave(&p->signal_lock, flags);
 	/* Verify signal index is in bounds. */
-	if ((signal_idx * sizeof(struct drm_dpa_signal)) >=
-	    (p->signal_pages_count * PAGE_SIZE)) {
+	if (page >= p->signal_pages_count) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}
-
-	page_index = signal_idx * sizeof(struct drm_dpa_signal) / PAGE_SIZE;
-	signal_page_buf = page_to_virt(p->signal_pages[page_index]);
-	if (!signal_page_buf) {
-		ret = -ENOMEM;
-		goto out_unlock;
-	}
-
-	signal = (struct drm_dpa_signal *) (signal_page_buf + ((signal_idx -
-		page_index * DPA_DRM_SIGNALS_PER_PAGE) *
-		sizeof(struct drm_dpa_signal)));
+	signals = page_to_virt(p->signal_pages[page]);
 
 	/* Check if the signal has already been reset by firmware. */
-	if (!READ_ONCE(signal->signal_value))
+	if (!READ_ONCE(signals[index].signal_value))
 		goto out_unlock;
 
 	INIT_LIST_HEAD(&waiter.list);
 	waiter.signal_idx = signal_idx;
 	init_completion(&waiter.signal_done);
-
-	spin_lock_irqsave(&p->signal_waiters_lock, flags);
 	list_add_tail(&waiter.list, &p->signal_waiters);
-	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
+	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 	/*
 	 * Firmware will reject a subscription if the specified signal has already
@@ -355,32 +347,23 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		goto out_remove_waiter;
 
 	/* Wait for the signal, timeout value of 0 means 'no timeout' */
-	mutex_unlock(&p->lock);
-	if (timeout == 0)
-		wait_for_completion_interruptible(&waiter.signal_done);
-	else
-		wait_for_completion_interruptible_timeout(&waiter.signal_done, timeout);
-	mutex_lock(&p->lock);
+	if (timeout == 0) {
+		ret = wait_for_completion_interruptible(&waiter.signal_done);
+	} else {
+		ret = wait_for_completion_interruptible_timeout(
+			&waiter.signal_done, timeout);
+	}
 
-	if (waiter.error == -EINVAL) {
-		dev_warn(p->dev->dev, "%s: Signal page for PASID %d unregistered while waiting on signal %lld\n",
-			__func__, p->pasid, signal_idx);
-		ret = -EINVAL;
-	} else if (signal->signal_value) {
+	if (timeout && !ret) {
 		dev_warn(p->dev->dev, "%s: Timeout waiting for signal %lld\n", __func__, signal_idx);
 		ret = -ETIMEDOUT;
 	}
 
-	dev_warn(p->dev->dev, "%s: signal idx = %llu, value = %lld\n", __func__,
-		 args->signal_idx, signal->signal_value);
-
 out_remove_waiter:
-	spin_lock_irqsave(&p->signal_waiters_lock, flags);
+	spin_lock_irqsave(&p->signal_lock, flags);
 	list_del(&waiter.list);
-	spin_unlock_irqrestore(&p->signal_waiters_lock, flags);
-
 out_unlock:
-	mutex_unlock(&p->lock);
+	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 	return ret;
 }
@@ -530,7 +513,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 	/* Init dpa_signal_waiter queue */
 	INIT_LIST_HEAD(&dpa_app->signal_waiters);
-	spin_lock_init(&dpa_app->signal_waiters_lock);
+	spin_lock_init(&dpa_app->signal_lock);
 
 	dpa->dpa_process_count++;
 	INIT_LIST_HEAD(&dpa_app->dpa_process_list);

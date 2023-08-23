@@ -102,12 +102,9 @@ struct dpa_process {
 	// aql queues
 	struct list_head queue_list;
 
-	/* signal related */
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int signal_pages_count;
-
-	/* Signal waiters */
-	spinlock_t signal_waiters_lock;
+	spinlock_t signal_lock;
 	struct list_head signal_waiters;
 
 	// Start of doorbell registers in DUC MMIO
@@ -120,7 +117,6 @@ struct dpa_signal_waiter {
 	struct list_head list;
 
 	u64 signal_idx;
-	int error;
 	struct completion signal_done;
 };
 
