@@ -53,6 +53,7 @@
 #define ISBDM_IPMR		120
 #define ISBDM_IRCR		128
 #define ISBDM_ADMIN		136
+#define ISBDM_EP_STATUS		144
 #define ISBDM_RX_TLP_DROP_CNT	160
 
 #define ISBDM_WRITEQ(isbdm, reg, val) writeq(cpu_to_le64(val), (isbdm)->base + (reg))
@@ -95,6 +96,12 @@
 /* Convert from a buffer size into the BUFSIZ register field value. */
 #define ISBDM_RX_BUFFER_SIZE_TO_REG(size) \
 	(__builtin_ctzll(size) - 9)
+
+/* Endpoint status register bits, for ISBDM's in RASD bridge mode */
+/* Set when the host has the BME (Bus Master Enable) bit set. */
+#define ISBDM_EP_STATUS_EPBME BIT(0)
+/* Set when this ISBDM is in RASD bridge mode. */
+#define ISBDM_EP_STATUS_RASD_MODE BIT(1)
 
 /*
  * The success code from an RDMA command, written to the physical address
@@ -169,6 +176,8 @@
 #define ISBDM_ATS_UR_IRQ (1 << 9)
 /* RF response caused PRI to be disabled */
 #define ISBDM_PRI_RF_IRQ (1 << 10)
+/* In RASD mode, fires when the host changed the BME bit */
+#define ISBDM_EPBMECHG_IRQ (1 << 11)
 /* Interrupt summary bit, clear to ask HW to re-evaluate interrupts. */
 #define ISBDM_IPSR_IIP (1ULL << 63)
 
@@ -177,7 +186,7 @@
 	(ISBDM_LNKSTS_IRQ | ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | \
 	 ISBDM_RXDONE_IRQ | ISBDM_RXOVF_IRQ | ISBDM_RXRTHR_IRQ | \
 	 ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ | \
-	 ISBDM_ATS_UR_IRQ | ISBDM_PRI_RF_IRQ)
+	 ISBDM_ATS_UR_IRQ | ISBDM_PRI_RF_IRQ | ISBDM_EPBMECHG_IRQ)
 
 #define ISBDM_RX_TLP_DROP_CTR_SIZE (1ULL << 40)
 #define ISBDM_RX_TLP_DROP_CTR_MASK (ISBDM_RX_TLP_DROP_CTR_SIZE - 1)
@@ -632,6 +641,8 @@ struct isbdm {
 	 * sending a million responses if we receive a million handshakes.
 	 */
 	bool send_handshake_ack;
+	/* Set if this ISBDM is a bridge to a RASD host. */
+	bool rasd_mode;
 
 	/* Command statistics, protected under the command ring mutex. */
 	struct isbdm_cmd_stats cmd_stats;
