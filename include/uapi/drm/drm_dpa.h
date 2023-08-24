@@ -55,9 +55,14 @@ struct drm_dpa_register_signal_pages {
 	__u32 type;	/* ignored for now, eventually different types */
 };
 
+/* The maximum number of signals that can be waited on simultaneously. */
+#define DPA_DRM_MAX_WAIT_SIGNALS	4
+
+/* Waits for any of the signals in signal_ids to be set. */
 struct drm_dpa_wait_signal {
-	__u64 signal_idx;		 /* in signal index, offset in 64B from start */
-	struct __kernel_timespec timeout; /* in timeout */
+	__u8 signal_ids[DPA_DRM_MAX_WAIT_SIGNALS];
+	__u32 num_signals;
+	struct __kernel_timespec timeout;
 };
 
 #define DRM_IOCTL_DPA_GET_INFO \

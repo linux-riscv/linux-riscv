@@ -296,43 +296,132 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 	return 0;
 }
 
+static bool check_signals(struct dpa_process *p, u8 *ids, u32 num)
+{
+	int i;
+
+	for (i = 0; i < num; i++) {
+		unsigned int pg = ids[i] / DPA_DRM_SIGNALS_PER_PAGE;
+		unsigned int index = ids[i] % DPA_DRM_SIGNALS_PER_PAGE;
+		struct drm_dpa_signal *signals = page_to_virt(p->signal_pages[pg]);
+
+		if (READ_ONCE(signals[index].signal_value) == 0)
+			return true;
+	}
+
+	return false;
+}
+
+struct dpa_signal_waiter {
+	wait_queue_entry_t wq_entry;
+	u32 key;
+};
+
+struct dpa_signal_waiters {
+	struct dpa_signal_waiter waiter[DPA_DRM_MAX_WAIT_SIGNALS];
+	unsigned int num;
+};
+
+static void add_signal_waiters(struct dpa_process *p, u8 *ids, u32 num,
+			       struct dpa_signal_waiters *waiters)
+{
+	u64 key_mask = 0;
+	int i, w;
+
+	BUILD_BUG_ON(sizeof(key_mask) * 8 < ARRAY_SIZE(p->signal_wqs));
+	for (i = 0, w = 0; i < num; i++) {
+		struct dpa_signal_waiter *waiter = &waiters->waiter[w];
+		u32 key = hash_32(ids[i], SIGNAL_WQ_HASH_BITS);
+
+		if ((key_mask & BIT_ULL(key)) != 0)
+			continue;
+
+		key_mask |= BIT_ULL(key);
+		waiter->key = key;
+		init_waitqueue_entry(&waiter->wq_entry, current);
+		INIT_LIST_HEAD(&waiter->wq_entry.entry);
+		add_wait_queue(&p->signal_wqs[key], &waiter->wq_entry);
+		w++;
+	}
+	waiters->num = w;
+}
+
+static void remove_signal_waiters(struct dpa_process *p,
+				  struct dpa_signal_waiters *waiters)
+{
+	int i;
+
+	for (i = 0; i < waiters->num; i++) {
+		struct dpa_signal_waiter *waiter = &waiters->waiter[i];
+
+		remove_wait_queue(&p->signal_wqs[waiter->key],
+				  &waiter->wq_entry);
+	}
+}
+
 static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 				    struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_wait_signal *args = data;
-	u64 signal_idx = args->signal_idx;
-	u32 key = hash_32(signal_idx, SIGNAL_WQ_HASH_BITS);
-	struct timespec64 timeout = {
+	struct dpa_signal_waiters waiters;
+	struct timespec64 ts = {
 		.tv_sec = args->timeout.tv_sec,
 		.tv_nsec = args->timeout.tv_nsec,
 	};
-	struct drm_dpa_signal *signals;
-	unsigned int page, index;
 	unsigned long flags;
-	long ret = 0;
+	long timeout, ret = 0;
+	int i;
 
-	page = signal_idx / DPA_DRM_SIGNALS_PER_PAGE;
-	index = signal_idx % DPA_DRM_SIGNALS_PER_PAGE;
-	spin_lock_irqsave(&p->signal_lock, flags);
-	/* Verify signal index is in bounds. */
-	if (page >= p->signal_pages_count) {
-		spin_unlock_irqrestore(&p->signal_lock, flags);
+	if (args->num_signals == 0)
+		return 0;
+	if (args->num_signals >= ARRAY_SIZE(args->signal_ids))
 		return -EINVAL;
+
+	spin_lock_irqsave(&p->signal_lock, flags);
+	/* Verify signal IDs are in bounds. */
+	for (i = 0; i < args->num_signals; i++) {
+		unsigned int pg = args->signal_ids[i] /
+			DPA_DRM_SIGNALS_PER_PAGE;
+
+		if (pg >= p->signal_pages_count) {
+			spin_unlock_irqrestore(&p->signal_lock, flags);
+			return -EINVAL;
+		}
 	}
 	p->num_signal_waiters++;
 	spin_unlock_irqrestore(&p->signal_lock, flags);
 
-	signals = page_to_virt(p->signal_pages[page]);
-	ret = wait_event_interruptible_timeout(p->signal_wqs[key],
-		READ_ONCE(signals[index].signal_value) == 0,
-		timespec64_to_jiffies(&timeout));
-	if (!ret) {
-		dev_warn(p->dev->dev, "%s: Timeout waiting for signal %lld\n", __func__, signal_idx);
-		ret = -ETIMEDOUT;
-	} else if (ret > 0) {
-		ret = 0;
-	}
+	/* Check the signals once before going into the wait loop. */
+	if (check_signals(p, args->signal_ids, args->num_signals))
+		goto done;
+
+	timeout = timespec64_to_jiffies(&ts);
+	add_signal_waiters(p, args->signal_ids, args->num_signals, &waiters);
+	do {
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		/*
+		 * Check the signal state again after we're TASK_INTERRUPTIBLE
+		 * so that a racing waker will wake us up immediately from
+		 * schedule_timeout().
+		 */
+		if (check_signals(p, args->signal_ids, args->num_signals))
+			break;
+
+		if (signal_pending(current)) {
+			ret = -ERESTARTSYS;
+			break;
+		}
+		if (timeout == 0) {
+			ret = -ETIMEDOUT;
+			break;
+		}
+
+		timeout = schedule_timeout(timeout);
+	} while (!check_signals(p, args->signal_ids, args->num_signals));
+	__set_current_state(TASK_RUNNING);
+	remove_signal_waiters(p, &waiters);
 
 done:
 	spin_lock_irqsave(&p->signal_lock, flags);

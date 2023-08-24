@@ -95,13 +95,14 @@ static struct drm_dpa_signal *get_signal_page()
 	return event_page;
 }
 
-static int wait_signal(uint64_t index, uint64_t timeout_sec,
+static int wait_signal(uint8_t index, uint64_t timeout_sec,
 		       uint64_t timeout_ns)
 {
 	struct drm_dpa_wait_signal args;
 	int ret;
 
-	args.signal_idx = index;
+	args.signal_ids[0] = index;
+	args.num_signals = 1;
 	args.timeout.tv_sec = timeout_sec;
 	args.timeout.tv_nsec = timeout_ns;
 
