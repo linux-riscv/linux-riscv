@@ -274,6 +274,7 @@ int main(int argc, char *argv[])
 
 		// this is the kernel dispatch packet
 		aql_packet = (hsa_kernel_dispatch_packet_t *)(ring + sizeof(*aql_barrier_packet));
+		memset(aql_packet, 0, sizeof(*aql_packet));
 
 		// Stub these fields for now
 		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -288,7 +289,6 @@ int main(int argc, char *argv[])
 		aql_packet->private_segment_size_log2 = 0; // It means no private.
 		aql_packet->kernarg_size = 0;
 		aql_packet->private_mem_ptr = 0;
-		aql_packet->completion_signal.handle = 0;		
 		aql_packet->num_pg_barriers = 0;
 		aql_packet->num_gprs_blocks = 1;  // Min 1 for r-mode.
 		aql_packet->scratch_mem_allocs = 0;
@@ -323,7 +323,9 @@ int main(int argc, char *argv[])
 		aql_barrier_packet = (hsa_barrier_and_packet_t *)
 			(ring + meta->write_index.value * sizeof(*aql_barrier_packet));
 		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
-		aql_barrier_packet->completion_signal.handle = (uint64_t)signal;
+		aql_barrier_packet->completion_signal.index = 0;
+		aql_barrier_packet->completion_signal.flags =
+			DUC_SIGNAL_VALID | DUC_SIGNAL_NOTIFY_ON_WRITE;
 		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
 		meta->write_index.value += 1;
 		doorbell->doorbell_write_offset = 1;

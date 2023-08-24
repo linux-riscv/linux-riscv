@@ -77,7 +77,5 @@ int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
 				    u32 num_pages);
 int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
 				      struct dpa_process *p);
-int daffy_subscribe_signal_cmd(struct dpa_device *dpa,
-			       struct dpa_process *p, u64 event_id);
 
 #endif /* _DPA_DRM_DAFFY_H_ */

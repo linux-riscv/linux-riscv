@@ -72,14 +72,12 @@ enum {
 	DAFFY_CMD_DESTROY_QUEUE = 9,
 	DAFFY_CMD_REGISTER_SIGNAL_PAGES = 10,
 	DAFFY_CMD_UNREGISTER_SIGNAL_PAGES = 11,
-	DAFFY_CMD_SUBSCRIBE_SIGNAL = 12,
 	DAFFY_CMD_UPDATE_SIGNAL = 13,
 };
 
 enum {
 	DAFFY_RESP_SUCCESS = 1,
 	DAFFY_RESP_ERROR = 2,
-	DAFFY_RESP_ALREADY_SIGNALED = 3,
 };
 
 struct daffy_pkt_header {
@@ -157,11 +155,6 @@ struct daffy_unregister_signal_pages_cmd {
 	uint32_t pasid;
 };
 
-struct daffy_subscribe_signal_cmd {
-	uint64_t signal_idx;
-	uint32_t pasid;
-};
-
 struct daffy_update_signal_cmd {
 	uint64_t signal_idx;
 	uint32_t pasid;
@@ -180,7 +173,6 @@ struct daffy_queue_pkt {
 		struct daffy_destroy_queue_cmd ddqc;
 		struct daffy_register_signal_pages_cmd drspc;
 		struct daffy_unregister_signal_pages_cmd durspc;
-		struct daffy_subscribe_signal_cmd dssc;
 		struct daffy_update_signal_cmd dusc;
 
 		uint8_t buf[DAFFY_QUEUE_PKT_SIZE - sizeof(struct daffy_pkt_header)];

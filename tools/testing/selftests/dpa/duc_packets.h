@@ -22,9 +22,18 @@ typedef struct queue_metadata {
   queue_index_t write_index;
 } queue_metadata_t;
 
-typedef struct hsa_signal_s {
-  uint64_t handle;
-} hsa_signal_t;
+typedef enum {
+  /* Set if the signal handle is valid. */
+  DUC_SIGNAL_VALID = (1 << 0),
+  /* Set if the DUC should notify the host when the DUC writes the signal. */
+  DUC_SIGNAL_NOTIFY_ON_WRITE = (1 << 1),
+} duc_signal_flags_t;
+
+typedef struct duc_signal_handle_s {
+  uint8_t index;
+  uint8_t reserved[3];
+  uint32_t flags;
+} duc_signal_handle_t;
 
 typedef enum {
   /* Keep these in sync with HSA for now. */
@@ -55,17 +64,19 @@ typedef struct hsa_kernel_dispatch_packet_s {
   uint8_t num_pg_barriers;
   uint8_t num_gprs_blocks;
   uint8_t scratch_mem_allocs;
-  uint8_t reserved[5];
-  hsa_signal_t completion_signal;
+  // TODO: Add size, qlet/fifo mem and barriers and start offset when needed
+  uint8_t qlet;
+  uint8_t reserved[4];
+  duc_signal_handle_t completion_signal;
 } hsa_kernel_dispatch_packet_t;
 
 typedef struct hsa_barrier_and_packet_s {
   uint16_t header;
   uint16_t reserved0;
   uint32_t reserved1;
-  hsa_signal_t dep_signal[5];
+  duc_signal_handle_t dep_signal[5];
   uint64_t reserved2;
-  hsa_signal_t completion_signal;
+  duc_signal_handle_t completion_signal;
 } hsa_barrier_and_packet_t;
 
 typedef struct duc_dma_packet_s {
@@ -75,6 +86,6 @@ typedef struct duc_dma_packet_s {
   uint64_t reserved1[3];
   uint64_t src; /* Pattern for memset, address for memcpy */
   uint64_t dst;
-  uint64_t reserved3;
-  hsa_signal_t completion_signal;
+  uint64_t reserved2;
+  duc_signal_handle_t completion_signal;
 } duc_dma_packet_t;

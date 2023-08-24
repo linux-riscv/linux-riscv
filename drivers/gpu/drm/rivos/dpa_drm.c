@@ -323,19 +323,7 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	p->num_signal_waiters++;
 	spin_unlock_irqrestore(&p->signal_lock, flags);
 
-	/* Check if the signal has already been reset by firmware. */
 	signals = page_to_virt(p->signal_pages[page]);
-	if (!READ_ONCE(signals[index].signal_value))
-		goto done;
-
-	/*
-	 * Firmware will reject a subscription if the specified signal has already
-	 * been satisfied when it processes the subscription request.
-	 */
-	ret = daffy_subscribe_signal_cmd(p->dev, p, signal_idx);
-	if (ret)
-		goto done;
-
 	ret = wait_event_interruptible_timeout(p->signal_wqs[key],
 		READ_ONCE(signals[index].signal_value) == 0,
 		timespec64_to_jiffies(&timeout));

@@ -394,22 +394,3 @@ int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
 
 	return daffy_submit_sync(dpa, &pkt);
 }
-
-int daffy_subscribe_signal_cmd(struct dpa_device *dpa,
-				struct dpa_process *p, u64 signal_idx)
-{
-	struct daffy_queue_pkt pkt;
-	struct daffy_subscribe_signal_cmd *cmd;
-	int ret;
-
-	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = DAFFY_CMD_SUBSCRIBE_SIGNAL;
-	cmd = &pkt.u.dssc;
-	cmd->signal_idx = signal_idx;
-	cmd->pasid = p->pasid;
-
-	ret = daffy_submit_sync(dpa, &pkt);
-	if (ret < 0 && pkt.hdr.response == DAFFY_RESP_ALREADY_SIGNALED)
-		return 1;
-	return ret;
-}
