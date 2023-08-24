@@ -176,7 +176,10 @@ void isbdm_port_status_change(struct isbdm *ii)
 {
 	struct ib_event ib_event;
 
-	if ((ii->link_status != ISBDM_LINK_DOWN) && !ii->ib_device) {
+	if (!ii->ib_device) {
+		if (ii->link_status == ISBDM_LINK_DOWN)
+			return;
+
 		ii->ib_device = isbdm_device_create(ii);
 		if (!ii->ib_device) {
 			dev_err(&ii->pdev->dev,
