@@ -828,19 +828,26 @@ int isbdm_init_hw(struct isbdm *ii)
 {
 	int rc;
 
-	rc = init_tx_ring(ii);
-	if (rc)
-		return rc;
+	if (ISBDM_READQ(ii, ISBDM_EP_STATUS) & ISBDM_EP_STATUS_RASD_MODE) {
+		dev_info(&ii->pdev->dev, "RASD mode enabled");
+		ii->rasd_mode = true;
+
+	} else {
+		/* In non-RASD mode, fire up TX, RX, and the RMB table. */
+		rc = init_tx_ring(ii);
+		if (rc)
+			return rc;
+
+		rc = init_rmb_table(ii);
+		if (rc)
+			return rc;
+
+		rc = init_rx_ring(ii);
+		if (rc)
+			return rc;
+	}
 
 	rc = init_cmd_ring(ii);
-	if (rc)
-		return rc;
-
-	rc = init_rmb_table(ii);
-	if (rc)
-		return rc;
-
-	rc = init_rx_ring(ii);
 	if (rc)
 		return rc;
 
@@ -849,24 +856,34 @@ int isbdm_init_hw(struct isbdm *ii)
 
 void isbdm_deinit_hw(struct isbdm *ii)
 {
-	deinit_tx_ring(ii);
 	deinit_cmd_ring(ii);
-	deinit_rmb_table(ii);
-	deinit_rx_ring(ii);
+	if (!ii->rasd_mode) {
+		deinit_tx_ring(ii);
+		deinit_rmb_table(ii);
+		deinit_rx_ring(ii);
+	}
+
 	return;
 }
 
 static void isbdm_enable(struct isbdm *ii)
 {
 	/* Don't enable RXOVF or RXRTHR as the RX ring is empty. */
-	u64 mask = ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
-		   ISBDM_RXMF_IRQ | ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
+	u64 mask = ISBDM_CMDDONE_IRQ | ISBDM_CMDMF_IRQ;
+
+	if (!ii->rasd_mode) {
+		mask |= ISBDM_TXDONE_IRQ | ISBDM_TXMF_IRQ | ISBDM_RXDONE_IRQ |
+			ISBDM_RXMF_IRQ;
+	}
 
 	/* Clear out any old interrupts (except LNKSTS, we want that). */
 	ISBDM_WRITEQ(ii, ISBDM_IPSR, mask);
-	enable_tx_ring(ii);
+	if (!ii->rasd_mode) {
+		enable_tx_ring(ii);
+		enable_rx_ring(ii);
+	}
+
 	enable_cmd_ring(ii);
-	enable_rx_ring(ii);
 	enable_interrupt(ii, mask | ISBDM_LNKSTS_IRQ);
 	return;
 }
@@ -1017,6 +1034,11 @@ int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
 	/* This member being zero is representative of a free slot. */
 	WARN_ON_ONCE(rmb->sw_avail == 0);
 
+	if (ii->rasd_mode) {
+		dev_warn(&ii->pdev->dev, "No RMBs in RASD mode\n");
+		return -EINVAL;
+	}
+
 	/* Hunt for a free entry in the hardware. */
 	mutex_lock(&ii->rmb_table_lock);
 	prev_alloced_rmbi = ii->prev_alloced_rmbi;
@@ -1057,6 +1079,11 @@ int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi)
 	int rc = -ENOENT;
 	__le64 token = cpu_to_le64((unsigned long)file);
 
+	if (ii->rasd_mode) {
+		dev_warn(&ii->pdev->dev, "No RMBs in RASD mode\n");
+		return -EAGAIN;
+	}
+
 	if (rmbi >= ISBDMEX_RMB_TABLE_SIZE) {
 		dev_err(&ii->pdev->dev, "RMB index %u out of range\n", rmbi);
 		return -ERANGE;
@@ -1073,6 +1100,8 @@ int isbdmex_free_rmb(struct isbdm *ii, struct file *file, int rmbi)
 /* Unconditionally free the RMB at the given index. */
 void isbdm_free_rmb(struct isbdm *ii, int rmbi)
 {
+	WARN_ON_ONCE(ii->rasd_mode);
+
 	mutex_lock(&ii->rmb_table_lock);
 
 	/*
@@ -1094,6 +1123,10 @@ void isbdm_free_all_rmbs(struct isbdm *ii, struct file *file)
 	int idx;
 
 	__le64 token = cpu_to_le64((unsigned long)file);
+	/* No RMBs in RASD mode. */
+	if (ii->rasd_mode)
+		return;
+
 	mutex_lock(&ii->rmb_table_lock);
 	for (idx = 0; idx < ISBDMEX_RMB_TABLE_SIZE; idx++) {
 		if (ii->rmb_table[idx].sw_avail == token) {
@@ -1245,6 +1278,9 @@ void isbdm_rx_threshold(struct isbdm *ii)
 static void isbdm_connect(struct isbdm *ii)
 {
 	isbdm_enable(ii);
+	if (ii->rasd_mode)
+		return;
+
 	/* Refill RX since it was drained on disconnect. */
 	isbdm_rx_threshold(ii);
 	/* Enable RX interrupts now that RX is full of descriptors. */
@@ -1456,8 +1492,11 @@ static void isbdm_disconnect(struct isbdm *ii)
 	isbdm_disable(ii);
 
 	/* Clean up resources for all the in-flight and pending I/O. */
-	isbdm_abort_tx(ii);
-	isbdm_abort_rx(ii);
+	if (!ii->rasd_mode) {
+		isbdm_abort_tx(ii);
+		isbdm_abort_rx(ii);
+	}
+
 	isbdm_abort_cmds(ii);
 }
 
