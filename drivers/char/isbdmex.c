@@ -306,7 +306,9 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		break;
 
 	case IOCTL_RX_REFILL:
-		isbdm_rx_threshold(ii);
+		if (!ii->rasd_mode)
+			isbdm_rx_threshold(ii);
+
 		break;
 
 	case IOCTL_ALLOC_RMB:
@@ -348,6 +350,11 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 	struct isbdm *ii = ctx->isbdm;
 	ssize_t done;
 
+	if (ii->rasd_mode) {
+		dev_warn(&ii->pdev->dev, "No RX in RASD mode\n");
+		return -EINVAL;
+	}
+
 	do {
 		done = wait_event_interruptible_timeout(ii->read_wait_queue,
 					!list_empty(&ii->rx_ring.wait_list) ||
@@ -388,6 +395,11 @@ static ssize_t isbdmex_write(struct file *file, const char __user *va,
 	struct isbdm_user_ctx *ctx = file->private_data;
 	struct isbdm *ii = ctx->isbdm;
 	ssize_t rc;
+
+	if (ii->rasd_mode) {
+		dev_err(&ii->pdev->dev, "No TX in RASD mode\n");
+		return -EINVAL;
+	}
 
 	rc = isbdmex_raw_send(ii, va, size);
 	return rc;
@@ -477,10 +489,6 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ii->base = pcim_iomap_table(pdev)[BAR_0];
-	ret = isbdm_map_rasd_regions(ii);
-	if (ret)
-		return ret;
-
 	ii->dvsec_cap = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_RIVOS,
 						  ISBDM_DVSEC_ID);
 
@@ -499,12 +507,21 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
+	if (ii->rasd_mode) {
+		ret = isbdm_map_rasd_regions(ii);
+		if (ret) {
+			dev_err_probe(dev, ret, "Failed to map RASD regions\n");
+			goto deinit;
+		}
+	}
+
 	pci_set_master(pdev);
+
 /* No PASIDs in hybrid sim. */
 #ifndef CONFIG_RIVOS_ISBDM_HYBRID_SIM
 	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		dev_err_probe(dev, ret, "SVA enablement failed\n");
-		goto deinit;
+		goto deinit_rasd;
 	}
 #endif
 
@@ -530,7 +547,7 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!ii->inline_pool)  {
 		ret = -ENOMEM;
 		dev_err_probe(dev, ret, "Cannot create dma pool\n");
-		goto deinit;
+		goto deinit_rasd;
 	}
 
 	ret = isbdmex_request_irq(pdev);
@@ -582,6 +599,10 @@ release_irq:
 
 release_pool:
 	dma_pool_destroy(ii->inline_pool);
+
+deinit_rasd:
+	if (ii->rasd_mode)
+		isbdm_free_rasd_control(ii);
 
 deinit:
 	isbdm_deinit_hw(ii);
