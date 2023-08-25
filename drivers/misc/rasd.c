@@ -11,6 +11,7 @@
 
 #include <linux/bitmap.h>
 #include <linux/device.h>
+#include <linux/iommu.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/pci-epf.h>
@@ -197,6 +198,53 @@ static const struct file_operations rasd_fops = {
 /******************************************************************************/
 /* Probe, and PCI plumbing */
 
+/* Map a region fixed in IOVA space that Sentinel can DMA to and from. */
+int alloc_test_region(struct rasd *ra)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(&ra->pdev->dev);
+	int ret;
+
+	ra->test_region = dma_alloc_coherent(&ra->pdev->dev,
+					     RASD_TEST_REGION_SIZE,
+					     &ra->test_region_physical,
+					     GFP_KERNEL);
+
+	if (!ra->test_region) {
+		dev_warn(&ra->pdev->dev, "Failed to allocate test region\n");
+		return -ENOMEM;
+	}
+
+	ret = iommu_map(domain, RASD_TEST_REGION_IOVA, ra->test_region_physical,
+			RASD_TEST_REGION_SIZE,
+			IOMMU_READ | IOMMU_WRITE | IOMMU_MMIO,
+			GFP_KERNEL);
+
+	if (ret) {
+		dev_warn(&ra->pdev->dev, "Failed to map test region: %d", ret);
+		dma_free_coherent(&ra->pdev->dev, RASD_TEST_REGION_SIZE,
+				  ra->test_region, ra->test_region_physical);
+
+		ra->test_region = NULL;
+		return ret;
+	}
+
+	return 0;
+}
+
+void free_test_region(struct rasd *ra)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(&ra->pdev->dev);
+
+	iommu_unmap(domain,
+		    RASD_TEST_REGION_IOVA,
+		    RASD_TEST_REGION_SIZE);
+
+	dma_free_coherent(&ra->pdev->dev, RASD_TEST_REGION_SIZE,
+			  ra->test_region, ra->test_region_physical);
+
+	ra->test_region = NULL;
+}
+
 static int rasd_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	int ret;
@@ -247,6 +295,7 @@ static int rasd_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		 ra->instance, ra->regs, ra->ddr, ra->hbm, ra->irqs[0],
 		 ra->irqs[1]);
 
+	alloc_test_region(ra);
 	/* Register a misc device */
 	ra->misc.minor = MISC_DYNAMIC_MINOR;
 	ra->misc.fops = &rasd_fops;
@@ -284,6 +333,7 @@ static void rasd_remove(struct pci_dev *pdev)
 	struct rasd *ra = (struct rasd *)pci_get_drvdata(pdev);
 
 	/* Some resources are freed by devres */
+	free_test_region(ra);
 	misc_deregister(&ra->misc);
 	rasd_del_instance(ra);
 	return;
