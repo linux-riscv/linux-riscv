@@ -335,6 +335,10 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		rc = isbdmex_link_status_op(ii, argp64);
 		break;
 
+	case IOCTL_GET_EP_STATUS:
+		rc = put_user(isbdmex_ioctl_get_ep_status(ii), argp64);
+		break;
+
 	default:
 		rc = -ENOENT;
 		break;

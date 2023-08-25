@@ -279,9 +279,17 @@ struct isbdm_remote_buffer {
 #define ISBDM_COMMAND_CAS 3ull
 /* Fetch and add */
 #define ISBDM_COMMAND_FETCH_ADD 4ull
+/* Read from remote host into local buffer. */
+#define ISBDM_COMMAND_HOST_READ 9ull
+/* Write from local buffer to remote host */
+#define ISBDM_COMMAND_HOST_WRITE 10ull
+/* Compare and swap to a host */
+#define ISBDM_COMMAND_HOST_CAS 11ull
+/* Fetch and add to a host */
+#define ISBDM_COMMAND_HOST_FETCH_ADD 12ull
 
 /* This should always be one higher than the highest command. */
-#define ISBDM_COMMAND_COUNT 5
+#define ISBDM_COMMAND_COUNT 13
 
 /* Fields within the fifth qword of the command descriptor */
 /* Offset within the remote memory buffer */
@@ -432,6 +440,7 @@ struct isbdm_handshake_packet {
 #define IOCTL_GET_LAST_ERROR	_IO('3', 8)	/* Get error status. */
 #define IOCTL_GET_RX_DROP_CNT	_IO('3', 9)	/* Get RX drop count. */
 #define IOCTL_LINK_STATUS_OP	_IO('3', 10)	/* Link status operations */
+#define IOCTL_GET_EP_STATUS	_IO('3', 11)	/* Get EP_STATUS register */
 
 #define IOCTL_LINK_STATUS_OP_DISCONNECT 1
 #define IOCTL_LINK_STATUS_OP_RECONNECT 2
@@ -714,6 +723,7 @@ void isbdm_complete_link_status_change(struct isbdm *ii);
 u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask);
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
+u64 isbdmex_ioctl_get_ep_status(struct isbdm *ii);
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
 int isbdmex_link_status_op(struct isbdm *ii, void __user *argp);
 

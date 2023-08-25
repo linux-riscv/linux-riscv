@@ -378,6 +378,7 @@ static int init_tx_ring(struct isbdm *ii)
 static int init_cmd_ring(struct isbdm *ii)
 {
 	u64 base;
+	size_t notify_size;
 	int rc;
 
 	rc = alloc_ring(ii, &ii->cmd_ring, sizeof(struct isbdm_rdma_command),
@@ -386,12 +387,21 @@ static int init_cmd_ring(struct isbdm *ii)
 		return rc;
 
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_BASE, base);
+	notify_size = (sizeof(u32) * ISBDMEX_RING_SIZE);
+	ii->notify_area = dma_alloc_coherent(&ii->pdev->dev, notify_size,
+					     &ii->notify_area_physical,
+					     GFP_KERNEL);
+
+	if (!ii->notify_area) {
+		free_ring(ii, &ii->cmd_ring);
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 
 static int init_rmb_table(struct isbdm *ii)
 {
-	size_t alloc_size;
 	size_t table_size;
 	u64 base;
 
@@ -410,8 +420,7 @@ static int init_rmb_table(struct isbdm *ii)
 	table_size = sizeof(struct isbdm_remote_buffer) *
 		     ISBDMEX_RMB_TABLE_SIZE;
 
-	alloc_size = table_size + (sizeof(u32) * ISBDMEX_RING_SIZE);
-	ii->rmb_table = dma_alloc_coherent(&ii->pdev->dev, alloc_size,
+	ii->rmb_table = dma_alloc_coherent(&ii->pdev->dev, table_size,
 					   &ii->rmb_table_physical, GFP_KERNEL);
 
 	if (!ii->rmb_table)
@@ -422,8 +431,6 @@ static int init_rmb_table(struct isbdm *ii)
 
 	ISBDM_WRITEQ(ii, ISBDM_RMBA_BASE, base);
 	mutex_init(&ii->rmb_table_lock);
-	ii->notify_area = (u32 *)(ii->rmb_table + ISBDMEX_RMB_TABLE_SIZE);
-	ii->notify_area_physical = ii->rmb_table_physical + table_size;
 	return 0;
 }
 
@@ -466,8 +473,14 @@ static void deinit_tx_ring(struct isbdm *ii)
 
 static void deinit_cmd_ring(struct isbdm *ii)
 {
+	size_t notify_size = (sizeof(u32) * ISBDMEX_RING_SIZE);
+
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_BASE, 0);
 	free_ring(ii, &ii->cmd_ring);
+	dma_free_coherent(&ii->pdev->dev, notify_size, ii->notify_area,
+			  ii->notify_area_physical);
+
+	ii->notify_area = NULL;
 	return;
 }
 
@@ -484,7 +497,6 @@ static void deinit_rmb_table(struct isbdm *ii)
 				  ii->rmb_table_physical);
 
 		ii->rmb_table = NULL;
-		ii->notify_area = NULL;
 	}
 
 	return;
@@ -1712,6 +1724,11 @@ u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask)
 u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii)
 {
 	return ISBDM_READQ(ii, ISBDM_IPSR);
+}
+
+u64 isbdmex_ioctl_get_ep_status(struct isbdm *ii)
+{
+	return ISBDM_READQ(ii, ISBDM_EP_STATUS);
 }
 
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii)
