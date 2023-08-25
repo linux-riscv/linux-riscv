@@ -1578,16 +1578,18 @@ static void isbdm_check_link(struct isbdm *ii)
 
 /* Let the Root of Trust know the link state has changed. */
 static void isbdm_update_rot_link_state(struct isbdm *ii) {
-	struct rivos_doe_isbdm_status msg;
+	struct rivos_doe_isbdm_status_request request;
+	struct rivos_doe_isbdm_status_response response;
+	int32_t error;
 	int rc;
 	u32 state;
 
 	if (!ii->rot)
 		return;
 
-	memset(&msg, 0, sizeof(msg));
-	rivos_rot_init_fidl_msg(&msg.hdr, RIVOS_FIDL_ORD_ISBDM_STATUS);
-	msg.rid = cpu_to_le32(pci_dev_id(ii->pdev));
+	memset(&request, 0, sizeof(request));
+	rivos_rot_init_fidl_msg(&request.hdr, RIVOS_FIDL_ORD_ISBDM_STATUS);
+	request.rid = cpu_to_le32(pci_dev_id(ii->pdev));
 	switch (ii->link_status) {
 	case ISBDM_LINK_UPSTREAM:
 		state = RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_UPSTREAM;
@@ -1603,10 +1605,35 @@ static void isbdm_update_rot_link_state(struct isbdm *ii) {
 		break;
 	}
 
-	msg.state = cpu_to_le32(state);
-	rc = rivos_fidl_doe(ii->rot, &msg, sizeof(msg), NULL, 0);
-	if (rc)
+	request.state = cpu_to_le32(state);
+	rc = rivos_fidl_doe(ii->rot, &request, sizeof(request), &response,
+			    sizeof(response));
+	if (rc < 0) {
 		dev_warn(&ii->pdev->dev, "Failed to update RoT: %d\n", rc);
+
+	} else if (rc != sizeof(response)) {
+		dev_warn(&ii->pdev->dev,
+			 "Failed to update RoT: Expected %d byte response, received %d bytes\n",
+			 sizeof(response), rc);
+
+		return;
+	}
+
+	error = le32_to_cpu(response.error);
+
+	/*
+	 * TODO: Ted Logan was going to add a NOT_IMPLEMENTED error that could
+	 * be more safely ignored.
+	 */
+	if (error == RIVOS_DOE_ROT_ERROR_NOT_SUPPORTED) {
+		dev_dbg(&ii->pdev->dev,
+			"Ignoring not_supported error updating RoT\n");
+
+	} else if (error != RIVOS_DOE_ROT_ERROR_SUCCESS) {
+		dev_warn(&ii->pdev->dev,
+			 "Failed to update RoT: RoT returned %d\n",
+			 error);
+	}
 }
 
 /* Called when the link goes down or after a handshake has completed. */
