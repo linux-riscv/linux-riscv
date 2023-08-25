@@ -77,6 +77,10 @@ static const char *isbdm_cmd_name[ISBDM_COMMAND_COUNT] = {
 	[ISBDM_COMMAND_WRITE] = "write",
 	[ISBDM_COMMAND_CAS] = "cas",
 	[ISBDM_COMMAND_FETCH_ADD] = "add",
+	[ISBDM_COMMAND_HOST_READ] = "host_read",
+	[ISBDM_COMMAND_HOST_WRITE] = "host_write",
+	[ISBDM_COMMAND_HOST_CAS] = "host_cas",
+	[ISBDM_COMMAND_HOST_FETCH_ADD] = "host_add",
 };
 
 static ssize_t isbdm_debug_cmdstats_read(struct file *filp, char __user *buffer,
