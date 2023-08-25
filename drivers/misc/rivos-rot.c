@@ -41,7 +41,7 @@ static struct rivos_rot_device *rivos_rot_device_create(struct pci_dev *pdev)
 	rot->dev = dev;
 	rot->fidl_mb = pci_find_doe_mailbox(pdev,
 					    PCI_VENDOR_ID_RIVOS,
-					    RIVOS_DOE_ROT_FIDL);
+					    RIVOS_DOE_ROT_FIDL_REPORTING);
 
 	if (!rot->fidl_mb) {
 		dev_warn(&pdev->dev, "Failed to find ISBDM mailbox\n");
@@ -105,8 +105,9 @@ int rivos_fidl_doe(struct rivos_rot_device *rot, const void *request,
 		goto out;
 	}
 
-	rc = pci_doe(rot->fidl_mb, PCI_VENDOR_ID_RIVOS, RIVOS_DOE_ROT_FIDL,
-		     request, request_sz, response, response_sz);
+	rc = pci_doe(rot->fidl_mb, PCI_VENDOR_ID_RIVOS,
+		     RIVOS_DOE_ROT_FIDL_REPORTING, request, request_sz,
+		     response, response_sz);
 
 out:
 	mutex_unlock(&rot->mbox_mutex);
