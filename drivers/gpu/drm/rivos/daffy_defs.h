@@ -105,11 +105,8 @@ struct daffy_unregister_pasid_cmd {
 struct daffy_create_queue_cmd {
 	/* in */
 	uint64_t ring_base_address;
-	uint64_t write_pointer_address;
-	uint64_t read_pointer_address;
 	uint32_t ring_size;
 	uint32_t queue_priority;
-	uint32_t queue_type;
 	uint32_t pasid;
 
 	/* out */
