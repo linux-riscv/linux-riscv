@@ -44,18 +44,13 @@ static void dpa_release_process(struct kref *ref);
 static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
 						    u32 pasid)
 {
-	struct list_head *cur;
-	struct dpa_process *dpa_app;
+	struct dpa_process *cur, *dpa_app = NULL;
 
 	mutex_lock(&dpa->dpa_processes_lock);
-
-	list_for_each(cur, &dpa->dpa_processes) {
-		struct dpa_process *cur_process =
-			container_of(cur, struct dpa_process,
-				     dpa_process_list);
-		if (cur_process->pasid == pasid) {
-			dpa_app = cur_process;
-			kref_get(&dpa_app->ref);
+	list_for_each_entry(cur, &dpa->dpa_processes, dpa_process_list) {
+		if (cur->pasid == pasid) {
+			if (kref_get_unless_zero(&cur->ref))
+				dpa_app = cur;
 			break;
 		}
 	}
@@ -459,20 +454,14 @@ out:
 
 static void dpa_release_process(struct kref *ref)
 {
-	struct dpa_process *p = container_of(ref, struct dpa_process,
-						 ref);
+	struct dpa_process *p = container_of(ref, struct dpa_process, ref);
 	struct dpa_device *dpa = p->dev;
 	int ret;
-
-	mutex_lock(&dpa->dpa_processes_lock);
 
 	dev_warn(dpa->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
 	dpa_del_all_queues(p);
-	list_del(&p->dpa_process_list);
-	dpa->dpa_process_count--;
-	mutex_unlock(&dpa->dpa_processes_lock);
 
 	ret = daffy_unregister_pasid_cmd(p->dev, p->pasid);
 	if (ret) {
@@ -489,6 +478,12 @@ static void dpa_release_process(struct kref *ref)
 		unpin_user_pages(p->signal_pages, p->num_signal_pages);
 
 	iommu_sva_unbind_device(p->sva);
+
+	mutex_lock(&dpa->dpa_processes_lock);
+	list_del(&p->dpa_process_list);
+	dpa->dpa_process_count--;
+	mutex_unlock(&dpa->dpa_processes_lock);
+
 	kfree(p);
 }
 
