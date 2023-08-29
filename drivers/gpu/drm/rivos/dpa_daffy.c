@@ -377,3 +377,21 @@ int daffy_set_signal_pages_cmd(struct dpa_device *dpa, struct dpa_process *p,
 
 	return daffy_submit_sync(dpa, &pkt);
 }
+
+int daffy_set_notification_queue_cmd(struct dpa_device *dpa,
+				     struct dpa_process *p,
+				     struct drm_dpa_set_notification_queue *args)
+{
+	struct daffy_queue_pkt pkt;
+	struct daffy_set_notification_queue_cmd *cmd;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DAFFY_CMD_SET_NOTIFICATION_QUEUE;
+	cmd = &pkt.u.dsnqc;
+	cmd->base_address = args->base_address;
+	cmd->ring_size = args->ring_size;
+	cmd->pasid = p->pasid;
+	cmd->signal_id = args->signal_id;
+
+	return daffy_submit_sync(dpa, &pkt);
+}

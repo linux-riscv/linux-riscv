@@ -16,6 +16,7 @@
 #define DRM_DPA_UPDATE_QUEUE					0x4
 #define DRM_DPA_SET_SIGNAL_PAGES				0x7
 #define DRM_DPA_WAIT_SIGNAL					0x8
+#define DRM_DPA_SET_NOTIFICATION_QUEUE				0x9
 
 #define DPA_IOCTL(dir, name, str) \
 	DRM_##dir(DRM_COMMAND_BASE + DRM_DPA_##name, struct drm_dpa_##str)
@@ -69,6 +70,18 @@ struct drm_dpa_wait_signal {
 	struct __kernel_timespec timeout;
 };
 
+/*
+ * Registers the DPA -> userspace notification queue at base_address. The
+ * specified signal_id will be written by the DPA whenever it posts a packet
+ * to the queue.
+ */
+struct drm_dpa_set_notification_queue {
+	__u64 base_address;
+	__u32 ring_size;
+	__u8 signal_id;
+	__u8 reserved[3];
+};
+
 #define DRM_IOCTL_DPA_GET_INFO \
 	DPA_IOCTL(IOWR, GET_INFO, get_info)
 #define DRM_IOCTL_DPA_CREATE_QUEUE \
@@ -81,7 +94,8 @@ struct drm_dpa_wait_signal {
 	DPA_IOCTL(IOWR, SET_SIGNAL_PAGES, set_signal_pages)
 #define DRM_IOCTL_DPA_WAIT_SIGNAL \
 	DPA_IOCTL(IOWR, WAIT_SIGNAL, wait_signal)
-
+#define DRM_IOCTL_DPA_SET_NOTIFICATION_QUEUE \
+	DPA_IOCTL(IOWR, SET_NOTIFICATION_QUEUE, set_notification_queue)
 
 /* Each signal takes one 64B cacheline */
 struct drm_dpa_signal {

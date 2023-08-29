@@ -403,6 +403,20 @@ done:
 	return ret;
 }
 
+static int dpa_drm_ioctl_set_notification_queue(struct drm_device *dev,
+						void *data,
+						struct drm_file *file)
+{
+	struct dpa_process *p = file->driver_priv;
+	struct drm_dpa_set_notification_queue *args = data;
+
+	if ((args->base_address & (PAGE_SIZE - 1)) ||
+	    !is_power_of_2(args->ring_size))
+		return -EINVAL;
+
+	return daffy_set_notification_queue_cmd(p->dev, p, args);
+}
+
 static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_GET_INFO, dpa_drm_ioctl_get_info, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_CREATE_QUEUE, dpa_drm_ioctl_create_queue, DRM_RENDER_ALLOW),
@@ -410,6 +424,7 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_UPDATE_QUEUE, dpa_drm_ioctl_update_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_SET_SIGNAL_PAGES, dpa_drm_ioctl_set_signal_pages, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_SET_NOTIFICATION_QUEUE, dpa_drm_ioctl_set_notification_queue, DRM_RENDER_ALLOW),
 };
 
 static int dpa_drm_mmap(struct file *filp, struct vm_area_struct *vma)

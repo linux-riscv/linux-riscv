@@ -74,5 +74,8 @@ int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id);
 int daffy_set_signal_pages_cmd(struct dpa_device *dpa, struct dpa_process *p,
 			       struct drm_dpa_set_signal_pages *args,
 			       u32 num_pages);
+int daffy_set_notification_queue_cmd(struct dpa_device *dpa,
+				     struct dpa_process *p,
+				     struct drm_dpa_set_notification_queue *args);
 
 #endif /* _DPA_DRM_DAFFY_H_ */
