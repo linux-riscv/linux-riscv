@@ -78,7 +78,7 @@ static void alloc_gpu_memory(void **ptr, size_t size)
 static struct drm_dpa_signal *get_signal_page()
 {
 	int ret;
-	struct drm_dpa_register_signal_pages args;
+	struct drm_dpa_set_signal_pages args;
 	struct drm_dpa_signal *event_page;
 
 	alloc_aligned_host_memory((void **)&event_page, getpagesize());
@@ -86,7 +86,7 @@ static struct drm_dpa_signal *get_signal_page()
 	args.va = (uint64_t)event_page;
 	args.size = getpagesize();
 
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_REGISTER_SIGNAL_PAGES, &args);
+	ret = ioctl(drm_fd, DRM_IOCTL_DPA_SET_SIGNAL_PAGES, &args);
 	if (ret) {
 		perror("ioctl register signal pages");
 		exit(1);

@@ -361,35 +361,18 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 	return 0;
 }
 
-int daffy_register_signal_pages_cmd(struct dpa_device *dpa,
-				    struct dpa_process *p,
-				    struct drm_dpa_register_signal_pages *args,
-				    u32 num_pages)
+int daffy_set_signal_pages_cmd(struct dpa_device *dpa, struct dpa_process *p,
+			       struct drm_dpa_set_signal_pages *args,
+			       u32 num_pages)
 {
 	struct daffy_queue_pkt pkt;
-	struct daffy_register_signal_pages_cmd *cmd;
+	struct daffy_set_signal_pages_cmd *cmd;
 
 	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = DAFFY_CMD_REGISTER_SIGNAL_PAGES;
-	cmd = &pkt.u.drspc;
+	pkt.hdr.command = DAFFY_CMD_SET_SIGNAL_PAGES;
+	cmd = &pkt.u.dsspc;
 	cmd->base_address = args->va;
 	cmd->num_pages = num_pages;
-	/* Only support default signal type for now. */
-	cmd->type = DAFFY_SIGNAL_EVENT;
-	cmd->pasid = p->pasid;
-
-	return daffy_submit_sync(dpa, &pkt);
-}
-
-int daffy_unregister_signal_pages_cmd(struct dpa_device *dpa,
-				      struct dpa_process *p)
-{
-	struct daffy_queue_pkt pkt;
-	struct daffy_unregister_signal_pages_cmd *cmd;
-
-	memset(&pkt, 0, sizeof(pkt));
-	pkt.hdr.command = DAFFY_CMD_UNREGISTER_SIGNAL_PAGES;
-	cmd = &pkt.u.durspc;
 	cmd->pasid = p->pasid;
 
 	return daffy_submit_sync(dpa, &pkt);

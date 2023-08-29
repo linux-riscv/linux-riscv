@@ -190,11 +190,11 @@ static int dpa_drm_ioctl_get_info(struct drm_device *drm, void *data,
 	return 0;
 }
 
-static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *data,
-					       struct drm_file *file)
+static int dpa_drm_ioctl_set_signal_pages(struct drm_device *dev, void *data,
+					  struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
-	struct drm_dpa_register_signal_pages *args = data;
+	struct drm_dpa_set_signal_pages *args = data;
 	struct page *pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	u32 num_pages = args->size / PAGE_SIZE;
 	unsigned long flags;
@@ -212,7 +212,7 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 	mutex_lock(&p->lock);
 
 	/* XXX we don't support resize yet */
-	if (p->signal_pages_count) {
+	if (p->num_signal_pages) {
 		ret = -EBUSY;
 		goto out_unlock;
 	}
@@ -237,8 +237,8 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 		goto out_unlock;
 	}
 
-	// Tell the DUC we've allocated a new range of signal pages
-	ret = daffy_register_signal_pages_cmd(p->dev, p, args, num_pages);
+	/* Tell the DUC we've allocated a new range of signal pages. */
+	ret = daffy_set_signal_pages_cmd(p->dev, p, args, num_pages);
 	if (ret) {
 		unpin_user_pages(pages, count);
 		goto out_unlock;
@@ -246,36 +246,13 @@ static int dpa_drm_ioctl_register_signal_pages(struct drm_device *dev, void *dat
 
 	spin_lock_irqsave(&p->signal_lock, flags);
 	memcpy(p->signal_pages, pages, num_pages * sizeof(*p->signal_pages));
-	p->signal_pages_count = num_pages;
+	p->num_signal_pages = num_pages;
 	spin_unlock_irqrestore(&p->signal_lock, flags);
 
 out_unlock:
 	mutex_unlock(&p->lock);
 
 	return ret;
-}
-
-static void dpa_remove_signal_pages(struct dpa_process *p)
-{
-	int ret = 0;
-
-	mutex_lock(&p->lock);
-
-	/*
-	 * We only remove signal pages when the fd is closed, so there must
-	 * not be any threads in wait_signal() at this piont.
-	 */
-	WARN_ON(p->num_signal_waiters);
-
-	ret = daffy_unregister_signal_pages_cmd(p->dev, p);
-	if (ret) {
-		dev_warn(p->dev->dev, "%s: DUC failed to unmap signal page(s) for pasid %u\n",
-			__func__, p->pasid);
-	}
-
-	unpin_user_pages(p->signal_pages, p->signal_pages_count);
-
-	mutex_unlock(&p->lock);
 }
 
 int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
@@ -384,7 +361,7 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		unsigned int pg = args->signal_ids[i] /
 			DPA_DRM_SIGNALS_PER_PAGE;
 
-		if (pg >= p->signal_pages_count) {
+		if (pg >= p->num_signal_pages) {
 			spin_unlock_irqrestore(&p->signal_lock, flags);
 			return -EINVAL;
 		}
@@ -436,7 +413,7 @@ static const struct drm_ioctl_desc dpadrm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(DPA_CREATE_QUEUE, dpa_drm_ioctl_create_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_DESTROY_QUEUE, dpa_drm_ioctl_destroy_queue, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_UPDATE_QUEUE, dpa_drm_ioctl_update_queue, DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(DPA_REGISTER_SIGNAL_PAGES, dpa_drm_ioctl_register_signal_pages, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(DPA_SET_SIGNAL_PAGES, dpa_drm_ioctl_set_signal_pages, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(DPA_WAIT_SIGNAL, dpa_drm_ioctl_wait_signal, DRM_RENDER_ALLOW),
 };
 
@@ -492,9 +469,6 @@ static void dpa_release_process(struct kref *ref)
 	dev_warn(dpa->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
-	// Unpin signal pages and inform the DUC
-	dpa_remove_signal_pages(p);
-
 	dpa_del_all_queues(p);
 	list_del(&p->dpa_process_list);
 	dpa->dpa_process_count--;
@@ -505,6 +479,14 @@ static void dpa_release_process(struct kref *ref)
 		dev_warn(dpa->dev, "%s: Failed to unregister pasid %d from DUC\n",
 			__func__, p->pasid);
 	}
+
+	/*
+	 * We're dropping the last reference to the process, so there must
+	 * not be any threads in wait_signal() at this piont.
+	 */
+	WARN_ON(p->num_signal_waiters);
+	if (p->num_signal_pages > 0)
+		unpin_user_pages(p->signal_pages, p->num_signal_pages);
 
 	iommu_sva_unbind_device(p->sva);
 	kfree(p);

@@ -103,7 +103,7 @@ struct dpa_process {
 	struct list_head queue_list;
 
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
-	unsigned int signal_pages_count;
+	unsigned int num_signal_pages;
 	unsigned int num_signal_waiters;
 	spinlock_t signal_lock;
 #define SIGNAL_WQ_HASH_BITS	3
