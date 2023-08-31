@@ -2011,6 +2011,8 @@ static void isbdm_handle_handshake(struct isbdm *ii, struct isbdm_buf *buf)
 	flags = le16_to_cpu(hs->flags);
 	old_peer_id = ii->peer_interface_id;
 	ii->peer_interface_id = le64_to_cpu(hs->interface_id);
+	cancel_delayed_work_sync(&ii->handshake_work);
+	ii->handshake_retry_count = 0;
 	if (ii->link_status == ISBDM_LINK_UPSTREAM) {
 		if (flags & ISBDM_HANDSHAKE_UPSTREAM) {
 			dev_warn(&ii->pdev->dev,
@@ -2040,9 +2042,6 @@ static void isbdm_handle_handshake(struct isbdm *ii, struct isbdm_buf *buf)
 		dev_warn(&ii->pdev->dev, "Got handshake while offline\n");
 		return;
 	}
-
-	cancel_delayed_work_sync(&ii->handshake_work);
-	ii->handshake_retry_count = 0;
 
 	/* Send one more handshake if the other side hasn't seen us yet. */
 	ii->send_handshake_ack = !(flags & ISBDM_HANDSHAKE_ACK);
