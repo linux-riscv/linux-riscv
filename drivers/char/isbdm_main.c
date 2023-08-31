@@ -188,6 +188,13 @@ void isbdm_port_status_change(struct isbdm *ii)
 
 	memset(&ib_event, 0, sizeof(ib_event));
 
+	if (!ii->ib_device) {
+		dev_info(&ii->pdev->dev,
+			 "No ib device, skipping notification\n");
+
+		return;
+	}
+
 	ib_event.device = &ii->ib_device->base_dev;
 	ib_event.element.port_num = 1;
 	if (ii->link_status == ISBDM_LINK_DOWN) {

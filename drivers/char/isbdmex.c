@@ -87,9 +87,9 @@ static struct isbdm *isbdmex_locate(int minor)
 static irqreturn_t isbdmex_irq_handler(int irq, void *data)
 {
 	struct isbdm *ii = data;
-	u64 ipsr = ISBDM_READQ(ii, ISBDM_IPSR);
+	u64 ipsr = ISBDM_READQ(ii, ISBDM_IPSR) & ~ii->irq_mask;
 
-	if (ipsr & ~ii->irq_mask) {
+	if (ipsr) {
 		/* TODO: I don't need an exchange, just a write. How to do? */
 		atomic64_xchg(&ii->pending_irqs, ipsr);
 		return IRQ_WAKE_THREAD;
@@ -367,6 +367,8 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 
 			if (done < 0)
 				break;
+
+			return -EAGAIN;
 		}
 
 		done = isbdmex_read_one(ii, va, size);
