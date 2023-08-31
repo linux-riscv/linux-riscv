@@ -1651,16 +1651,22 @@ out:
 u64 isbdmex_ioctl_set_ipmr(struct isbdm *ii, u64 mask)
 {
 	u64 old_value = ISBDM_READQ(ii, ISBDM_IPMR);
+	u64 new_value = old_value | mask;
 
-	ISBDM_WRITEQ(ii, ISBDM_IPMR, old_value | mask);
+	ii->irq_mask = new_value;
+	smp_mb();
+	ISBDM_WRITEQ(ii, ISBDM_IPMR, new_value);
 	return old_value;
 }
 
 u64 isbdmex_ioctl_clear_ipmr(struct isbdm *ii, u64 mask)
 {
 	u64 old_value = ISBDM_READQ(ii, ISBDM_IPMR);
+	u64 new_value = old_value & ~mask;
 
-	ISBDM_WRITEQ(ii, ISBDM_IPMR, old_value & ~mask);
+	ii->irq_mask = new_value;
+	smp_mb();
+	ISBDM_WRITEQ(ii, ISBDM_IPMR, new_value);
 	return old_value;
 }
 
