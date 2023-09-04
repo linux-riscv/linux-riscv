@@ -36,7 +36,7 @@
 /* TODO: fix offset */
 #define DCE_REG_WQITBA      0x0
 #define DCE_REG_WQRUNSTS    0x10
-#define DCE_REG_WQENABLE    0x18
+#define DCE_REG_WQDISABLE   0x18
 #define DCE_REG_WQIRQSTS    0x20
 
 #define DCE_WQCR_PAGE0      0x1

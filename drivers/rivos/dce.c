@@ -604,24 +604,21 @@ static int reserve_unused_wq(struct dce_driver_priv *priv)
 /* set the enable bit for queue in dce HW */
 static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool enable)
 {
-	u64 wq_enable;
+	u64 wq_disable;
 
 	if (enable)
 	/* Ensure that writes to the updated mem structures are observable by
 	 * device before actually enabling the queue
 	 */
 		wmb();
-	/*
-	 * TODO: This is the best we can do for now before HW offers a solution
-	 * for atomic clear/set of enable bits.
-	 */
+	/* Only SW writes to this register, lock to avoid parallel RMW ops */
 	spin_lock(&dev_ctx->reg_lock);
-	wq_enable = dce_reg_read(dev_ctx, DCE_REG_WQENABLE);
+	wq_disable = dce_reg_read(dev_ctx, DCE_REG_WQDISABLE);
 	if (enable)
-		wq_enable |= BIT_ULL(wq_num);
+		wq_disable &= (~BIT_ULL(wq_num));
 	else
-		wq_enable &= (~BIT_ULL(wq_num));
-	dce_reg_write(dev_ctx, DCE_REG_WQENABLE, wq_enable);
+		wq_disable |= BIT_ULL(wq_num);
+	dce_reg_write(dev_ctx, DCE_REG_WQDISABLE, wq_disable);
 	spin_unlock(&dev_ctx->reg_lock);
 }
 
