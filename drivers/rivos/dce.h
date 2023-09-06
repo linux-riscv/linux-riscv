@@ -32,6 +32,8 @@
 #define DCE_INTERRUPT_MASK                         80
 
 #define DCE_PAGE_SIZE       0x1000
+#define DCE_WQ_CTX_SIZE     DCE_PAGE_SIZE
+#define DCE_WQIT_SIZE       DCE_PAGE_SIZE
 
 /* TODO: fix offset */
 #define DCE_REG_WQITBA      0x0
@@ -288,6 +290,10 @@ struct dce_driver_priv {
 	/* Kernel space memory area, read by HW */
 	struct WQITE *WQIT;
 	dma_addr_t WQIT_dma;
+
+	/* Kernel space scratch area for HW*/
+	u8 *wq_ctx_save;
+	dma_addr_t wq_ctx_save_dma;
 
 	/* DCE workqueue configuration space*/
 	struct work_queue wq[NUM_WQ];

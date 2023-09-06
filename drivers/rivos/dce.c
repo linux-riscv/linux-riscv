@@ -35,6 +35,7 @@
 #include <linux/mm.h>
 #include <linux/wait.h>
 #include <linux/mutex.h>
+#include <linux/dma-mapping.h>
 
 #include "dce.h"
 
@@ -672,6 +673,8 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 0) |
 					  FIELD_PREP(TRANSCTL_PASID_V, 1) |
 					  FIELD_PREP(TRANSCTL_PASID, ctx->pasid);
+	dce_priv->WQIT[wq_num].WQ_CTX_SAVE_BA =
+		((u64) dce_priv->wq_ctx_save_dma) + wq_num * DCE_WQ_CTX_SIZE;
 	dce_priv->WQIT[wq_num].keys[0]  = DCE_KEY_VALID_ENTRY(6);
 	dce_priv->WQIT[wq_num].keys[1]  = DCE_KEY_VALID_ENTRY(18);
 
@@ -757,6 +760,8 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
+	dce_priv->WQIT[wq_num].WQ_CTX_SAVE_BA =
+		((u64) dce_priv->wq_ctx_save_dma) + wq_num * DCE_WQ_CTX_SIZE;
 	/* TODO: get from user */
 	dce_priv->WQIT[wq_num].keys[0]  = DCE_KEY_VALID_ENTRY(6);
 	dce_priv->WQIT[wq_num].keys[1]  = DCE_KEY_VALID_ENTRY(18);
@@ -852,6 +857,9 @@ void free_resources(struct device *dev, struct dce_driver_priv *priv)
 	/* also take the HW down properly, waiting for it to be unpluggable?*/
 	if (priv->WQIT)
 		dma_free_coherent(&priv->pdev->dev, 0x1000, priv->WQIT, priv->WQIT_dma);
+	if (priv->wq_ctx_save)
+		dma_free_coherent(&priv->pdev->dev, DCE_WQ_CTX_SIZE * NUM_WQ,
+			priv->wq_ctx_save, priv->wq_ctx_save_dma);
 }
 
 static int dce_sync(struct dce_submitter_ctx *ctx)
@@ -1024,25 +1032,53 @@ int setup_memory_regions(struct dce_driver_priv *drv_priv)
 	int err = 0;
 
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
-	/* TODO: Actually handle error !? */
-	if (err)
+	if (err) {
 		dev_info(&drv_priv->pdev->dev, "DMA set mask failed: %d\n", err);
-	/* WQIT is 4KiB */
-	/* TODO: Error handling, dma_alloc can fail*/
-	/* TODO: check alignement, the idea is to have a page aligned alloc */
+		return err;
+	}
+
 	drv_priv->WQIT =
-		dma_alloc_coherent(dev, 0x1000, &drv_priv->WQIT_dma, GFP_KERNEL);
-	if ((drv_priv->WQIT_dma & GENMASK(11, 0)) != 0) {
-		dev_err(&drv_priv->dev, "DCE: WQITBA[11:0]:0x%pad is not all zero!\n",
+		dma_alloc_coherent(dev, DCE_WQIT_SIZE,
+			&drv_priv->WQIT_dma, GFP_KERNEL);
+	if (!drv_priv->WQIT) {
+		dev_err(&drv_priv->dev, "DCE: WQIT allocation failure\n");
+		return -ENOMEM;
+	}
+	if (!IS_ALIGNED(drv_priv->WQIT_dma, DCE_PAGE_SIZE)) {
+		dev_err(&drv_priv->dev,
+			"DCE: WQITBA:0x%pad not page aligned!\n",
 			&drv_priv->WQIT_dma);
-		dma_free_coherent(dev, 0x1000, drv_priv->WQIT, drv_priv->WQIT_dma);
-		return -EFAULT;
+		err = -EFAULT;
+		goto wqit_cleanup;
 	}
 	for (int w = 0; w < NUM_WQ; w++)
 		drv_priv->wq[w].wqite = drv_priv->WQIT + w;
 
+	drv_priv->wq_ctx_save = dma_alloc_coherent(dev,
+					DCE_WQ_CTX_SIZE * NUM_WQ,
+					&drv_priv->wq_ctx_save_dma, GFP_KERNEL);
+	if (!drv_priv->wq_ctx_save) {
+		dev_err(&drv_priv->dev, "DCE: WQIT allocation failure\n");
+		err = -ENOMEM;
+		goto wqit_cleanup;
+	}
+	if (!IS_ALIGNED(drv_priv->wq_ctx_save_dma, DCE_PAGE_SIZE)) {
+		dev_err(&drv_priv->dev,
+			"DCE: WQ_CTX_SAVE_BA:0x%pad is not page aligned!\n",
+			&drv_priv->WQIT_dma);
+		err = -EFAULT;
+		goto ctx_save_cleanup;
+	}
 	dce_reg_write(drv_priv, DCE_REG_WQITBA, (uint64_t) drv_priv->WQIT_dma);
 	return 0;
+
+ctx_save_cleanup:
+	dma_free_coherent(dev, DCE_WQ_CTX_SIZE * NUM_WQ,
+		   drv_priv->wq_ctx_save, drv_priv->wq_ctx_save_dma);
+wqit_cleanup:
+	dma_free_coherent(dev, 0x1000, drv_priv->WQIT, drv_priv->WQIT_dma);
+
+	return err;
 }
 
 /* Probing, registering and device name management below */
