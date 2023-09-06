@@ -30,10 +30,13 @@
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
 
+#define DAFFY_ENABLE_TIMEOUT_US	500000
+
 int daffy_init(struct dpa_device *dpa)
 {
 	struct dpa_daffy *daffy = &dpa->daffy;
-	u64 version;
+	u64 version, ctrl;
+	ktime_t timeout;
 	int i;
 
 	version = dpa_fwq_read(dpa, DPA_FWQ_VERSION_ID);
@@ -71,15 +74,44 @@ int daffy_init(struct dpa_device *dpa)
 
 	dpa_fwq_write(dpa, daffy->fwq_dma_addr, DPA_FWQ_QUEUE_DESCRIPTOR);
 
+	dpa_fwq_write(dpa, DPA_FWQ_QUEUE_CTRL_ENABLE | DPA_FWQ_QUEUE_CTRL_BUSY,
+		      DPA_FWQ_QUEUE_CTRL);
+	timeout = ktime_add_us(ktime_get(), DAFFY_ENABLE_TIMEOUT_US);
+	for (;;) {
+		ctrl = dpa_fwq_read(dpa, DPA_FWQ_QUEUE_CTRL);
+		if (!(ctrl & DPA_FWQ_QUEUE_CTRL_BUSY))
+			break;
+		if (ktime_compare(ktime_get(), timeout) > 0)
+			break;
+		usleep_range(1000, 5000);
+	}
+	if (ctrl & DPA_FWQ_QUEUE_CTRL_BUSY)
+		return -ETIMEDOUT;
+	if (!(ctrl & DPA_FWQ_QUEUE_CTRL_ENABLE))
+		return -EIO;
+
 	return 0;
 }
 
 void daffy_free(struct dpa_device *dpa)
 {
 	struct dpa_daffy *daffy = &dpa->daffy;
+	ktime_t timeout;
+	u64 ctrl;
+
+	dpa_fwq_write(dpa, DPA_FWQ_QUEUE_CTRL_BUSY, DPA_FWQ_QUEUE_CTRL);
+	timeout = ktime_add_us(ktime_get(), DAFFY_ENABLE_TIMEOUT_US);
+	for (;;) {
+		ctrl = dpa_fwq_read(dpa, DPA_FWQ_QUEUE_CTRL);
+		if (!(ctrl & DPA_FWQ_QUEUE_CTRL_BUSY))
+			break;
+		if (ktime_compare(ktime_get(), timeout) > 0)
+			break;
+		usleep_range(1000, 5000);
+	}
+	WARN_ON((ctrl & (DPA_FWQ_QUEUE_CTRL_BUSY | DPA_FWQ_QUEUE_CTRL_ENABLE)));
 
 	dpa_fwq_write(dpa, 0, DPA_FWQ_QUEUE_DESCRIPTOR);
-	/* TODO: Add proper fw queue disable sequence. */
 	dma_free_coherent(dpa->dev, sizeof(*daffy->fwq), daffy->fwq,
 			  daffy->fwq_dma_addr);
 }
