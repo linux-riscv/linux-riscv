@@ -339,6 +339,10 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		rc = put_user(isbdmex_ioctl_get_ep_status(ii), argp64);
 		break;
 
+	case IOCTL_GET_RING_SIZE:
+		rc = put_user(ISBDMEX_RING_SIZE, argp64);
+		break;
+
 	default:
 		rc = -ENOENT;
 		break;
@@ -379,8 +383,6 @@ static ssize_t isbdmex_read(struct file *file, char __user *va, size_t size,
 
 			if (done < 0)
 				break;
-
-			return -EAGAIN;
 		}
 
 		done = isbdmex_read_one(ii, va, size);
