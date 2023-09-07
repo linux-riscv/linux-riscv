@@ -79,8 +79,6 @@ static struct rasd *rasd_locate(int minor)
 
 static irqreturn_t rasd_irq_handler(int irq, void *data)
 {
-	struct rasd *ra = data;
-
 	if (1) {
 		return IRQ_WAKE_THREAD;
 	}
@@ -156,7 +154,6 @@ static int rasd_release(struct inode *inode, struct file *file)
 static long rasd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	u64 __user *argp64;
-	struct rasd *ra = file->private_data;
 	int rc;
 
 	if (is_compat_task())
