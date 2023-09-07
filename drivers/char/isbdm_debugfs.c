@@ -175,6 +175,22 @@ exit:
 	return status;
 }
 
+static ssize_t isbdm_debug_ring_size_read(struct file *filp,
+					  char __user *buffer,
+					  size_t usr_buf_len, loff_t *ppos)
+{
+	char buf[64];
+
+	/* No partial reads */
+	if (*ppos != 0)
+		return 0;
+
+	snprintf(buf, sizeof(buf), "%u", ISBDMEX_RING_SIZE);
+	buf[sizeof(buf) - 1] = '\0';
+	return simple_read_from_buffer(buffer, usr_buf_len, ppos, buf,
+				       strlen(buf) + 1);
+}
+
 static const struct file_operations isbdm_debug_rxstats_ops = {
 	.owner = THIS_MODULE,
 	.open = simple_open,
@@ -191,6 +207,12 @@ static const struct file_operations isbdm_debug_cmdstats_ops = {
 	.owner = THIS_MODULE,
 	.open = simple_open,
 	.read = isbdm_debug_cmdstats_read,
+};
+
+static const struct file_operations isbdm_debug_ring_size_ops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = isbdm_debug_ring_size_read,
 };
 
 void isbdm_debugfs_init(struct isbdm *ii)
@@ -210,6 +232,9 @@ void isbdm_debugfs_init(struct isbdm *ii)
 
 	debugfs_create_file("cmd_stats", S_IRUSR, dir,
 			    ii, &isbdm_debug_cmdstats_ops);
+
+	debugfs_create_file("ring_size", S_IRUSR, dir,
+			    ii, &isbdm_debug_ring_size_ops);
 }
 
 void isbdm_debugfs_cleanup(struct isbdm *ii)
