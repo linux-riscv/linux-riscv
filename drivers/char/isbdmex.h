@@ -60,7 +60,7 @@
 #define ISBDM_IRCR		128
 #define ISBDM_ADMIN		136
 #define ISBDM_EP_STATUS		144
-#define ISBDM_RX_TLP_DROP_CNT	160
+#define ISBDM_RX_TLP_DROP_CNT	184
 
 #define ISBDM_WRITEQ(isbdm, reg, val) writeq(cpu_to_le64(val), (isbdm)->base + (reg))
 #define ISBDM_READQ(isbdm, reg) le64_to_cpu(readq((isbdm)->base + (reg)))
