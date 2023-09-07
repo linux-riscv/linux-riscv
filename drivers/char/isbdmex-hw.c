@@ -186,7 +186,8 @@ void isbdm_tx_enqueue(struct isbdm *ii)
 		desc = &ring->descs[ring->prod_idx];
 		desc->iova = cpu_to_le64(buf->physical);
 		flags = buf->flags;
-		if (flags & ISBDM_DESC_LS)
+		ring->prod_idx = (ring->prod_idx + 1) & mask;
+		if ((flags & ISBDM_DESC_LS) || ring_is_full(ring))
 			flags |= ISBDM_DESC_TX_ND;
 
 		desc->flags = cpu_to_le32(flags);
@@ -196,8 +197,6 @@ void isbdm_tx_enqueue(struct isbdm *ii)
 		desc->length = cpu_to_le32(buf->size & ISBDM_DESC_SIZE_MASK);
 		trace_isbdm_tx_enqueue(ii, buf->desc_idx, buf->physical,
 				       buf->size & ISBDM_DESC_SIZE_MASK, flags);
-
-		ring->prod_idx = (ring->prod_idx + 1) & mask;
 	}
 
 	trace_isbdm_tx_tail(ii, ring->prod_idx);
@@ -918,6 +917,7 @@ void isbdm_hw_reset(struct isbdm *ii)
 	ISBDM_WRITEQ(ii, ISBDM_RX_RING_CTRL, 0);
 	ISBDM_WRITEQ(ii, ISBDM_RMBA_CTRL, 0);
 	/* Disable all IRQs */
+	ii->irq_mask = ISBDM_ALL_IRQ_MASK;
 	ISBDM_WRITEQ(ii, ISBDM_IPMR, -1ULL);
 }
 
