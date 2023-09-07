@@ -505,7 +505,6 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	isbdm_hw_reset(ii);
-	ii->irq_mask = ~ISBDM_IPSR_IIP;
 	init_waitqueue_head(&ii->read_wait_queue);
 	ret = isbdm_init_hw(ii);
 	if (ret) {
