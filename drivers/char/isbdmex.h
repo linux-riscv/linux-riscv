@@ -21,7 +21,13 @@
 #include "isbdm-ib.h"
 
 /* The current arbitrarily hardcoded ring size. */
+/* For hybrid-sim, make this smaller so it's easier to test wraparound. */
+#ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
+#define ISBDMEX_RING_SIZE 16
+#else
 #define ISBDMEX_RING_SIZE 1024
+#endif
+
 #define ISBDMEX_RMB_TABLE_SIZE ISBDMEX_RING_SIZE
 
 /*
