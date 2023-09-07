@@ -441,6 +441,7 @@ struct isbdm_handshake_packet {
 #define IOCTL_GET_RX_DROP_CNT	_IO('3', 9)	/* Get RX drop count. */
 #define IOCTL_LINK_STATUS_OP	_IO('3', 10)	/* Link status operations */
 #define IOCTL_GET_EP_STATUS	_IO('3', 11)	/* Get EP_STATUS register */
+#define IOCTL_GET_RING_SIZE	_IO('3', 12)	/* Return TX/RX/CMD ring size */
 
 #define IOCTL_LINK_STATUS_OP_DISCONNECT 1
 #define IOCTL_LINK_STATUS_OP_RECONNECT 2
