@@ -54,13 +54,18 @@ void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 #define flush_tlb_all() local_flush_tlb_all()
 #define flush_tlb_page(vma, addr) local_flush_tlb_page(addr)
 
+static inline void flush_tlb_mm(struct mm_struct *mm)
+{
+	unsigned long asid = cntx2asid(atomic_long_read(&mm->context.id));
+
+	local_flush_tlb_all_asid(asid);
+}
+
 static inline void flush_tlb_range(struct vm_area_struct *vma,
 		unsigned long start, unsigned long end)
 {
-	local_flush_tlb_all();
+	flush_tlb_mm(vma->vm_mm);
 }
-
-#define flush_tlb_mm(mm) flush_tlb_all()
 #endif /* !CONFIG_SMP || !CONFIG_MMU */
 
 /* Flush a range of kernel pages */
