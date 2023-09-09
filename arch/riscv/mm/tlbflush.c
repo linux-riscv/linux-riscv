@@ -15,6 +15,7 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
 		local_flush_tlb_all_asid(asid);
 }
 
+#ifdef CONFIG_SMP
 static void __ipi_flush_tlb_all(void *info)
 {
 	local_flush_tlb_all();
@@ -41,12 +42,12 @@ static void __ipi_flush_tlb_range_asid(void *info)
 
 	local_flush_tlb_range_asid(d->start, d->size, d->stride, d->asid);
 }
+#endif
 
 static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 			      unsigned long size, unsigned long stride)
 {
 	unsigned long asid = cntx2asid(atomic_long_read(&mm->context.id));
-	struct flush_tlb_range_data ftd;
 	struct cpumask *cmask = mm_cpumask(mm);
 	unsigned int cpuid;
 
@@ -54,9 +55,12 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 		return;
 
 	cpuid = get_cpu();
+#ifdef CONFIG_SMP
 	/* check if the tlbflush needs to be sent to other CPUs */
 	if (cpumask_any_but(cmask, cpuid) < nr_cpu_ids) {
 		if (riscv_use_ipi_for_rfence()) {
+			struct flush_tlb_range_data ftd;
+
 			ftd.asid = asid;
 			ftd.start = start;
 			ftd.size = size;
@@ -68,6 +72,7 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 			sbi_remote_sfence_vma_asid(cmask,
 						   start, size, asid);
 	} else
+#endif
 		local_flush_tlb_range_asid(start, size, stride, asid);
 	put_cpu();
 }

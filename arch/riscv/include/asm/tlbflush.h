@@ -33,13 +33,12 @@ static inline void local_flush_tlb_page_asid(unsigned long addr,
 {
 	ALT_SFENCE_VMA_ADDR_ASID(addr, asid);
 }
-#else /* CONFIG_MMU */
-#define local_flush_tlb_all()			do { } while (0)
-#define local_flush_tlb_page(addr)		do { } while (0)
-#endif /* CONFIG_MMU */
 
-#if defined(CONFIG_SMP) && defined(CONFIG_MMU)
+#ifdef CONFIG_SMP
 void flush_tlb_all(void);
+#else
+#define flush_tlb_all() local_flush_tlb_all()
+#endif
 void flush_tlb_mm(struct mm_struct *mm);
 void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr);
 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
@@ -49,24 +48,10 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			unsigned long end);
 #endif
-#else /* CONFIG_SMP && CONFIG_MMU */
-
-#define flush_tlb_all() local_flush_tlb_all()
-#define flush_tlb_page(vma, addr) local_flush_tlb_page(addr)
-
-static inline void flush_tlb_mm(struct mm_struct *mm)
-{
-	unsigned long asid = cntx2asid(atomic_long_read(&mm->context.id));
-
-	local_flush_tlb_all_asid(asid);
-}
-
-static inline void flush_tlb_range(struct vm_area_struct *vma,
-		unsigned long start, unsigned long end)
-{
-	flush_tlb_mm(vma->vm_mm);
-}
-#endif /* !CONFIG_SMP || !CONFIG_MMU */
+#else /* CONFIG_MMU */
+#define local_flush_tlb_all()			do { } while (0)
+#define local_flush_tlb_page(addr)		do { } while (0)
+#endif /* CONFIG_MMU */
 
 /* Flush a range of kernel pages */
 static inline void flush_tlb_kernel_range(unsigned long start,
