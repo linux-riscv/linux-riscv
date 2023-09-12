@@ -343,6 +343,15 @@ static long isbdmex_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		rc = put_user(ISBDMEX_RING_SIZE, argp64);
 		break;
 
+	case IOCTL_SET_IN_MEM_QUEUE:
+		if (get_user(value, argp64) != 0)
+			return -EFAULT;
+
+		rc = put_user(isbdmex_ioctl_set_in_memory_queuing(ii, !!value),
+			      argp64);
+
+		break;
+
 	default:
 		rc = -ENOENT;
 		break;
