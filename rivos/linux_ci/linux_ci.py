@@ -13,8 +13,8 @@ import argparse
 
 SSH_MAX_TRIALS = 100
 SSH_SLEEP_INTERVAL_SEC = 5
-vm_path = "ubuntu-22.10-preinstalled-server-riscv64+unmatched.img"
-qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,v=true,vlen=128,svnapot=on,h=true,{}=on -bios fw_dynamic.elf -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -virtfs local,path={},mount_tag=host0,security_model=passthrough,id=host0 -device virtio-rng-pci -s"
+vm_path = "ubuntu-23.04-preinstalled-server-riscv64+unmatched.img"
+qemu_cmd = "/rivos/qemu/bin/qemu-system-riscv64 -machine virt -cpu rv64,v=true,vlen=128,svnapot=on,h=true,{}=on -bios fw_dynamic.elf -nographic -m 16G -smp 8 -kernel usr/lib/u-boot/qemu-riscv64_smode/uboot.elf -device virtio-net-device,netdev=net0 -netdev user,hostfwd=tcp::10022-:22,id=net0,tftp=tftp -drive file={},format=raw,if=virtio -virtfs local,path={},mount_tag=host0,security_model=passthrough,id=host0 -device virtio-rng-pci"
 host_vm = "ubuntu@localhost:10022"
 host_pwd = "ubuntu"
 satp_mode_list = [ "sv39", "sv48", "sv57" ]
@@ -105,6 +105,11 @@ def userspace_validate_kernel(c, kernel_version):
     # Mount the shared directory that contains the linux sources
     c.sudo("mkdir -p /opt/sources/linux/")
     c.sudo("mount -t 9p -o trans=virtio host0 /opt/sources/linux/ -oversion=9p2000.L")
+
+    # TEMP: install missing packages from prepared VM here, will regenerate an
+    # image when too many of them are installed here.
+    c.sudo("apt update")
+    c.sudo("apt install -y make gcc yacc flex bison")
 
     userspace_launch_tests(c, kernel_version, args.long_valid, "all")
 

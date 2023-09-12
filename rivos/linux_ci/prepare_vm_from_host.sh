@@ -9,13 +9,21 @@ sudo apt update
 sudo apt install -y cloud-guest-utils
 
 # Download and extract the VM
-wget --no-verbose https://cdimage.ubuntu.com/releases/22.10/release/ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz
-xz -d ubuntu-22.10-preinstalled-server-riscv64+unmatched.img.xz
+ubuntu_vm_version="23.04"
+ubuntu_vm_name="ubuntu-$ubuntu_vm_version-preinstalled-server-riscv64+unmatched.img"
+if [ ! -f "$ubuntu_vm_name" ]; then
+    wget --no-verbose https://cdimage.ubuntu.com/releases/$ubuntu_vm_version/release/$ubuntu_vm_name.xz
+    xz -d $ubuntu_vm_name.xz
+fi
 
 # Increase rootfs partition
-qemu-img resize ubuntu-22.10-preinstalled-server-riscv64+unmatched.img +8G
-loop_dev=`sudo losetup --partscan -f --show ubuntu-22.10-preinstalled-server-riscv64+unmatched.img`
+qemu-img resize $ubuntu_vm_name +8G
+loop_dev=`sudo losetup --partscan -f --show $ubuntu_vm_name`
 sudo growpart ${loop_dev} 1
+
+# workaround for e2fsck < 1.47
+#sudo tune2fs -O ^orphan_file "${loop_dev}p1"
+
 sudo e2fsck -f "${loop_dev}p1" -y
 sudo resize2fs "${loop_dev}p1" 12G
 # Remove expiration of the initial password
