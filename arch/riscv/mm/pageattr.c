@@ -106,7 +106,7 @@ static const struct mm_walk_ops pageattr_ops = {
 };
 
 static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
-			pgprot_t clear_mask)
+			pgprot_t clear_mask, struct mm_struct *mm)
 {
 	int ret;
 	unsigned long start = addr;
@@ -119,42 +119,50 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
 	if (!numpages)
 		return 0;
 
-	mmap_write_lock(&init_mm);
-	ret =  walk_page_range_novma(&init_mm, start, end, &pageattr_ops, NULL,
+	mmap_write_lock(mm);
+	ret =  walk_page_range_novma(mm, start, end, &pageattr_ops, NULL,
 				     &masks);
-	mmap_write_unlock(&init_mm);
+	mmap_write_unlock(mm);
 
 	flush_tlb_kernel_range(start, end);
 
 	return ret;
 }
 
+#if defined(CONFIG_32BIT) && defined(CONFIG_STRICT_KERNEL_RWX)
+int set_memory_rw_nx_by_mm(unsigned long addr, int numpages, struct mm_struct *mm)
+{
+	return __set_memory(addr, numpages, __pgprot(_PAGE_READ | _PAGE_WRITE),
+			    __pgprot(_PAGE_EXEC), mm);
+}
+#endif
+
 int set_memory_rw_nx(unsigned long addr, int numpages)
 {
 	return __set_memory(addr, numpages, __pgprot(_PAGE_READ | _PAGE_WRITE),
-			    __pgprot(_PAGE_EXEC));
+			    __pgprot(_PAGE_EXEC), &init_mm);
 }
 
 int set_memory_ro(unsigned long addr, int numpages)
 {
 	return __set_memory(addr, numpages, __pgprot(_PAGE_READ),
-			    __pgprot(_PAGE_WRITE));
+			    __pgprot(_PAGE_WRITE), &init_mm);
 }
 
 int set_memory_rw(unsigned long addr, int numpages)
 {
 	return __set_memory(addr, numpages, __pgprot(_PAGE_READ | _PAGE_WRITE),
-			    __pgprot(0));
+			    __pgprot(0), &init_mm);
 }
 
 int set_memory_x(unsigned long addr, int numpages)
 {
-	return __set_memory(addr, numpages, __pgprot(_PAGE_EXEC), __pgprot(0));
+	return __set_memory(addr, numpages, __pgprot(_PAGE_EXEC), __pgprot(0), &init_mm);
 }
 
 int set_memory_nx(unsigned long addr, int numpages)
 {
-	return __set_memory(addr, numpages, __pgprot(0), __pgprot(_PAGE_EXEC));
+	return __set_memory(addr, numpages, __pgprot(0), __pgprot(_PAGE_EXEC), &init_mm);
 }
 
 int set_direct_map_invalid_noflush(struct page *page)
@@ -199,10 +207,10 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
 
 	if (enable)
 		__set_memory((unsigned long)page_address(page), numpages,
-			     __pgprot(_PAGE_PRESENT), __pgprot(0));
+			     __pgprot(_PAGE_PRESENT), __pgprot(0), &init_mm);
 	else
 		__set_memory((unsigned long)page_address(page), numpages,
-			     __pgprot(0), __pgprot(_PAGE_PRESENT));
+			     __pgprot(0), __pgprot(_PAGE_PRESENT), &init_mm);
 }
 #endif
 

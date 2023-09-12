@@ -342,13 +342,43 @@ static int __init topology_init(void)
 }
 subsys_initcall(topology_init);
 
+#if defined(CONFIG_32BIT) && defined(CONFIG_STRICT_KERNEL_RWX)
+static void set_kernel_mm_early(char *startp, char *endp,
+				int (*set_memory)(unsigned long start,
+				int num_pages, struct mm_struct *mm))
+{
+	struct task_struct *t, *s;
+	unsigned long start = (unsigned long)startp;
+	unsigned long end = (unsigned long)endp;
+	int num_pages = PAGE_ALIGN(end - start) >> PAGE_SHIFT;
+
+	set_memory(start, num_pages, current->active_mm);
+	if (current->active_mm != &init_mm)
+		set_memory(start, num_pages, &init_mm);
+
+	for_each_process(t) {
+		if (t->flags & PF_KTHREAD)
+			continue;
+		for_each_thread(t, s) {
+			if (s->mm)
+				set_memory(start, num_pages, s->mm);
+		}
+	}
+}
+#endif
+
 void free_initmem(void)
 {
-	if (IS_ENABLED(CONFIG_STRICT_KERNEL_RWX)) {
-		set_kernel_memory(lm_alias(__init_begin), lm_alias(__init_end), set_memory_rw_nx);
-		if (IS_ENABLED(CONFIG_64BIT))
-			set_kernel_memory(__init_begin, __init_end, set_memory_nx);
-	}
+#ifdef CONFIG_STRICT_KERNEL_RWX
+#ifdef CONFIG_32BIT
+	set_kernel_mm_early(lm_alias(__init_begin), lm_alias(__init_end),
+			    set_memory_rw_nx_by_mm);
+#else
+	set_kernel_memory(lm_alias(__init_begin), lm_alias(__init_end), set_memory_rw_nx);
+#endif
+	if (IS_ENABLED(CONFIG_64BIT))
+		set_kernel_memory(__init_begin, __init_end, set_memory_nx);
+#endif
 
 	free_initmem_default(POISON_FREE_INITMEM);
 }
