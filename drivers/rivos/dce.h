@@ -35,6 +35,8 @@
 #define DCE_WQ_CTX_SIZE     DCE_PAGE_SIZE
 #define DCE_WQIT_SIZE       DCE_PAGE_SIZE
 
+#define DCE_COMPLETION_ALIGNMENT      64
+
 /* TODO: fix offset */
 #define DCE_REG_WQITBA      0x0
 #define DCE_REG_WQRUNSTS    0x10

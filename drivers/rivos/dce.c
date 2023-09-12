@@ -502,6 +502,19 @@ static int dce_push_descriptor(struct dce_submitter_ctx *ctx,
 	struct DCEDescriptor *dest;
 	int queue_size;
 
+	/*
+	 * If descriptor completion is not 64B aligned, do not push the job
+	 * If the user does not check for the ioctl return value, they will
+	 * wait forever for completion to turn valid. Which I guess is fine.
+	 * HW treats bits 5:0 as 0 and would update another memory location.
+	 */
+	if (!IS_ALIGNED(descriptor->completion, DCE_COMPLETION_ALIGNMENT)) {
+		dev_warn(&priv->dev,
+			"Rejecting job with unaligned completion on wq %d",
+			wq_num);
+		return -EBADR;
+	}
+
 	/* Serializing push_descriptor, queue type update, clean index update */
 try_push:
 	spin_lock(&wq->lock); /* Guarantees tail and type do not change */
