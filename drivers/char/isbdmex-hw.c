@@ -1851,3 +1851,28 @@ int isbdmex_link_status_op(struct isbdm *ii, void __user *argp)
 
 	return 0;
 }
+
+/* ioctl for testing both in-memory RDMA queuing and regular MMIO queueing. */
+bool isbdmex_ioctl_set_in_memory_queuing(struct isbdm *ii, bool on)
+{
+	bool old_value = ii->in_memory_cmd_queue;
+
+	ii->in_memory_cmd_queue = on;
+
+	/*
+	 * The IDX_IN_MEM_ENABLE bit cannot be changed while the ring is
+	 * enabled. Re-enabling the ring resets the head/tail pointers, so tear
+	 * down the command ring and bring it back up.
+	 */
+	if (on != old_value) {
+		dev_info(&ii->pdev->dev,
+			 "%sabling in-memory command queuing\n",
+			 on ? "en" : "dis");
+
+		disable_cmd_ring(ii);
+		isbdm_abort_cmds(ii);
+		enable_cmd_ring(ii);
+	}
+
+	return old_value;
+}
