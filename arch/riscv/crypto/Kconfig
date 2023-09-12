@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "Accelerated Cryptographic Algorithms for CPU (RISC-V)"
+
+config CRYPTO_BLAKE2S_RISCV
+	bool "Hash functions: BLAKE2s (V)"
+	depends on 64BIT && MMU && RISCV_ISA_V
+	select CRYPTO_LIB_BLAKE2S_GENERIC
+	select CRYPTO_ARCH_HAVE_LIB_BLAKE2S
+	help
+	  BLAKE2s cryptographic hash function (RFC 7693)
+
+	  Architecture: riscv64 using:
+	  - V extension (VLEN >= 256)
+
+endmenu

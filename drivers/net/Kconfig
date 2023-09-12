@@ -94,6 +94,7 @@ config WIREGUARD
 	select CRYPTO_CHACHA_MIPS if CPU_MIPS32_R2
 	select CRYPTO_POLY1305_MIPS if MIPS
 	select CRYPTO_CHACHA_S390 if S390
+	select CRYPTO_BLAKE2S_RISCV if RISCV && 64BIT
 	help
 	  WireGuard is a secure, fast, and easy to use replacement for IPSec
 	  that uses modern cryptography and clever networking tricks. It's
