@@ -134,7 +134,7 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
 	if (unlikely(err))
 		return err;
 
-	riscv_v_vstate_restore(current, regs);
+	riscv_v_vstate_set_restore(current, regs);
 
 	return err;
 }
