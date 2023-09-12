@@ -9,6 +9,7 @@
  * 3 Feb 2023 mev
  */
 
+#include <linux/align.h>
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -262,7 +263,24 @@ void isbdm_cmd_enqueue(struct isbdm *ii)
 	}
 
 	trace_isbdm_cmd_tail(ii, ring->prod_idx);
-	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
+	if (ii->in_memory_cmd_queue) {
+		/* Ensure descriptor setup is visible. */
+		wmb();
+
+		/* Write the tail index to the address hardware is polling. */
+		*(ii->cmd_tail_idx) = ring->prod_idx;
+
+		/* Ensure the tail write finished before checking the head. */
+		wmb();
+
+		/* If the hardware went to sleep, kick it with an MMIO write. */
+		if (*(ii->cmd_head_idx) & ISBDM_CMD_HEAD_IDLE)
+			ISBDM_WRITEQ(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
+
+	} else {
+		ISBDM_WRITEQ(ii, ISBDM_CMD_RING_TAIL, ring->prod_idx);
+	}
+
 	return;
 }
 
@@ -386,7 +404,16 @@ static int init_cmd_ring(struct isbdm *ii)
 		return rc;
 
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_BASE, base);
-	notify_size = (sizeof(u32) * ISBDMEX_RING_SIZE);
+
+	/*
+	 * Allocate an array of 32-bit values that runs parallel to the cmd
+	 * table, where hardware will write the status code for the command at
+	 * that index. Also allocate two 64-bit values for the command head
+	 * writeback address and the tail shadow address.
+	 */
+	notify_size = (sizeof(u32) * ISBDMEX_RING_SIZE) +
+		      ((ISBDM_MEMORY_INDEX_ALIGNMENT + sizeof(u64)) * 2);
+
 	ii->notify_area = dma_alloc_coherent(&ii->pdev->dev, notify_size,
 					     &ii->notify_area_physical,
 					     GFP_KERNEL);
@@ -396,6 +423,28 @@ static int init_cmd_ring(struct isbdm *ii)
 		return -ENOMEM;
 	}
 
+	/*
+	 * The command head/tail index memory comes right after the notify area,
+	 * but has alignment requirements.
+	 */
+	ii->cmd_head_idx = (__le64 *)(ii->notify_area + ISBDMEX_RING_SIZE);
+	ii->cmd_head_idx = PTR_ALIGN(ii->cmd_head_idx,
+				     ISBDM_MEMORY_INDEX_ALIGNMENT);
+
+	ii->cmd_head_idx_physical = ii->notify_area_physical +
+				    (sizeof(u32) * ISBDMEX_RING_SIZE);
+
+	ii->cmd_head_idx_physical = ALIGN(ii->cmd_head_idx_physical,
+					  ISBDM_MEMORY_INDEX_ALIGNMENT);
+
+	ii->cmd_tail_idx = (void *)ii->cmd_head_idx +
+			   ISBDM_MEMORY_INDEX_ALIGNMENT;
+
+	ii->cmd_tail_idx_physical = ii->cmd_head_idx_physical +
+				    ISBDM_MEMORY_INDEX_ALIGNMENT;
+
+	ISBDM_WRITEQ(ii, ISBDM_CMD_HEAD_WB_ADDR, ii->cmd_head_idx_physical);
+	ISBDM_WRITEQ(ii, ISBDM_CMD_TAIL_SHADOW_ADDR, ii->cmd_tail_idx_physical);
 	return 0;
 }
 
@@ -480,6 +529,8 @@ static void deinit_cmd_ring(struct isbdm *ii)
 			  ii->notify_area_physical);
 
 	ii->notify_area = NULL;
+	ii->cmd_head_idx = NULL;
+	ii->cmd_tail_idx = NULL;
 	return;
 }
 
@@ -544,9 +595,25 @@ static void enable_cmd_ring(struct isbdm *ii)
 	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
 
 	ctrl |= ISBDM_RING_CTRL_ENABLE;
+	ctrl &= ~ISBDM_CMD_CTRL_IDX_IN_MEM_ENABLE;
+	if (ii->in_memory_cmd_queue)
+		ctrl |= ISBDM_CMD_CTRL_IDX_IN_MEM_ENABLE;
+
 	ii->cmd_ring.cons_idx = 0;
 	ii->cmd_ring.prod_idx = 0;
+
+	/*
+	 * Hardware doesn't update the head memory location when enabled, but
+	 * does reset the internal head index.
+	 */
+	*(ii->cmd_head_idx) = ISBDM_CMD_HEAD_IDLE;
+	*(ii->cmd_tail_idx) = 0;
+
+	/* Ensure those writes made it to memory. */
+	wmb();
 	ISBDM_WRITEQ(ii, ISBDM_CMD_RING_CTRL, ctrl);
+
+	/* Enable the RMB table for remote fetches as well. */
 	ctrl = ISBDM_READQ(ii, ISBDM_RMBA_CTRL);
 
 	WARN_ON_ONCE(ctrl & ISBDM_RING_CTRL_ENABLE);
@@ -784,7 +851,14 @@ void isbdm_reap_cmds(struct isbdm *ii)
 {
 	struct isbdm_ring *ring = &ii->cmd_ring;
 	u32 mask = ring->size - 1;
-	u32 hw_next = ISBDM_READQ(ii, ISBDM_CMD_RING_HEAD) & mask;
+	u32 hw_next;
+
+	if (ii->in_memory_cmd_queue) {
+		hw_next = *(ii->cmd_head_idx) & mask;
+
+	} else {
+		hw_next = ISBDM_READQ(ii, ISBDM_CMD_RING_HEAD) & mask;
+	}
 
 	mutex_lock(&ring->lock);
 

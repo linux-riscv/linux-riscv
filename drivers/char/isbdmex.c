@@ -479,6 +479,8 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ii->pdev = pdev;
 	ii->rot = rot;
+	/* Let's get fancy! */
+	ii->in_memory_cmd_queue = true;
 	pci_set_drvdata(pdev, ii);
 
 	ret = pcim_enable_device(pdev);
