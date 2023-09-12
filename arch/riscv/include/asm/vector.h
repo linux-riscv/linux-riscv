@@ -196,9 +196,24 @@ static inline void __switch_to_vector(struct task_struct *prev,
 {
 	struct pt_regs *regs;
 
-	regs = task_pt_regs(prev);
-	riscv_v_vstate_save(&prev->thread.vstate, regs);
-	riscv_v_vstate_set_restore(next, task_pt_regs(next));
+	if (IS_ENABLED(CONFIG_RISCV_ISA_V_PREEMPTIVE) &&
+	    test_tsk_thread_flag(prev, TIF_RISCV_V_KERNEL_MODE)) {
+		regs = prev->thread.trap_pt_regs;
+		WARN_ON(!regs);
+		riscv_v_vstate_save(&prev->thread.kernel_vstate, regs);
+	} else {
+		regs = task_pt_regs(prev);
+		riscv_v_vstate_save(&prev->thread.vstate, regs);
+	}
+
+	if (IS_ENABLED(CONFIG_RISCV_ISA_V_PREEMPTIVE) &&
+	    test_tsk_thread_flag(next, TIF_RISCV_V_KERNEL_MODE)) {
+		regs = next->thread.trap_pt_regs;
+		WARN_ON(!regs);
+		riscv_v_vstate_restore(&next->thread.kernel_vstate, regs);
+	} else {
+		riscv_v_vstate_set_restore(next, task_pt_regs(next));
+	}
 }
 
 void riscv_v_vstate_ctrl_init(struct task_struct *tsk);
@@ -222,5 +237,11 @@ static inline bool riscv_v_vstate_ctrl_user_allowed(void) { return false; }
 #define riscv_v_vstate_on(regs)			do {} while (0)
 
 #endif /* CONFIG_RISCV_ISA_V */
+
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+void kernel_vector_allow_preemption(void);
+#else
+#define kernel_vector_allow_preemption()	do {} while (0)
+#endif
 
 #endif /* ! __ASM_RISCV_VECTOR_H */

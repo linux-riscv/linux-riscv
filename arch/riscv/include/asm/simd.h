@@ -12,6 +12,7 @@
 #include <linux/percpu.h>
 #include <linux/preempt.h>
 #include <linux/types.h>
+#include <linux/thread_info.h>
 
 #ifdef CONFIG_RISCV_ISA_V
 
@@ -35,7 +36,8 @@ static __must_check inline bool may_use_simd(void)
 	 * where it is set.
 	 */
 	return !in_irq() && !irqs_disabled() && !in_nmi() &&
-	       !this_cpu_read(vector_context_busy);
+	       !this_cpu_read(vector_context_busy) &&
+	       !test_thread_flag(TIF_RISCV_V_KERNEL_MODE);
 }
 
 #else /* ! CONFIG_RISCV_ISA_V */

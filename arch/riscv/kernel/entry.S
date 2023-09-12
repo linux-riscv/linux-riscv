@@ -66,6 +66,29 @@ _save_context:
 	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
 
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	/*
+	 * Record the register set at the frame where in-kernel V registers are
+	 * last alive.
+	 */
+	REG_L s0, TASK_TI_FLAGS(tp)
+	li s1, 1 << TIF_RISCV_V_KERNEL_MODE
+	and s0, s0, s1
+	beqz s0, 1f
+	li s0, TASK_THREAD_TRAP_REGP
+	add s0, s0, tp
+	REG_L s1, (s0)
+	bnez s1, 1f
+	REG_S sp, (s0)
+	li s0, TASK_THREAD_VSTATE_CTRL
+	add s0, s0, tp
+	REG_L s1, (s0)
+	li s2, ~RISCV_V_VSTATE_CTRL_PREEMPTIBLE
+	and s1, s1, s2
+	REG_S s1, (s0)
+1:
+#endif
+
 	/*
 	 * Set the scratch register to 0, so that if a recursive exception
 	 * occurs, the exception vector knows it came from the kernel
@@ -129,6 +152,28 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	 */
 	csrw CSR_SCRATCH, tp
 1:
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	/*
+	 * Clear tracking of the trap registers when we return to the frame
+	 * that uses kernel mode Vector.
+	 */
+	REG_L s0, TASK_TI_FLAGS(tp)
+	li s1, 1 << TIF_RISCV_V_KERNEL_MODE
+	and s0, s0, s1
+	beqz s0, 1f
+	li s0, TASK_THREAD_TRAP_REGP
+	add s0, s0, tp
+	REG_L s1, (s0)
+	bne s1, sp, 1f
+	REG_S x0, (s0)
+	li s0, TASK_THREAD_VSTATE_CTRL
+	add s0, s0, tp
+	REG_L s1, (s0)
+	ori s1, s1, RISCV_V_VSTATE_CTRL_PREEMPTIBLE
+	REG_S s1, (s0)
+1:
+#endif
+
 	REG_L a0, PT_STATUS(sp)
 	/*
 	 * The current load reservation is effectively part of the processor's

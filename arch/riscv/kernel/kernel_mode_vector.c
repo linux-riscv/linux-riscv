@@ -10,6 +10,7 @@
 #include <linux/percpu.h>
 #include <linux/preempt.h>
 #include <linux/types.h>
+#include <linux/slab.h>
 
 #include <asm/vector.h>
 #include <asm/switch_to.h>
@@ -48,6 +49,44 @@ static void put_cpu_vector_context(void)
 	preempt_enable();
 }
 
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+void kernel_vector_allow_preemption(void)
+{
+	current->thread.vstate_ctrl |= RISCV_V_VSTATE_CTRL_PREEMPTIBLE;
+}
+
+static bool kernel_vector_preemptible(void)
+{
+	return !!(current->thread.vstate_ctrl & RISCV_V_VSTATE_CTRL_PREEMPTIBLE);
+}
+
+static int riscv_v_start_kernel_context(void)
+{
+	struct __riscv_v_ext_state *vstate;
+
+	vstate = &current->thread.kernel_vstate;
+	if (!vstate->datap) {
+		vstate->datap = kmalloc(riscv_v_vsize, GFP_KERNEL);
+		if (!vstate->datap)
+			return -ENOMEM;
+	}
+
+	current->thread.trap_pt_regs = NULL;
+	WARN_ON(test_and_set_thread_flag(TIF_RISCV_V_KERNEL_MODE));
+	return 0;
+}
+
+static void riscv_v_stop_kernel_context(void)
+{
+	WARN_ON(!test_and_clear_thread_flag(TIF_RISCV_V_KERNEL_MODE));
+	current->thread.trap_pt_regs = NULL;
+}
+#else
+#define kernel_vector_preemptible()	(false)
+#define riscv_v_start_kernel_context()	(0)
+#define riscv_v_stop_kernel_context()	do {} while (0)
+#endif /* CONFIG_RISCV_ISA_V_PREEMPTIVE */
+
 /*
  * kernel_vector_begin(): obtain the CPU vector registers for use by the calling
  * context
@@ -70,11 +109,14 @@ void kernel_vector_begin(void)
 
 	riscv_v_vstate_save(&current->thread.vstate, task_pt_regs(current));
 
-	get_cpu_vector_context();
+	if (!preemptible() || !kernel_vector_preemptible()) {
+		get_cpu_vector_context();
+	} else {
+		if (riscv_v_start_kernel_context())
+			get_cpu_vector_context();
+	}
 
 	riscv_v_enable();
-
-	return 0;
 }
 EXPORT_SYMBOL_GPL(kernel_vector_begin);
 
@@ -96,6 +138,9 @@ void kernel_vector_end(void)
 
 	riscv_v_disable();
 
-	put_cpu_vector_context();
+	if (!test_thread_flag(TIF_RISCV_V_KERNEL_MODE))
+		put_cpu_vector_context();
+	else
+		riscv_v_stop_kernel_context();
 }
 EXPORT_SYMBOL_GPL(kernel_vector_end);

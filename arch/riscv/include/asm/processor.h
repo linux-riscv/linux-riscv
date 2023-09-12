@@ -82,6 +82,8 @@ struct thread_struct {
 	unsigned long bad_cause;
 	unsigned long vstate_ctrl;
 	struct __riscv_v_ext_state vstate;
+	struct pt_regs *trap_pt_regs;
+	struct __riscv_v_ext_state kernel_vstate;
 };
 
 /* Whitelist the fstate from the task_struct for hardened usercopy */

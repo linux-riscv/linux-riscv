@@ -520,6 +520,16 @@ config RISCV_ISA_V_DEFAULT_ENABLE
 
 	  If you don't know what to do here, say Y.
 
+config RISCV_ISA_V_PREEMPTIVE
+	bool "Run kernel-mode Vector with kernel preemption"
+	depends on PREEMPTION
+	depends on RISCV_ISA_V
+	default y
+	help
+	  Ordinarily the kernel disables preemption before running in-kernel
+	  Vector code. This config frees the kernel from disabling preemption
+	  by adding memory on demand for tracking kernel's V-context.
+
 config TOOLCHAIN_HAS_ZBB
 	bool
 	default y
