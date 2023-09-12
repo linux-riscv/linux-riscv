@@ -1325,6 +1325,37 @@ static struct device_node *parse_interrupts(struct device_node *np,
 	return of_irq_parse_one(np, index, &sup_args) ? NULL : sup_args.np;
 }
 
+static struct device_node *parse_msi_parent(struct device_node *np,
+					    const char *prop_name, int index)
+{
+	struct of_phandle_args sup_args;
+	struct device_node *msi_np;
+
+	if (IS_ENABLED(CONFIG_SPARC))
+		return NULL;
+
+	if (strcmp(prop_name, "msi-parent"))
+		return NULL;
+
+	msi_np = of_parse_phandle(np, prop_name, 0);
+	if (msi_np) {
+		if (!of_property_read_bool(msi_np, "#msi-cells")) {
+			if (index) {
+				of_node_put(msi_np);
+				return NULL;
+			}
+			return msi_np;
+		}
+		of_node_put(msi_np);
+	}
+
+	if (of_parse_phandle_with_args(np, prop_name, "#msi-cells", index,
+				       &sup_args))
+		return NULL;
+
+	return sup_args.np;
+}
+
 static const struct supplier_bindings of_supplier_bindings[] = {
 	{ .parse_prop = parse_clocks, },
 	{ .parse_prop = parse_interconnects, },
@@ -1359,6 +1390,7 @@ static const struct supplier_bindings of_supplier_bindings[] = {
 	{ .parse_prop = parse_regulators, },
 	{ .parse_prop = parse_gpio, },
 	{ .parse_prop = parse_gpios, },
+	{ .parse_prop = parse_msi_parent, },
 	{}
 };
 
