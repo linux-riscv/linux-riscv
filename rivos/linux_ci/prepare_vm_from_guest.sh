@@ -84,6 +84,7 @@ prepare_image_install_kselftests() {
 }
 
 sudo apt update
+sudo apt install -y make gcc yacc flex bison
 
 prepare_image_uefi
 prepare_image_initramfs
