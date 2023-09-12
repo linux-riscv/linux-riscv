@@ -465,6 +465,9 @@ struct isbdm_handshake_packet {
 #define IOCTL_GET_EP_STATUS	_IO('3', 11)	/* Get EP_STATUS register */
 #define IOCTL_GET_RING_SIZE	_IO('3', 12)	/* Return TX/RX/CMD ring size */
 
+/* Enable or disable in-memory command queuing */
+#define IOCTL_SET_IN_MEM_QUEUE	_IO('3', 13)
+
 #define IOCTL_LINK_STATUS_OP_DISCONNECT 1
 #define IOCTL_LINK_STATUS_OP_RECONNECT 2
 
@@ -757,6 +760,7 @@ u64 isbdmex_ioctl_get_ipsr(struct isbdm *ii);
 u64 isbdmex_ioctl_get_ep_status(struct isbdm *ii);
 u64 isbdmex_get_dropped_rx_count(struct isbdm *ii);
 int isbdmex_link_status_op(struct isbdm *ii, void __user *argp);
+bool isbdmex_ioctl_set_in_memory_queuing(struct isbdm *ii, bool on);
 
 void isbdm_complete_rdma_cmd(struct isbdm *ii, struct isbdm_command *command,
 			     uint32_t status);
