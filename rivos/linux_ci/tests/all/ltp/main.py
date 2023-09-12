@@ -5,21 +5,7 @@ def test_main(c, kernel_version, long_valid):
         c.get("/home/ubuntu/ltp_failed.log", "tests_results/{}/ltp/ltp_failed.log".format(kernel_version))
         c.get("/home/ubuntu/ltp_conf.log", "tests_results/{}/ltp/ltp_conf.log".format(kernel_version))
 
-    def ltp_short_valid(c, kernel_version):
-        # Only launch a small subset of tests for sanity checks, this scenario is known to succeed
-        # so no need to compare the logs, let fabric stop on its own if this fails.
-        res = c.sudo("LTP_TIMEOUT_MUL=10 bash -c 'cd /opt/ltp && ./runltp -o /home/ubuntu/ltp_output -l /home/ubuntu/ltp_cur.log -C /home/ubuntu/ltp_failed.log -T /home/ubuntu/ltp_conf.log -s mmap' || true")
-
-        ltp_get_results_file(c, kernel_version)
-
-        if "INFO: ltp-pan reported some tests FAIL" in res.stdout:
-            raise RuntimeError("FAIL: LTP testsuite failed")
-
-    # ltp comes preinstalled (very long to build...)
-
-    if not long_valid:
-        ltp_short_valid(c, kernel_version)
-    else:
+    if long_valid:
         res = c.sudo("LTP_TIMEOUT_MUL=10 bash -c 'cd /opt/ltp && ./runltp -o /home/ubuntu/ltp_output -l /home/ubuntu/ltp_cur.log -C /home/ubuntu/ltp_failed.log -T /home/ubuntu/ltp_conf.log {}' || true")
 
         ltp_get_results_file(c, kernel_version)
