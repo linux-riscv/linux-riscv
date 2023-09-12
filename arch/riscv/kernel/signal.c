@@ -86,7 +86,7 @@ static long save_v_state(struct pt_regs *regs, void __user **sc_vec)
 	/* datap is designed to be 16 byte aligned for better performance */
 	WARN_ON(unlikely(!IS_ALIGNED((unsigned long)datap, 16)));
 
-	riscv_v_vstate_save(current, regs);
+	riscv_v_vstate_save(&current->thread.vstate, regs);
 	/* Copy everything of vstate but datap. */
 	err = __copy_to_user(&state->v_state, &current->thread.vstate,
 			     offsetof(struct __riscv_v_ext_state, datap));

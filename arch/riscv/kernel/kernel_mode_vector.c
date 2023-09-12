@@ -68,7 +68,7 @@ void kernel_vector_begin(void)
 
 	BUG_ON(!may_use_simd());
 
-	riscv_v_vstate_save(current, task_pt_regs(current));
+	riscv_v_vstate_save(&current->thread.vstate, task_pt_regs(current));
 
 	get_cpu_vector_context();
 
