@@ -40,27 +40,29 @@
 /* The hardcoded buffer size */
 #define ISBDMEX_BUF_SIZE 4096
 
-/* Registers are mostly 64-bits, except for the head/tail regs. */
-#define ISBDM_CMD_RING_BASE	0
-#define ISBDM_CMD_RING_HEAD	8
-#define ISBDM_CMD_RING_TAIL	16
-#define ISBDM_CMD_RING_CTRL	24
-#define ISBDM_RX_RING_BASE	32
-#define ISBDM_RX_RING_HEAD	40
-#define ISBDM_RX_RING_TAIL	48
-#define ISBDM_RX_RING_CTRL	56
-#define ISBDM_TX_RING_BASE	64
-#define ISBDM_TX_RING_HEAD	72
-#define ISBDM_TX_RING_TAIL	80
-#define ISBDM_TX_RING_CTRL	88
-#define ISBDM_RMBA_BASE		96
-#define ISBDM_RMBA_CTRL		104
-#define ISBDM_IPSR		112
-#define ISBDM_IPMR		120
-#define ISBDM_IRCR		128
-#define ISBDM_ADMIN		136
-#define ISBDM_EP_STATUS		144
-#define ISBDM_RX_TLP_DROP_CNT	184
+/* Registers are all 64-bit. */
+#define ISBDM_CMD_RING_BASE		0
+#define ISBDM_CMD_RING_HEAD		8
+#define ISBDM_CMD_RING_TAIL		16
+#define ISBDM_CMD_RING_CTRL		24
+#define ISBDM_RX_RING_BASE		32
+#define ISBDM_RX_RING_HEAD		40
+#define ISBDM_RX_RING_TAIL		48
+#define ISBDM_RX_RING_CTRL		56
+#define ISBDM_TX_RING_BASE		64
+#define ISBDM_TX_RING_HEAD		72
+#define ISBDM_TX_RING_TAIL		80
+#define ISBDM_TX_RING_CTRL		88
+#define ISBDM_RMBA_BASE			96
+#define ISBDM_RMBA_CTRL			104
+#define ISBDM_IPSR			112
+#define ISBDM_IPMR			120
+#define ISBDM_IRCR			128
+#define ISBDM_ADMIN			136
+#define ISBDM_EP_STATUS			144
+#define ISBDM_CMD_HEAD_WB_ADDR		152
+#define ISBDM_CMD_TAIL_SHADOW_ADDR	160
+#define ISBDM_RX_TLP_DROP_CNT		184
 
 #define ISBDM_WRITEQ(isbdm, reg, val) writeq(cpu_to_le64(val), (isbdm)->base + (reg))
 #define ISBDM_READQ(isbdm, reg) le64_to_cpu(readq((isbdm)->base + (reg)))
@@ -78,6 +80,10 @@
 
 /* The ENABLE bit is common to all rings (TX, RX, CMD) */
 #define ISBDM_RING_CTRL_ENABLE 0x1
+
+/* When set on the command ring, enables in-memory HEAD/TAIL updates. */
+#define ISBDM_CMD_CTRL_IDX_IN_MEM_ENABLE BIT(3)
+
 /*
  * The ring's BUSY flag goes down to indicate it has finished operating on
  * buffers within the ring.
@@ -209,6 +215,16 @@
 #define ISBDM_DESC_LS 0x40000000
 /* First Segment */
 #define ISBDM_DESC_FS 0x80000000
+
+/*
+ * When set, indicates the command queue is IDLE and not polling the tail memory
+ * address.
+ */
+#define ISBDM_CMD_HEAD_IDLE BIT(63)
+#define ISBDM_CMD_HEAD_INDEX_MASK 0xffffffff
+
+/* Define the alignemnt requirement for in-memory head/tail updates. */
+#define ISBDM_MEMORY_INDEX_ALIGNMENT 64
 
 /* RX and TX hardware descriptor format */
 struct isbdm_descriptor {
@@ -623,6 +639,12 @@ struct isbdm {
 	 */
 	uint32_t *notify_area;
 	dma_addr_t notify_area_physical;
+	/* If enabled, the hardware writes back the command head index here. */
+	volatile __le64 *cmd_head_idx;
+	dma_addr_t cmd_head_idx_physical;
+	/* If enabled, hardware reads the tail index from here, sometimes. */
+	volatile __le64 *cmd_tail_idx;
+	dma_addr_t cmd_tail_idx_physical;
 
 	/* Wait queue head blocking reads. */
 	struct wait_queue_head read_wait_queue;
@@ -659,6 +681,8 @@ struct isbdm {
 	bool send_handshake_ack;
 	/* Set if this ISBDM is a bridge to a RASD host. */
 	bool rasd_mode;
+	/* Set if we're using in-memory command head/tail pointers. */
+	bool in_memory_cmd_queue;
 
 	/* Command statistics, protected under the command ring mutex. */
 	struct isbdm_cmd_stats cmd_stats;
