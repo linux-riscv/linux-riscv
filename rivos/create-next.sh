@@ -25,7 +25,7 @@ VER=v6.5-rc1
 DOT=
 ORG="rivos"
 
-while getopts 'u:d:o:kh' opt; do
+while getopts 'u:d:o:klh' opt; do
   case "$opt" in
   u)
     echo "Upstream tag: $OPTARG"
@@ -39,12 +39,18 @@ while getopts 'u:d:o:kh' opt; do
     echo "Origin repo: $OPTARG"
     ORG="$OPTARG"
     ;;
+  l)
+    echo "Using local branches"
+    local_src=
+    ;;
   k)
     echo "Keep current branch state"
     no_reset=yes
     ;;
   h|?)
-    echo "Usage: $(basename $0) [-u upstream-tag] [-d dot-release] [-o origin]"
+    echo "Usage: $(basename $0) [-u upstream-tag] [-d dot-release] [-o origin] [-l] [-k]"
+    echo "  -l  - use local repository as source"
+    echo "  -k  - keep current branch state, do not reset to the upstream tag"
     exit 0
     ;;
   esac
@@ -52,7 +58,7 @@ done
 
 DST="dev/rivos/next/${VER}${DOT:+.$DOT}"
 TAG="rivos/${VER}${DOT:+.$DOT}"
-SRC="${ORG:+$ORG/}"
+SRC="${local_src-${ORG:+$ORG/}}"
 
 GIT_MERGE="git merge --no-ff --log=100 --stat --no-edit --signoff"
 
