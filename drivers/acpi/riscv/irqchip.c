@@ -27,6 +27,11 @@ LIST_HEAD(aplic_list);
 
 LIST_HEAD(plic_list);
 
+static struct fwnode_handle *riscv_get_gsi_domain_id_default(u32 gsi)
+{
+	return NULL;
+}
+
 struct fwnode_handle *acpi_rintc_create_irqchip_fwnode(struct acpi_madt_rintc *rintc)
 {
 	struct property_entry props[6] = {};
@@ -101,6 +106,7 @@ struct fwnode_handle *acpi_imsic_create_fwnode(struct acpi_madt_imsic *imsic)
 
 	imsic_acpi_fwnode = fwnode_create_software_node_early(props, NULL);
 
+	acpi_set_irq_model(ACPI_IRQ_MODEL_PLATFORM, riscv_get_gsi_domain_id_default);
 	return imsic_acpi_fwnode;
 }
 
