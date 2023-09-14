@@ -586,9 +586,8 @@ static bool riscv_iommu_iofence_sync(struct riscv_iommu_device *iommu)
 	return riscv_iommu_post_sync(iommu, &cmd, true);
 }
 
-static void riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
-				      struct mm_struct *mm, unsigned long start,
-				      unsigned long end)
+static int riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
+				      const struct mmu_notifier_range *range)
 {
 	struct riscv_iommu_command cmd;
 	struct riscv_iommu_endpoint *endpoint;
@@ -600,14 +599,14 @@ static void riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
 	 * different from IOMMU subsystem using the last address of an address
 	 * range. So do a simple translation here by updating what end means.
 	 */
-	u64 payload = riscv_iommu_ats_inval_payload(start, end - 1, true);
+	u64 payload = riscv_iommu_ats_inval_payload(range->start, range->end - 1, true);
 
 	riscv_iommu_cmd_inval_vma(&cmd);
 	riscv_iommu_cmd_inval_set_gscid(&cmd, 0);
 	riscv_iommu_cmd_inval_set_pscid(&cmd, domain->pscid);
-	if (end > start) {
+	if (range->end > range->start) {
 		/* Cover only the range that is needed */
-		for (iova = start; iova < end; iova += PAGE_SIZE) {
+		for (iova = range->start; iova < range->end; iova += PAGE_SIZE) {
 			riscv_iommu_cmd_inval_set_addr(&cmd, iova);
 			riscv_iommu_post(domain->iommu, &cmd);
 		}
@@ -630,6 +629,8 @@ static void riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
 		riscv_iommu_post(domain->iommu, &cmd);
 	}
 	riscv_iommu_iofence_sync(domain->iommu);
+
+	return 0;
 }
 
 static void riscv_iommu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
@@ -639,7 +640,7 @@ static void riscv_iommu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm
 
 static const struct mmu_notifier_ops riscv_iommu_mmuops = {
 	.release = riscv_iommu_mm_release,
-	.invalidate_range = riscv_iommu_mm_invalidate,
+	.invalidate_range_start = riscv_iommu_mm_invalidate,
 };
 
 /* Command queue primary interrupt handler */
