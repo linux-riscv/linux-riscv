@@ -33,7 +33,7 @@ struct test_args test_args = {
 	.nr_iter = NR_TEST_ITERS_DEF,
 	.timer_period_ms = TIMER_TEST_PERIOD_MS_DEF,
 	.migration_freq_ms = TIMER_TEST_MIGRATION_FREQ_MS,
-	.offset = { .reserved = 1 },
+	.reserved = 1,
 };
 
 struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
@@ -71,6 +71,8 @@ static void *test_vcpu_run(void *arg)
 	default:
 		TEST_FAIL("Unexpected guest exit\n");
 	}
+
+	pr_info("PASS(vCPU-%d).\n", vcpu_idx);
 
 	return NULL;
 }
@@ -186,7 +188,7 @@ static void test_print_help(char *name)
 		TIMER_TEST_PERIOD_MS_DEF);
 	pr_info("\t-m: Frequency (in ms) of vCPUs to migrate to different pCPU. 0 to turn off (default: %u)\n",
 		TIMER_TEST_MIGRATION_FREQ_MS);
-	pr_info("\t-o: Counter offset (in counter cycles, default: 0)\n");
+	pr_info("\t-o: Counter offset (in counter cycles, default: 0)[aarch64-only]\n");
 	pr_info("\t-h: print this help screen\n");
 }
 
@@ -214,8 +216,8 @@ static bool parse_args(int argc, char *argv[])
 			test_args.migration_freq_ms = atoi_non_negative("Frequency", optarg);
 			break;
 		case 'o':
-			test_args.offset.counter_offset = strtol(optarg, NULL, 0);
-			test_args.offset.reserved = 0;
+			test_args.counter_offset = strtol(optarg, NULL, 0);
+			test_args.reserved = 0;
 			break;
 		case 'h':
 		default:
