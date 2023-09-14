@@ -222,6 +222,9 @@ CFLAGS += -Wall -Wstrict-prototypes -Wuninitialized -O2 -g -std=gnu99 \
 ifeq ($(ARCH),s390)
 	CFLAGS += -march=z10
 endif
+ifeq ($(ARCH),riscv)
+	CFLAGS += -DCONFIG_64BIT
+endif
 
 no-pie-option := $(call try-run, echo 'int main(void) { return 0; }' | \
         $(CC) -Werror $(CFLAGS) -no-pie -x c - -o "$$TMP", -no-pie)
