@@ -939,4 +939,6 @@ struct ex_regs;
 typedef void(*exception_handler_fn)(struct ex_regs *);
 void vm_install_exception_handler(struct kvm_vm *vm, int vector, exception_handler_fn handler);
 
+uint32_t guest_get_vcpuid(void);
+
 #endif /* SELFTEST_KVM_UTIL_BASE_H */
