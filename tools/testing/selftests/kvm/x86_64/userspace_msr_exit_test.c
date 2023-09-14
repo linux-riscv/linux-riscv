@@ -544,8 +544,8 @@ static void test_msr_filter_allow(void)
 
 	vm_ioctl(vm, KVM_X86_SET_MSR_FILTER, &filter_allow);
 
-	vm_init_descriptor_tables(vm);
-	vcpu_init_descriptor_tables(vcpu);
+	vm_init_vector_tables(vm);
+	vcpu_init_vector_tables(vcpu);
 
 	vm_install_exception_handler(vm, GP_VECTOR, guest_gp_handler);
 

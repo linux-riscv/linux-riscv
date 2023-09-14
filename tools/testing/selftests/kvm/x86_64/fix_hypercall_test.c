@@ -110,8 +110,8 @@ static void test_fix_hypercall(bool disable_quirk)
 
 	vm = vm_create_with_one_vcpu(&vcpu, guest_main);
 
-	vm_init_descriptor_tables(vcpu->vm);
-	vcpu_init_descriptor_tables(vcpu);
+	vm_init_vector_tables(vcpu->vm);
+	vcpu_init_vector_tables(vcpu);
 	vm_install_exception_handler(vcpu->vm, UD_VECTOR, guest_ud_handler);
 
 	if (disable_quirk)

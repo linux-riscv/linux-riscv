@@ -756,8 +756,8 @@ static void test_vgic(uint32_t nr_irqs, bool level_sensitive, bool eoi_split)
 
 	vm = vm_create_with_one_vcpu(&vcpu, guest_code);
 
-	vm_init_descriptor_tables(vm);
-	vcpu_init_descriptor_tables(vcpu);
+	vm_init_vector_tables(vm);
+	vcpu_init_vector_tables(vcpu);
 
 	/* Setup the guest args page (so it gets the args). */
 	args_gva = vm_vaddr_alloc_page(vm);

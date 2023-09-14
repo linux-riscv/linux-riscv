@@ -415,10 +415,10 @@ void assert_on_unhandled_exception(struct kvm_vcpu *vcpu)
 }
 
 struct handlers {
-	handler_fn exception_handlers[VECTOR_NUM][ESR_EC_NUM];
+	exception_handler_fn exception_handlers[VECTOR_NUM][ESR_EC_NUM];
 };
 
-void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu)
+void vcpu_init_vector_tables(struct kvm_vcpu *vcpu)
 {
 	extern char vectors;
 
@@ -458,7 +458,7 @@ unexpected_exception:
 	kvm_exit_unexpected_exception(vector, ec, valid_ec);
 }
 
-void vm_init_descriptor_tables(struct kvm_vm *vm)
+void vm_init_vector_tables(struct kvm_vm *vm)
 {
 	vm->handlers = __vm_vaddr_alloc(vm, sizeof(struct handlers),
 					vm->page_size, MEM_REGION_DATA);

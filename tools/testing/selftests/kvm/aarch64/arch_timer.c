@@ -377,7 +377,7 @@ static struct kvm_vm *test_vm_create(void)
 
 	vm = vm_create_with_vcpus(nr_vcpus, guest_code, vcpus);
 
-	vm_init_descriptor_tables(vm);
+	vm_init_vector_tables(vm);
 	vm_install_exception_handler(vm, VECTOR_IRQ_CURRENT, guest_irq_handler);
 
 	if (!test_args.offset.reserved) {
@@ -388,7 +388,7 @@ static struct kvm_vm *test_vm_create(void)
 	}
 
 	for (i = 0; i < nr_vcpus; i++)
-		vcpu_init_descriptor_tables(vcpus[i]);
+		vcpu_init_vector_tables(vcpus[i]);
 
 	test_init_timer_irq(vm);
 	gic_fd = vgic_v3_setup(vm, nr_vcpus, 64, GICD_BASE_GPA, GICR_BASE_GPA);

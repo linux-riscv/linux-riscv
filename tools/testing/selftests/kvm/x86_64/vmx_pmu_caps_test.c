@@ -85,8 +85,8 @@ static void test_guest_wrmsr_perf_capabilities(union perf_capabilities host_cap)
 	struct ucall uc;
 	int r, i;
 
-	vm_init_descriptor_tables(vm);
-	vcpu_init_descriptor_tables(vcpu);
+	vm_init_vector_tables(vm);
+	vcpu_init_vector_tables(vcpu);
 
 	vcpu_set_msr(vcpu, MSR_IA32_PERF_CAPABILITIES, host_cap.capabilities);
 

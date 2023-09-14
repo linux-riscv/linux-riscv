@@ -156,8 +156,8 @@ static void guest_test_msrs_access(void)
 			vcpu_init_cpuid(vcpu, prev_cpuid);
 		}
 
-		vm_init_descriptor_tables(vm);
-		vcpu_init_descriptor_tables(vcpu);
+		vm_init_vector_tables(vm);
+		vcpu_init_vector_tables(vcpu);
 
 		/* TODO: Make this entire test easier to maintain. */
 		if (stage >= 21)
@@ -531,8 +531,8 @@ static void guest_test_hcalls_access(void)
 	while (true) {
 		vm = vm_create_with_one_vcpu(&vcpu, guest_hcall);
 
-		vm_init_descriptor_tables(vm);
-		vcpu_init_descriptor_tables(vcpu);
+		vm_init_vector_tables(vm);
+		vcpu_init_vector_tables(vcpu);
 
 		/* Hypercall input/output */
 		hcall_page = vm_vaddr_alloc_pages(vm, 2);

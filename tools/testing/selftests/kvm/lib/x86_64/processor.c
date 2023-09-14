@@ -1093,7 +1093,7 @@ void route_exception(struct ex_regs *regs)
 		     regs->vector, regs->rip);
 }
 
-void vm_init_descriptor_tables(struct kvm_vm *vm)
+void vm_init_vector_tables(struct kvm_vm *vm)
 {
 	extern void *idt_handlers;
 	int i;
@@ -1106,7 +1106,7 @@ void vm_init_descriptor_tables(struct kvm_vm *vm)
 			DEFAULT_CODE_SELECTOR);
 }
 
-void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu)
+void vcpu_init_vector_tables(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vm *vm = vcpu->vm;
 	struct kvm_sregs sregs;

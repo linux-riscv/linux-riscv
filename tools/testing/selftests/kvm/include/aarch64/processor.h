@@ -121,14 +121,8 @@ enum {
 void aarch64_get_supported_page_sizes(uint32_t ipa,
 				      bool *ps4k, bool *ps16k, bool *ps64k);
 
-void vm_init_descriptor_tables(struct kvm_vm *vm);
-void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu);
-
-typedef void(*handler_fn)(struct ex_regs *);
-void vm_install_exception_handler(struct kvm_vm *vm,
-		int vector, handler_fn handler);
 void vm_install_sync_handler(struct kvm_vm *vm,
-		int vector, int ec, handler_fn handler);
+		int vector, int ec, exception_handler_fn handler);
 
 uint64_t *virt_get_pte_hva(struct kvm_vm *vm, vm_vaddr_t gva);
 
