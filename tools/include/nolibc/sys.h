@@ -133,6 +133,8 @@ int sys_chmod(const char *path, mode_t mode)
 #elif defined(__NR_chmod)
 	return my_syscall2(__NR_chmod, path, mode);
 #else
+	(void)path;
+	(void)mode;
 	return -ENOSYS;
 #endif
 }
@@ -156,6 +158,9 @@ int sys_chown(const char *path, uid_t owner, gid_t group)
 #elif defined(__NR_chown)
 	return my_syscall3(__NR_chown, path, owner, group);
 #else
+	(void)path;
+	(void)owner;
+	(void)group;
 	return -ENOSYS;
 #endif
 }
@@ -230,6 +235,8 @@ int sys_dup2(int old, int new)
 #elif defined(__NR_dup2)
 	return my_syscall2(__NR_dup2, old, new);
 #else
+	(void)old;
+	(void)new;
 	return -ENOSYS;
 #endif
 }
@@ -486,6 +493,8 @@ int sys_gettimeofday(struct timeval *tv, struct timezone *tz)
 #ifdef __NR_gettimeofday
 	return my_syscall2(__NR_gettimeofday, tv, tz);
 #else
+	(void)tv;
+	(void)tz;
 	return -ENOSYS;
 #endif
 }
@@ -563,6 +572,8 @@ int sys_link(const char *old, const char *new)
 #elif defined(__NR_link)
 	return my_syscall2(__NR_link, old, new);
 #else
+	(void)old;
+	(void)new;
 	return -ENOSYS;
 #endif
 }
@@ -584,6 +595,9 @@ off_t sys_lseek(int fd, off_t offset, int whence)
 #ifdef __NR_lseek
 	return my_syscall3(__NR_lseek, fd, offset, whence);
 #else
+	(void)fd;
+	(void)offset;
+	(void)whence;
 	return -ENOSYS;
 #endif
 }
@@ -607,6 +621,8 @@ int sys_mkdir(const char *path, mode_t mode)
 #elif defined(__NR_mkdir)
 	return my_syscall2(__NR_mkdir, path, mode);
 #else
+	(void)path;
+	(void)mode;
 	return -ENOSYS;
 #endif
 }
@@ -629,6 +645,7 @@ int sys_rmdir(const char *path)
 #elif defined(__NR_unlinkat)
 	return my_syscall3(__NR_unlinkat, AT_FDCWD, path, AT_REMOVEDIR);
 #else
+	(void)path;
 	return -ENOSYS;
 #endif
 }
@@ -652,6 +669,9 @@ long sys_mknod(const char *path, mode_t mode, dev_t dev)
 #elif defined(__NR_mknod)
 	return my_syscall3(__NR_mknod, path, mode, dev);
 #else
+	(void)path;
+	(void)mode;
+	(void)dev;
 	return -ENOSYS;
 #endif
 }
@@ -742,6 +762,9 @@ int sys_open(const char *path, int flags, mode_t mode)
 #elif defined(__NR_open)
 	return my_syscall3(__NR_open, path, flags, mode);
 #else
+	(void)path;
+	(void)flags;
+	(void)mode;
 	return -ENOSYS;
 #endif
 }
@@ -842,6 +865,9 @@ int sys_poll(struct pollfd *fds, int nfds, int timeout)
 #elif defined(__NR_poll)
 	return my_syscall3(__NR_poll, fds, nfds, timeout);
 #else
+	(void)fds;
+	(void)nfds;
+	(void)timeout;
 	return -ENOSYS;
 #endif
 }
@@ -934,6 +960,11 @@ int sys_select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds, struct timeva
 #endif
 	return my_syscall5(__NR__newselect, nfds, rfds, wfds, efds, timeout);
 #else
+	(void)nfds;
+	(void)rfds;
+	(void)wfds;
+	(void)efds;
+	(void)timeout;
 	return -ENOSYS;
 #endif
 }
