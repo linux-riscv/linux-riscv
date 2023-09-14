@@ -10,6 +10,7 @@ def test_main(c, long_valid):
 ok 1 selftests: riscv: hwprobe
 ok 2 selftests: riscv: vstate_prctl
 ok 3 selftests: riscv: v_initval_nolibc
+ok 4 selftests: riscv: run_mmap.sh
 """
         # the short valid only targets the riscv subdirectory and is rebuilt (the
         # idea is that generic kselftests should be updated from time to time
