@@ -402,6 +402,53 @@
 		};
 	};
 
+	pcie0_pins: pcie0-0 {
+		wake-pins {
+			pinmux = <GPIOMUX(32, GPOUT_LOW,
+					      GPOEN_DISABLE,
+					      GPI_NONE)>;
+			bias-pull-up;
+			drive-strength = <2>;
+			input-enable;
+			input-schmitt-disable;
+			slew-rate = <0>;
+		};
+		clkreq-pins {
+			pinmux = <GPIOMUX(27, GPOUT_LOW,
+					      GPOEN_DISABLE,
+					      GPI_NONE)>;
+			bias-pull-down;
+			drive-strength = <2>;
+			input-enable;
+			input-schmitt-disable;
+			slew-rate = <0>;
+		};
+	};
+
+	pcie1_pins: pcie1-0 {
+		wake-pins {
+			pinmux = <GPIOMUX(21, GPOUT_LOW,
+					      GPOEN_DISABLE,
+					      GPI_NONE)>;
+			bias-pull-up;
+			drive-strength = <2>;
+			input-enable;
+			input-schmitt-disable;
+			slew-rate = <0>;
+		};
+
+		clkreq-pins {
+			pinmux = <GPIOMUX(29, GPOUT_LOW,
+					      GPOEN_DISABLE,
+					      GPI_NONE)>;
+			bias-pull-down;
+			drive-strength = <2>;
+			input-enable;
+			input-schmitt-disable;
+			slew-rate = <0>;
+		};
+	};
+
 	spi0_pins: spi0-0 {
 		mosi-pins {
 			pinmux = <GPIOMUX(52, GPOUT_SYS_SPI0_TXD,
@@ -497,6 +544,22 @@
 			input-enable;
 		};
 	};
+};
+
+&pcie0 {
+	pinctrl-names = "default";
+	perst-gpios = <&sysgpio 26 GPIO_ACTIVE_LOW>;
+	pinctrl-0 = <&pcie0_pins>;
+	phys = <&pciephy0>;
+	status = "okay";
+};
+
+&pcie1 {
+	pinctrl-names = "default";
+	perst-gpios = <&sysgpio 28 GPIO_ACTIVE_LOW>;
+	pinctrl-0 = <&pcie1_pins>;
+	phys = <&pciephy1>;
+	status = "okay";
 };
 
 &tdm {
