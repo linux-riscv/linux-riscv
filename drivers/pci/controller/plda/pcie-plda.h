@@ -150,6 +150,7 @@ struct plda_pcie_rp {
 	raw_spinlock_t lock;
 	struct plda_msi msi;
 	void __iomem *bridge_addr;
+	int num_events;
 };
 
 irqreturn_t plda_event_handler(int irq, void *dev_id);
