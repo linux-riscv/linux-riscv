@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2023 Rivos Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: linux-riscv-ci-patches
+
+on: pull_request
+
+jobs:
+  build-patches:
+    runs-on: 'self-hosted'
+    container: catthehacker/ubuntu:act-latest
+    steps:
+      - name: Configure git 
+        run: |
+          git config --global --add safe.directory '*'
+      - name: Checkout git
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 64 
+      - name: Setup container
+        run: |
+          bash .github/scripts/setup-github-ubuntu.sh
+      - name: Run checks
+        run: |
+          export PATH=${PATH}:/root/.local/bin
+          bash .github/scripts/patches.sh
