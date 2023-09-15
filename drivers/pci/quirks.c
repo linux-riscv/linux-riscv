@@ -4947,6 +4947,9 @@ static int pci_quirk_brcm_acs(struct pci_dev *dev, u16 acs_flags)
 
 static int pci_quirk_rivos_rciep_acs(struct pci_dev *dev, u16 acs_flags)
 {
+	if (dev->vendor == 0x1234 && dev->device == 0x11e8)
+		return 1;
+
 	/*
 	 * Rivos RCiEP's are required to allow p2p only on translated addresses.
 	 */
@@ -5127,6 +5130,7 @@ static const struct pci_dev_acs_enabled {
 	{ PCI_VENDOR_ID_WANGXUN, PCI_ANY_ID, pci_quirk_wangxun_nic_acs },
 	/* Rivos Inc. */
 	{ PCI_VENDOR_ID_RIVOS, PCI_ANY_ID, pci_quirk_rivos_rciep_acs },
+	{ 0x1234, 0x11e8, pci_quirk_rivos_rciep_acs },
 	{ 0 }
 };
 
