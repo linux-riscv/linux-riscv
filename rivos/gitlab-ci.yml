@@ -57,7 +57,7 @@ prepare-version:
       - linux-image*.deb
       - build_*/vmlinux
       - build_*/arch/riscv/boot/Image
-    expire_in: 3 hours
+    expire_in: 1w
 
 .validate-kernel: &validate-kernel
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:${SDK_BASE_TAG}
@@ -69,7 +69,7 @@ prepare-version:
       - rivos/linux_ci/*_defconfig_output
       - rivos/linux_ci/vm_output_*
       - rivos/linux_ci/tests_results/
-    expire_in: 3h
+    expire_in: 1w
   script:
     - rm -rf "${INSTALL_DIR}"
     - apt update
