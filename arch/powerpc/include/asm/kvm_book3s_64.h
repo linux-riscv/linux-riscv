@@ -16,6 +16,7 @@
 #include <asm/ppc-opcode.h>
 #include <asm/pte-walk.h>
 
+#ifdef __KVM__
 /*
  * Structure for a nested guest, that is, for a guest that is managed by
  * one of our guests.
@@ -679,4 +680,5 @@ extern pte_t *find_kvm_nested_guest_pte(struct kvm *kvm, unsigned long lpid,
 
 #endif /* CONFIG_KVM_BOOK3S_HV_POSSIBLE */
 
+#endif /* __KVM__ */
 #endif /* __ASM_KVM_BOOK3S_64_H__ */

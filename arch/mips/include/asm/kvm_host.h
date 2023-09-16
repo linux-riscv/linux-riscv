@@ -25,6 +25,7 @@
 #include <asm/inst.h>
 #include <asm/mipsregs.h>
 
+#ifdef __KVM__
 /* MIPS KVM register ids */
 #define MIPS_CP0_32(_R, _S)					\
 	(KVM_REG_MIPS_CP0 | KVM_REG_SIZE_U32 | (8 * (_R) + (_S)))
@@ -897,4 +898,5 @@ static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
 
 #define __KVM_HAVE_ARCH_FLUSH_REMOTE_TLBS
 
+#endif /* __KVM__ */
 #endif /* __MIPS_KVM_HOST_H__ */

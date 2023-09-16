@@ -5,6 +5,7 @@
  */
 
 #define GENERATING_ASM_OFFSETS
+#define __KVM__
 
 #include <linux/kbuild.h>
 #include <linux/mm.h>

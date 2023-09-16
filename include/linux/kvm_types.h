@@ -48,6 +48,8 @@ typedef u64            hfn_t;
 
 typedef hfn_t kvm_pfn_t;
 
+#ifdef __KVM__
+
 enum pfn_cache_usage {
 	KVM_GUEST_USES_PFN = BIT(0),
 	KVM_HOST_USES_PFN  = BIT(1),
@@ -123,4 +125,5 @@ struct kvm_vcpu_stat_generic {
 
 #define KVM_STATS_NAME_SIZE	48
 
+#endif /* __KVM__ */
 #endif /* __KVM_TYPES_H__ */

@@ -380,6 +380,10 @@ struct sie_page {
 	__u8 reserved700[2304];		/* 0x0700 */
 };
 
+extern char sie_exit;
+
+#ifdef __KVM__
+
 struct kvm_vcpu_stat {
 	struct kvm_vcpu_stat_generic generic;
 	u64 exit_userspace;
@@ -1028,8 +1032,6 @@ static inline int sie64a(struct kvm_s390_sie_block *sie_block, u64 *rsa)
 	return __sie64a(virt_to_phys(sie_block), sie_block, rsa);
 }
 
-extern char sie_exit;
-
 bool kvm_s390_pv_is_protected(struct kvm *kvm);
 bool kvm_s390_pv_cpu_is_protected(struct kvm_vcpu *vcpu);
 
@@ -1049,6 +1051,7 @@ static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
 
 #define __KVM_HAVE_ARCH_VM_FREE
 void kvm_arch_free_vm(struct kvm *kvm);
+#endif /* __KVM__ */
 
 struct zpci_kvm_hook {
 	int (*kvm_register)(void *opaque, struct kvm *kvm);

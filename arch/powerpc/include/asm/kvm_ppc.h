@@ -183,6 +183,7 @@ static inline void kvmppc_clear_host_ipi(int cpu)
 static inline bool kvm_hv_mode_active(void)		{ return false; }
 #endif
 
+#ifdef __KVM__
 /*
  * KVMPPC_INST_SW_BREAKPOINT is debug Instruction
  * for supporting software breakpoint.
@@ -1076,4 +1077,5 @@ static inline ulong kvmppc_get_ea_indexed(struct kvm_vcpu *vcpu, int ra, int rb)
 	return ea;
 }
 
+#endif /* __KVM__ */
 #endif /* __POWERPC_KVM_PPC_H__ */

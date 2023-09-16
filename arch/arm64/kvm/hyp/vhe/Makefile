@@ -4,7 +4,7 @@
 #
 
 asflags-y := -D__KVM_VHE_HYPERVISOR__
-ccflags-y := -D__KVM_VHE_HYPERVISOR__
+ccflags-y := -D__KVM_VHE_HYPERVISOR__ -D__KVM__
 
 obj-y := timer-sr.o sysreg-sr.o debug-sr.o switch.o tlb.o
 obj-y += ../vgic-v3-sr.o ../aarch32.o ../vgic-v2-cpuif-proxy.o ../entry.o \

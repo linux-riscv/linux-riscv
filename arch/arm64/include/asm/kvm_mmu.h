@@ -125,6 +125,8 @@ void kvm_update_va_mask(struct alt_instr *alt,
 void kvm_compute_layout(void);
 void kvm_apply_hyp_relocations(void);
 
+#ifdef __KVM__
+
 #define __hyp_pa(x) (((phys_addr_t)(x)) + hyp_physvirt_offset)
 
 static __always_inline unsigned long __kern_hyp_va(unsigned long v)
@@ -314,5 +316,7 @@ static inline struct kvm *kvm_s2_mmu_to_kvm(struct kvm_s2_mmu *mmu)
 {
 	return container_of(mmu->arch, struct kvm, arch);
 }
+
+#endif /* __KVM__ */
 #endif /* __ASSEMBLY__ */
 #endif /* __ARM64_KVM_MMU_H__ */

@@ -6,6 +6,7 @@
  */
 
 #define ASM_OFFSETS_C
+#define __KVM__
 
 #include <linux/kbuild.h>
 #include <linux/kvm_host.h>

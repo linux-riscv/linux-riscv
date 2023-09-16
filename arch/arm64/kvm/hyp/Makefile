@@ -5,6 +5,6 @@
 
 incdir := $(srctree)/$(src)/include
 subdir-asflags-y := -I$(incdir) -I$(srctree)/arch/arm64/kvm
-subdir-ccflags-y := -I$(incdir) -I$(srctree)/arch/arm64/kvm
+subdir-ccflags-y := -I$(incdir) -I$(srctree)/arch/arm64/kvm -D__KVM__
 
 obj-$(CONFIG_KVM) += vhe/ nvhe/ pgtable.o

@@ -7,6 +7,8 @@
  * Copyright (C) 2012 ARM Ltd.
  */
 
+#define __KVM__
+
 #include <linux/arm_sdei.h>
 #include <linux/sched.h>
 #include <linux/ftrace.h>

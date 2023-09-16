@@ -7,6 +7,7 @@
  * Author(s): Tony Krowiak <akrowiak@linux.ibm.com>
  *	      Pierre Morel <pmorel@linux.ibm.com>
  */
+#define __KVM__
 
 #include <linux/module.h>
 #include <linux/mod_devicetable.h>

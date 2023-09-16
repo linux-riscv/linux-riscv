@@ -8,6 +8,7 @@
  * compile this file to assembler, and then extract the
  * #defines from the assembly-language output.
  */
+#define __KVM__
 
 #include <linux/compat.h>
 #include <linux/signal.h>

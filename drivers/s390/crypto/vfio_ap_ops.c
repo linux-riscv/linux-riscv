@@ -8,6 +8,8 @@
  *	      Halil Pasic <pasic@linux.ibm.com>
  *	      Pierre Morel <pmorel@linux.ibm.com>
  */
+#define __KVM__
+
 #include <linux/string.h>
 #include <linux/vfio.h>
 #include <linux/device.h>

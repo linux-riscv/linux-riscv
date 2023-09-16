@@ -2,7 +2,12 @@
 #if !defined(_TRACE_KVM_MAIN_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_KVM_MAIN_H
 
+#include <linux/kvm_host.h>
 #include <linux/tracepoint.h>
+
+#ifndef __KVM__
+static_assert(0, "Do not include trace/events/kvm.h from non-KVM code");
+#endif
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvm

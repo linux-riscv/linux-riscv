@@ -93,6 +93,7 @@ static inline bool kvm_pmu_counter_deferred(struct perf_event_attr *attr)
 	return (!has_vhe() && attr->exclude_host);
 }
 
+#ifdef __KVM__
 DECLARE_STATIC_KEY_FALSE(userspace_irqchip_in_use);
 
 extern unsigned int __ro_after_init kvm_sve_max_vl;
@@ -1149,4 +1150,5 @@ int kvm_trng_call(struct kvm_vcpu *vcpu);
 void kvm_arm_vcpu_power_off(struct kvm_vcpu *vcpu);
 bool kvm_arm_vcpu_stopped(struct kvm_vcpu *vcpu);
 
+#endif /* __KVM__ */
 #endif /* __ARM64_KVM_HOST_H__ */

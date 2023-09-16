@@ -12,6 +12,8 @@
 #include <linux/types.h>
 #include <linux/kvm_host.h>
 
+#ifdef __KVM__
+
 /*
  * Number of available lpids. Only the low-order 6 bits of LPID rgister are
  * implemented on e500mc+ cores.
@@ -105,4 +107,6 @@ static inline bool kvmppc_supports_magic_page(struct kvm_vcpu *vcpu)
 	return false;
 #endif
 }
+
+#endif /* __KVM__ */
 #endif /* __ASM_KVM_BOOKE_H__ */

@@ -13,6 +13,8 @@
 #include <linux/kvm_host.h>
 #include <asm/kvm_book3s_asm.h>
 
+#ifdef __KVM__
+
 struct kvmppc_bat {
 	u64 raw;
 	u32 bepi;
@@ -483,4 +485,5 @@ static inline u32 kvmppc_pack_vcpu_id(struct kvm *kvm, u32 id)
 	return packed_id;
 }
 
+#endif /* __KVM__ */
 #endif /* __ASM_KVM_BOOK3S_H__ */
