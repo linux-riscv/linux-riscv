@@ -10,10 +10,10 @@
 #include <linux/atomic.h>
 #include <linux/bitmap.h>
 #include <linux/kvm_host.h>
+#include <linux/kvm_iodev.h>
 #include <linux/math.h>
 #include <linux/spinlock.h>
 #include <linux/swab.h>
-#include <kvm/iodev.h>
 #include <asm/csr.h>
 #include <asm/kvm_aia_imsic.h>
 

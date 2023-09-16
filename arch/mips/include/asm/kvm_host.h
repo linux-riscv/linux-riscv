@@ -16,6 +16,7 @@
 #include <linux/interrupt.h>
 #include <linux/types.h>
 #include <linux/kvm.h>
+#include <linux/kvm_iodev.h>
 #include <linux/kvm_types.h>
 #include <linux/threads.h>
 #include <linux/spinlock.h>
@@ -23,8 +24,6 @@
 #include <asm/asm.h>
 #include <asm/inst.h>
 #include <asm/mipsregs.h>
-
-#include <kvm/iodev.h>
 
 /* MIPS KVM register ids */
 #define MIPS_CP0_32(_R, _S)					\

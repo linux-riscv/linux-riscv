@@ -11,7 +11,7 @@
 #include <linux/math.h>
 #include <linux/spinlock.h>
 #include <linux/swab.h>
-#include <kvm/iodev.h>
+#include <linux/kvm_iodev.h>
 #include <asm/kvm_aia_aplic.h>
 
 struct aplic_irq {
