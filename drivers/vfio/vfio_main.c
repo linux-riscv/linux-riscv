@@ -397,7 +397,7 @@ vfio_allocate_device_file(struct vfio_device *device)
 		return ERR_PTR(-ENOMEM);
 
 	df->device = device;
-	spin_lock_init(&df->kvm_ref_lock);
+	spin_lock_init(&df->kvm_ref.lock);
 
 	return df;
 }
@@ -1303,7 +1303,8 @@ bool vfio_file_enforced_coherent(struct file *file)
 EXPORT_SYMBOL_GPL(vfio_file_enforced_coherent);
 
 #if IS_ENABLED(CONFIG_KVM)
-void vfio_device_get_kvm_safe(struct vfio_device *device, struct kvm *kvm)
+void vfio_device_get_kvm_safe(struct vfio_device *device,
+			      struct vfio_kvm_reference *ref)
 {
 	void (*pfn)(struct kvm *kvm);
 	bool (*fn)(struct kvm *kvm);
@@ -1311,28 +1312,33 @@ void vfio_device_get_kvm_safe(struct vfio_device *device, struct kvm *kvm)
 
 	lockdep_assert_held(&device->dev_set->lock);
 
-	if (!kvm)
-		return;
+	spin_lock(&ref->lock);
+
+	if (!ref->kvm)
+		goto out;
 
 	pfn = symbol_get(kvm_put_kvm);
 	if (WARN_ON(!pfn))
-		return;
+		goto out;
 
 	fn = symbol_get(kvm_get_kvm_safe);
 	if (WARN_ON(!fn)) {
 		symbol_put(kvm_put_kvm);
-		return;
+		goto out;
 	}
 
-	ret = fn(kvm);
+	ret = fn(ref->kvm);
 	symbol_put(kvm_get_kvm_safe);
 	if (!ret) {
 		symbol_put(kvm_put_kvm);
-		return;
+		goto out;
 	}
 
 	device->put_kvm = pfn;
-	device->kvm = kvm;
+	device->kvm = ref->kvm;
+
+out:
+	spin_unlock(&ref->lock);
 }
 
 void vfio_device_put_kvm(struct vfio_device *device)
@@ -1353,6 +1359,21 @@ clear:
 	device->kvm = NULL;
 }
 
+static void vfio_device_set_kvm(struct vfio_kvm_reference *ref,
+				struct kvm *kvm)
+{
+	spin_lock(&ref->lock);
+	ref->kvm = kvm;
+	spin_unlock(&ref->lock);
+}
+
+static void vfio_group_set_kvm(struct vfio_group *group, struct kvm *kvm)
+{
+#if IS_ENABLED(CONFIG_VFIO_GROUP)
+	vfio_device_set_kvm(&group->kvm_ref, kvm);
+#endif
+}
+
 static void vfio_device_file_set_kvm(struct file *file, struct kvm *kvm)
 {
 	struct vfio_device_file *df = file->private_data;
@@ -1362,9 +1383,7 @@ static void vfio_device_file_set_kvm(struct file *file, struct kvm *kvm)
 	 * be propagated to vfio_device::kvm when the file is bound to
 	 * iommufd successfully in the vfio device cdev path.
 	 */
-	spin_lock(&df->kvm_ref_lock);
-	df->kvm = kvm;
-	spin_unlock(&df->kvm_ref_lock);
+	vfio_device_set_kvm(&df->kvm_ref, kvm);
 }
 
 /**
