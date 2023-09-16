@@ -59,9 +59,6 @@ config HAVE_KVM_MSI
 config HAVE_KVM_CPU_RELAX_INTERCEPT
        bool
 
-config KVM_VFIO
-       bool
-
 config HAVE_KVM_INVALID_WAKEUPS
        bool
 
