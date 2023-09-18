@@ -1783,9 +1783,7 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 	struct isbdm_device *sdev = ii->ib_device;
 	u32 dest_qp_id = le32_to_cpu(hdr->dest_qp);
 	struct isbdm_qp *qp = isbdm_qp_id2obj(sdev, dest_qp_id);
-	bool has_grh = (qp->base_qp.qp_type == IB_QPT_UD) ||
-		       (qp->base_qp.qp_type == IB_QPT_GSI) ||
-		       (qp->base_qp.qp_type == IB_QPT_SMI);
+	bool has_grh;
 	u32 rcvd_bytes = 0;
 	size_t buf_off = sizeof(*hdr);
 	int pbl_idx = 0;
@@ -1795,6 +1793,18 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 	struct isbdm_wqe *wqe = NULL;
 	struct ib_grh grh;
 	int rv;
+
+	if (!qp) {
+		dev_warn(&ii->pdev->dev,
+			 "Dropping RX packet with unknown QP %x\n",
+			 dest_qp_id);
+
+		return;
+	}
+
+	has_grh = (qp->base_qp.qp_type == IB_QPT_UD) ||
+		  (qp->base_qp.qp_type == IB_QPT_GSI) ||
+		  (qp->base_qp.qp_type == IB_QPT_SMI);
 
 	if ((qp->base_qp.qp_type == IB_QPT_UD) ||
 	    (qp->base_qp.qp_type == IB_QPT_GSI)) {
@@ -1806,14 +1816,6 @@ static void isbdm_process_ib_recv(struct isbdm *ii,
 
 			goto out;
 		}
-	}
-
-	if (!qp) {
-		dev_warn(&ii->pdev->dev,
-			 "Dropping RX packet with unknown QP %x\n",
-			 dest_qp_id);
-
-		return;
 	}
 
 	if ((qp->attrs.state != ISBDM_QP_STATE_RTR) &&
