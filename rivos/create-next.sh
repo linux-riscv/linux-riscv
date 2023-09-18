@@ -21,7 +21,7 @@
 
 set -e
 
-VER=v6.5-rc1
+VER=v6.6-rc1
 DOT=
 ORG="rivos"
 
