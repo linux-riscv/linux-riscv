@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2023 Rivos Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: linux-riscv-ci
+
+on: workflow_dispatch
+
+jobs:
+  build-series:
+    runs-on: 'self-hosted'
+    container: catthehacker/ubuntu:act-latest
+    steps:
+      - name: Checkout git
+        uses: actions/checkout@v3
+      - name: Setup container
+        run: |
+          bash .github/scripts/setup-github-ubuntu.sh
+      - name: Run checks
+        run: |
+          export PATH=${PATH}:/root/.local/bin
+          bash .github/scripts/series.sh
+          
