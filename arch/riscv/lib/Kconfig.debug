@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "riscv lib Testing and Coverage"
+
+menuconfig RUNTIME_LIB_TESTING_MENU
+	bool "Runtime Lib Testing"
+	def_bool y
+	help
+	  Enable riscv runtime lib testing.
+
+if RUNTIME_LIB_TESTING_MENU
+
+config RISCV_CHECKSUM_KUNIT
+	tristate "KUnit test riscv checksum functions at runtime" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Enable this option to test the checksum functions at boot.
+
+	  KUnit tests run during boot and output the results to the debug log
+	  in TAP format (http://testanything.org/). Only useful for kernel devs
+	  running the KUnit test harness, and not intended for inclusion into a
+	  production build.
+
+	  For more information on KUnit and unit tests in general please refer
+	  to the KUnit documentation in Documentation/dev-tools/kunit/.
+
+	  If unsure, say N.
+
+endif # RUNTIME_LIB_TESTING_MENU
+
+endmenu # "riscv lib Testing and Coverage"
