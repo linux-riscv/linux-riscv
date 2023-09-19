@@ -107,6 +107,7 @@ docker-build-rivos-defconfig:
 
 docker-build-ubuntu-defconfig:
   extends: .build-kernel
+  timeout: 180min
   variables:
     KERNEL_CONFIG: "ubuntu_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ${KERNEL_CONFIG}"
@@ -123,6 +124,7 @@ docker-build-ubuntu-defconfig:
 
 docker-build-ubuntu-kasan-outline-defconfig:
   extends: .build-kernel
+  timeout: 180min
   variables:
     KERNEL_CONFIG: "ubuntu_kasan_outline_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
@@ -137,6 +139,7 @@ docker-build-ubuntu-kasan-outline-defconfig:
 
 docker-build-ubuntu-kasan-inline-defconfig:
   extends: .build-kernel
+  timeout: 180min
   variables:
     KERNEL_CONFIG: "ubuntu_kasan_inline_defconfig"
     BUILD_SH_ARGS: "${KERNEL_CONFIG} ubuntu_defconfig kasan.conf"
