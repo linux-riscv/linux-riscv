@@ -29,7 +29,7 @@ LIST_HEAD(plic_list);
 
 static struct fwnode_handle *riscv_get_gsi_domain_id_default(u32 gsi)
 {
-	return NULL;
+	return imsic_acpi_fwnode;
 }
 
 struct fwnode_handle *acpi_rintc_create_irqchip_fwnode(struct acpi_madt_rintc *rintc)
