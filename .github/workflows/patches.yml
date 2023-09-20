@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2023 Rivos Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: linux-riscv-ci-patches
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+on: pull_request
+
+jobs:
+  build-patches:
+    runs-on: 'self-hosted'
+    container:
+      image: ghcr.io/linux-riscv/pw-builder:latest
+      volumes:
+        - /disk-1/var/lib/ghrunner:/ccache
+    steps:
+      - name: Configure git
+        run: |
+          git config --global --add safe.directory '*'
+      - name: Checkout git
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 64
+      - name: Run checks
+        run: |
+          bash .github/scripts/patches.sh
