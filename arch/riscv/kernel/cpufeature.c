@@ -556,8 +556,9 @@ unsigned long riscv_get_elf_hwcap(void)
 	return hwcap;
 }
 
-void check_unaligned_access(int cpu)
+int check_unaligned_access(void *unused)
 {
+	int cpu = smp_processor_id();
 	u64 start_cycles, end_cycles;
 	u64 word_cycles;
 	u64 byte_cycles;
@@ -571,7 +572,7 @@ void check_unaligned_access(int cpu)
 	page = alloc_pages(GFP_NOWAIT, get_order(MISALIGNED_BUFFER_SIZE));
 	if (!page) {
 		pr_warn("Can't alloc pages to measure memcpy performance");
-		return;
+		return 0;
 	}
 
 	/* Make an unaligned destination buffer. */
@@ -643,15 +644,26 @@ void check_unaligned_access(int cpu)
 
 out:
 	__free_pages(page, get_order(MISALIGNED_BUFFER_SIZE));
-}
-
-static int check_unaligned_access_boot_cpu(void)
-{
-	check_unaligned_access(0);
 	return 0;
 }
 
-arch_initcall(check_unaligned_access_boot_cpu);
+static void check_unaligned_access_nonboot_cpu(void *param)
+{
+	if (smp_processor_id() != 0)
+		check_unaligned_access(param);
+}
+
+static int check_unaligned_access_all_cpus(void)
+{
+	/* Check everybody except 0, who stays behind to tend jiffies. */
+	on_each_cpu(check_unaligned_access_nonboot_cpu, NULL, 1);
+
+	/* Check core 0. */
+	smp_call_on_cpu(0, check_unaligned_access, NULL, true);
+	return 0;
+}
+
+arch_initcall(check_unaligned_access_all_cpus);
 
 #ifdef CONFIG_RISCV_ALTERNATIVE
 /*
