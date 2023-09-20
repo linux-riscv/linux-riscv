@@ -380,6 +380,8 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 	cmd->ring_base_address = args->ring_base_address;
 	cmd->ring_size = args->ring_size;
 
+	if (args->flags & DPA_DRM_CREATE_QUEUE_DEBUG)
+		cmd->flags |= DAFFY_CREATE_QUEUE_DEBUG;
 	ret = daffy_submit_sync(dpa, &pkt);
 	if (ret < 0)
 		return ret;

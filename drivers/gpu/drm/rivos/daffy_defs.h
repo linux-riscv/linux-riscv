@@ -80,6 +80,10 @@ enum {
 	DAFFY_RESP_ERROR = 2,
 };
 
+enum {
+	DAFFY_CREATE_QUEUE_DEBUG = (1 << 0),
+};
+
 struct daffy_pkt_header {
 	uint64_t id;
 	uint16_t command;
@@ -107,7 +111,7 @@ struct daffy_create_queue_cmd {
 	/* in */
 	uint64_t ring_base_address;
 	uint32_t ring_size;
-	uint32_t queue_priority;
+	uint32_t flags;
 	uint32_t pasid;
 
 	/* out */

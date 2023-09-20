@@ -27,6 +27,10 @@ struct drm_dpa_get_info {
 	__u32 pad;
 };
 
+
+/* Create a queue for debug packets. */
+#define DPA_DRM_CREATE_QUEUE_DEBUG	(1 << 0)
+
 struct drm_dpa_create_queue {
 	__u64 ring_base_address;	/* to DPA */
 	__u64 doorbell_offset;		/* from DPA */
@@ -34,6 +38,7 @@ struct drm_dpa_create_queue {
 	__u32 ring_size;		/* to DPA */
 	__u32 queue_priority;		/* to DPA */
 	__u32 queue_id;			/* from DPA */
+	__u32 flags;			/* to DPA */
 };
 
 struct drm_dpa_destroy_queue {
