@@ -40,6 +40,14 @@ properties:
               - thead,th1520-clint
           - const: thead,c900-clint
       - items:
+          - enum:
+              - sophgo,sg2042-clint-mtimer
+          - const: thead,c900-clint-mtimer
+      - items:
+          - enum:
+              - sophgo,sg2042-clint-mswi
+          - const: thead,c900-clint-mswi
+      - items:
           - const: sifive,clint0
           - const: riscv,clint0
         deprecated: true
