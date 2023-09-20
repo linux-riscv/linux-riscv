@@ -436,7 +436,7 @@ static void riscv_iommu_cmd_ats_set_dseg(struct riscv_iommu_command *cmd, u8 seg
 	 * We comment the following code until this is resolved.
 	 */
 	cmd->dword0 |= FIELD_PREP(RISCV_IOMMU_CMD_ATS_DSEG, seg) |
-		       0 /* RISCV_IOMMU_CMD_ATS_DSV */;
+		       RISCV_IOMMU_CMD_ATS_DSV;
 }
 
 static void riscv_iommu_cmd_ats_set_payload(struct riscv_iommu_command *cmd, u64 payload)
@@ -696,7 +696,7 @@ static void riscv_iommu_fault_report(struct riscv_iommu_device *iommu,
 	devid = FIELD_GET(RISCV_IOMMU_FQ_HDR_DID, event->hdr);
 
 	dev_warn_ratelimited(iommu->dev,
-			     "Fault %d devid: %d iotval: %llx iotval2: %llx\n", err,
+			     "Fault %d devid: 0x%x iotval: %llx iotval2: %llx\n", err,
 			     devid, event->iotval, event->iotval2);
 }
 
@@ -775,7 +775,7 @@ static void riscv_iommu_add_device(struct riscv_iommu_device *iommu, struct devi
 		} else if (rb_ep->devid < ep->devid) {
 			new_node = &((*new_node)->rb_right);
 		} else {
-			dev_warn(dev, "device %u already in the tree\n", ep->devid);
+			dev_warn(dev, "device 0x%x already in the tree\n", ep->devid);
 			break;
 		}
 	}
@@ -1328,8 +1328,8 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 	INIT_LIST_HEAD(&ep->regions);
 
 	if (dev_is_pci(dev)) {
-		ep->devid = pci_dev_id(to_pci_dev(dev));
 		ep->domid = pci_domain_nr(to_pci_dev(dev)->bus);
+		ep->devid = pci_dev_id(to_pci_dev(dev)) | (ep->domid << 16);
 	} else {
 		/* TODO: Make this generic, for now hardcode domain id to 0 */
 		ep->devid = fwspec->ids[0];
@@ -1342,8 +1342,8 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 	/* Initial DC pointer can be NULL if IOMMU is configured in OFF or BARE mode */
 	ep->dc = riscv_iommu_get_dc(iommu, ep->devid);
 
-	dev_dbg(iommu->dev, "adding device %s with domid:devid %i:%i\n",
-		dev_name(dev), ep->domid, ep->devid);
+	dev_dbg(iommu->dev, "adding device %s with devid 0x%x\n",
+		dev_name(dev), ep->devid);
 
 	dev_iommu_priv_set(dev, ep);
 	riscv_iommu_add_device(iommu, dev);
@@ -1364,8 +1364,8 @@ static void riscv_iommu_release_device(struct device *dev)
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
 	struct riscv_iommu_device *iommu = ep->iommu;
 
-	dev_dbg(iommu->dev, "release device %s with domid:devid %i:%i\n",
-		dev_name(dev), ep->domid, ep->devid);
+	dev_dbg(iommu->dev, "release device %s with devid 0x%x\n",
+		dev_name(dev), ep->devid);
 
 	mutex_lock(&ep->lock);
 	list_del(&ep->domain);
