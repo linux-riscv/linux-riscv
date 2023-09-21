@@ -143,11 +143,18 @@ static int riscv_of_parent_hartid(struct device_node *node,
 /* Find hart ID of the INTC fwnode. */
 int riscv_get_intc_hartid(struct fwnode_handle *node, unsigned long *hartid)
 {
-	/* Extend this function ACPI in the future. */
-	if (!is_of_node(node))
-		return -ENODEV;
+	int rc;
+	u64 temp;
 
-	return riscv_of_parent_hartid(to_of_node(node), hartid);
+	if (!is_of_node(node)) {
+		rc = fwnode_property_read_u64_array(node, "hartid", &temp, 1);
+		if (!rc)
+			*hartid = temp;
+	} else {
+		rc = riscv_of_parent_hartid(to_of_node(node), hartid);
+	}
+
+	return rc;
 }
 
 DEFINE_PER_CPU(struct riscv_cpuinfo, riscv_cpuinfo);
