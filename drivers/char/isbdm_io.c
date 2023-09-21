@@ -1125,7 +1125,7 @@ static int isbdm_rdma_one_sge(struct isbdm *ii, struct isbdm_qp *qp,
 	}
 
 	value = sge->length & ISBDM_RDMA_SIZE_MASK;
-	value |= ISBDM_RDMA_NV;
+	value |= ISBDM_RDMA_NV | ISBDM_RDMA_LI;
 
 	/*
 	 * If the data is inline, it's in the SGE array copied here (eg some
