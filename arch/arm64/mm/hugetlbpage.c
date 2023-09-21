@@ -248,9 +248,10 @@ static inline struct folio *hugetlb_swap_entry_to_folio(swp_entry_t entry)
 	return page_folio(pfn_to_page(swp_offset_pfn(entry)));
 }
 
-void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
+void set_huge_pte_at(struct vm_area_struct *vma, unsigned long addr,
 			    pte_t *ptep, pte_t pte)
 {
+	struct mm_struct *mm = vma->vm_mm;
 	size_t pgsize;
 	int i;
 	int ncontig;
@@ -571,5 +572,5 @@ pte_t huge_ptep_modify_prot_start(struct vm_area_struct *vma, unsigned long addr
 void huge_ptep_modify_prot_commit(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep,
 				  pte_t old_pte, pte_t pte)
 {
-	set_huge_pte_at(vma->vm_mm, addr, ptep, pte);
+	set_huge_pte_at(vma, addr, ptep, pte);
 }
