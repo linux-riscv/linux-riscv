@@ -679,7 +679,7 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 	ring->hti = (struct HeadTailIndex *)ua->hti;
 
 	/*Setup WQITE */
-	dce_priv->WQIT[wq_num].DSCBA  = (u64) ring->descriptors;
+	dce_priv->WQIT[wq_num].DSCBA  = ((u64) ring->descriptors) >> 12;
 	dce_priv->WQIT[wq_num].DSCSZ  = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = (u64) ring->hti;
 	/* set the PASID fields in TRANSCTL */
@@ -769,7 +769,7 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 	ring->hti->tail = 0;
 
 	/* populate WQITE */
-	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma;
+	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma >> 12;
 	dce_priv->WQIT[wq_num].DSCSZ = DSCSZ;
 	dce_priv->WQIT[wq_num].DSCPTA = ring->hti_dma;
 	dce_priv->WQIT[wq_num].TRANSCTL = FIELD_PREP(TRANSCTL_SUPV, 1);
