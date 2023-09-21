@@ -959,7 +959,7 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 
 	value = le64_to_cpu(command->cmd.size_pasid_flags);
 	/* Take the size and notify flag from usermode, leave everything else */
-	value &= ISBDM_RDMA_SIZE_MASK | ISBDM_RDMA_NV;
+	value &= ISBDM_RDMA_SIZE_MASK | ISBDM_RDMA_NV | ISBDM_RDMA_LI;
 	value |= ISBDM_RDMA_PV;
 	if (pasid > ISBDM_RDMA_PASID_MASK) {
 		dev_err(&ii->pdev->dev, "PASID out of range\n");
