@@ -139,10 +139,10 @@ static void __set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 	purge_tlb_entries_huge(mm, addr_start);
 }
 
-void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
+void set_huge_pte_at(struct vm_area_struct *vma, unsigned long addr,
 		     pte_t *ptep, pte_t entry)
 {
-	__set_huge_pte_at(mm, addr, ptep, entry);
+	__set_huge_pte_at(vma->vm_mm, addr, ptep, entry);
 }
 
 
