@@ -177,11 +177,12 @@ pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
 	return entry;
 }
 
-void set_huge_pte_at(struct mm_struct *mm,
+void set_huge_pte_at(struct vm_area_struct *vma,
 		     unsigned long addr,
 		     pte_t *ptep,
 		     pte_t pte)
 {
+	struct mm_struct *mm = vma->vm_mm;
 	int i, pte_num;
 
 	if (!pte_napot(pte)) {
