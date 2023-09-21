@@ -94,6 +94,9 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			phys_addr_t phys_addr, pgprot_t prot,
 			unsigned int max_page_shift, pgtbl_mod_mask *mask)
 {
+#ifdef CONFIG_HUGETLB_PAGE
+	struct vm_area_struct vma = TLB_FLUSH_VMA(&init_mm, 0);
+#endif
 	pte_t *pte;
 	u64 pfn;
 	unsigned long size = PAGE_SIZE;
@@ -111,7 +114,7 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			pte_t entry = pfn_pte(pfn, prot);
 
 			entry = arch_make_huge_pte(entry, ilog2(size), 0);
-			set_huge_pte_at(&init_mm, addr, pte, entry);
+			set_huge_pte_at(&vma, addr, pte, entry);
 			pfn += PFN_DOWN(size);
 			continue;
 		}
