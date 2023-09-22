@@ -5,14 +5,18 @@
 #
 # Run from Linux git repository with remote branches pointing to:
 # - git remote add rivos    https://gitlab.ba.rivosinc.com/rv/sw/ext/linux.git
+#
+# Repositories used for 3rd party patches
 # - git remote add avpatel  https://github.com/avpatel/linux.git
 # - git remote add vlsunil  https://github.com/vlsunil/linux.git
 #
 # Use upstream tag and optional dot-release, eg. target rivos/next/v6.3-rc1.1:
-# $ rivos/create-next -u v6.3-rc1 -d 1
+# $ rivos/create-next -u v6.6-rc2 -d 1
 #
 # After successful merge, test locally and push release candidate branch:
 #  git push rivos
+#
+# If needed, re-generate candidate branch, re-test.
 #
 # After test completes successfully annotate with release tag and push:
 #  git tag -a ${TAG} -m 'Rivos Linux ${VER}'
@@ -83,24 +87,30 @@ fi
 test -z "${no_reset}" && git reset --hard ${VER}
 
 # Rivos: Internal CI rules and unsorted private patches.
-${GIT_MERGE} "${SRC}dev/tjeznach/feature/rivos-main"
+${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_main"
 
-# Ventana patch series
+# Ventana public patch series
 # 1. based on avpatel/riscv_aia_v*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_aia"
 # 2. based on vlsunil/riscv_acpi_*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi"
 # 3. based on avpatel/riscv_sbi_dbcn_*
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_sbi_dbcn"
+
 # Rivos patch series
-# 1. based on tjeznach/riscv_iommu_v*
+# Maintainer: @tjeznach
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_iommu"
-# Rivos Private
+# Maintainer: @tjeznach
 ${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
+# Maintainer: @bend
 ${GIT_MERGE} "${SRC}dev/bend/feature/dce"
+# Maintainer: @sonny
 ${GIT_MERGE} "${SRC}dev/sonny/feature/dpa"
+# Maintainer: @evan
 ${GIT_MERGE} "${SRC}dev/evan/isbdm"
+# Maintainer: @tjeznach
 ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
+# Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
 
 # After successful merge and test create rivos release tag:
