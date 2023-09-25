@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+
+ifndef SCRIPTS_MAKEFILE_SYSCALLS
+  SCRIPTS_MAKEFILE_SYSCALLS = 1
+
+  ifdef CONFIG_TRIM_UNUSED_SYSCALLS
+    ifneq ($(wildcard $(CONFIG_USED_SYSCALLS)),)
+      used_syscalls_file = $(CONFIG_USED_SYSCALLS)
+      ifeq ($(shell test -s $(used_syscalls_file); echo $$?),0)
+        used_syscalls != cat $(CONFIG_USED_SYSCALLS)
+      endif
+    else
+      ifeq ($(subst /,,$(CONFIG_USED_SYSCALLS)),$(CONFIG_USED_SYSCALLS))
+        used_syscalls = $(CONFIG_USED_SYSCALLS)
+      else
+        $(error No such file: $(CONFIG_USED_SYSCALLS))
+      endif
+    endif
+
+    ifneq ($(used_syscalls),)
+      used_syscalls := $(subst $(space),|,$(strip $(used_syscalls)))
+    endif
+
+    used_syscalls_deps = $(used_syscalls_file) $(objtree)/.config
+
+    export used_syscalls used_syscalls_deps
+  endif # CONFIG_TRIM_UNUSED_SYSCALLS
+
+endif # SCRIPTS_MAKEFILE_SYSCALLS
