@@ -17,7 +17,7 @@
 
 asmlinkage long compat_sys_rt_sigreturn(void);
 
-void * const compat_sys_call_table[__NR_syscalls] = {
-	[0 ... __NR_syscalls - 1] = __riscv_sys_ni_syscall,
+void * const compat_sys_call_table[NR_syscalls] = {
+	[0 ... NR_syscalls - 1] = __riscv_sys_ni_syscall,
 #include <asm/unistd.h>
 };

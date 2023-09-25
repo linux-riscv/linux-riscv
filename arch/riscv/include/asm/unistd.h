@@ -23,4 +23,6 @@
 
 #include <uapi/asm/unistd.h>
 
+#ifndef NR_syscalls
 #define NR_syscalls (__NR_syscalls)
+#endif

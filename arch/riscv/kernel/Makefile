@@ -49,7 +49,9 @@ obj-y	+= signal.o
 obj-y	+= syscalls/
 obj-y	+= sys_riscv.o
 obj-y	+= time.o
+ifneq ($(CONFIG_TRIM_UNUSED_SYSCALLS),y)
 obj-y	+= traps.o
+endif
 obj-y	+= riscv_ksyms.o
 obj-y	+= stacktrace.o
 obj-y	+= cacheinfo.o
