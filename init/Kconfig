@@ -1457,6 +1457,11 @@ config BPF
 	bool
 	select CRYPTO_LIB_SHA1
 
+config HAVE_TRIM_UNUSED_SYSCALLS
+	bool
+	depends on HAVE_LD_DEAD_CODE_DATA_ELIMINATION
+	default n
+
 menuconfig EXPERT
 	bool "Configure standard kernel features (expert users)"
 	# Unhide debug options, to make the on-by-default options visible
@@ -1682,6 +1687,43 @@ config MEMBARRIER
 	  compiler barrier.
 
 	  If unsure, say Y.
+
+config TRIM_UNUSED_SYSCALLS
+	bool "Trim unused syscalls (EXPERIMENTAL)" if EXPERT
+	default n
+	depends on HAVE_TRIM_UNUSED_SYSCALLS
+	depends on HAVE_LD_DEAD_CODE_DATA_ELIMINATION
+	select LD_DEAD_CODE_DATA_ELIMINATION
+	help
+	  Say Y here to trim all of the unused syscalls for a target system.
+
+	  Note, this is only for minimal embedded systems, please don't use it
+	  for generic Linux distributions.
+
+	  If unsure, say N.
+
+config USED_SYSCALLS
+	string "Configure used syscalls (EXPERIMENTAL)" if EXPERT
+	depends on TRIM_UNUSED_SYSCALLS
+	default ""
+	help
+	  This option allows to configure the syscalls used in a target system,
+	  the unused ones will be disabled and trimmed by TRIM_UNUSED_SYSCALLS.
+
+	  The used syscalls should be listed one by one like this:
+
+	      write exit reboot
+
+	  Or put them into a file specified by this option, one syscall per
+	  line is recommended for such a config file:
+
+	      write
+	      exit
+	      reboot
+
+	  Note, If keep this empty, all of the syscalls will be trimmed.
+
+	  If unsure, please disable TRIM_UNUSED_SYSCALLS.
 
 config KALLSYMS
 	bool "Load all symbols for debugging/ksymoops" if EXPERT
