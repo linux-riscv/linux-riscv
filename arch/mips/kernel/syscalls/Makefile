@@ -26,10 +26,29 @@ sysnr_pfx_unistd_nr_n32 := N32
 sysnr_pfx_unistd_nr_n64 := 64
 sysnr_pfx_unistd_nr_o32 := O32
 
-$(kapi)/unistd_nr_%.h: $(src)/syscall_%.tbl $(sysnr) FORCE
+ifndef CONFIG_TRIM_UNUSED_SYSCALLS
+tbl = $(src)/syscall_%.tbl
+else
+
+include $(srctree)/scripts/Makefile.syscalls
+
+orig_tbl = $(src)/syscall_%.tbl
+ tbl_dir = arch/$(SRCARCH)/include/generated/tbl
+     tbl = $(tbl_dir)/syscall_used_%.tbl
+
+quiet_cmd_used = USED    $@
+      cmd_used = sed -E -e "/^[0-9]*[[:space:]]/{/(^($(used_syscalls))[[:space:]]|[[:space:]]($(used_syscalls))[[:space:]]|[[:space:]]($(used_syscalls))$$)/!{s/^/\#/g}}" $< > $@;
+
+$(tbl): $(orig_tbl) $(used_syscalls_deps) FORCE
+	$(Q)mkdir -p $(tbl_dir)
+	$(call cmd,used)
+
+endif
+
+$(kapi)/unistd_nr_%.h: $(tbl) $(sysnr) FORCE
 	$(call if_changed,sysnr)
 
-$(kapi)/syscall_table_%.h: $(src)/syscall_%.tbl $(systbl) FORCE
+$(kapi)/syscall_table_%.h: $(tbl) $(systbl) FORCE
 	$(call if_changed,systbl)
 
 uapisyshdr-y		+= unistd_n32.h			\
