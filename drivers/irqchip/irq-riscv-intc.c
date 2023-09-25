@@ -203,6 +203,12 @@ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
 
 	rintc = (struct acpi_madt_rintc *)header;
 
+	fn = acpi_rintc_create_irqchip_fwnode(rintc);
+	if (!fn) {
+		pr_err("unable to create INTC FW node\n");
+		return -ENOMEM;
+	}
+
 	/*
 	 * The ACPI MADT will have one INTC for each CPU (or HART)
 	 * so riscv_intc_acpi_init() function will be called once
@@ -211,12 +217,6 @@ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
 	 */
 	if (riscv_hartid_to_cpuid(rintc->hart_id) != smp_processor_id())
 		return 0;
-
-	fn = irq_domain_alloc_named_fwnode("RISCV-INTC");
-	if (!fn) {
-		pr_err("unable to allocate INTC FW node\n");
-		return -ENOMEM;
-	}
 
 	return riscv_intc_init_common(fn);
 }
