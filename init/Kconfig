@@ -1404,6 +1404,13 @@ config LD_DEAD_CODE_DATA_ELIMINATION
 	  present. This option is not well tested yet, so use at your
 	  own risk.
 
+config LD_DEAD_CODE_DATA_ELIMINATION_DEBUG
+	bool "Debug dead code and data elimination (EXPERIMENTAL)"
+	depends on LD_DEAD_CODE_DATA_ELIMINATION
+	default n
+	help
+	  Enable --print-gc-sections for --gc-sections
+
 config LD_ORPHAN_WARN
 	def_bool y
 	depends on ARCH_WANT_LD_ORPHAN_WARN

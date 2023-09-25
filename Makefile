@@ -938,6 +938,9 @@ ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
 KBUILD_CFLAGS_KERNEL += -ffunction-sections -fdata-sections
 KBUILD_RUSTFLAGS_KERNEL += -Zfunction-sections=y
 LDFLAGS_vmlinux += --gc-sections
+ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION_DEBUG
+LDFLAGS_vmlinux += --print-gc-sections
+endif
 endif
 
 ifdef CONFIG_SHADOW_CALL_STACK
