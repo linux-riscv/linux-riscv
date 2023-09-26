@@ -155,8 +155,10 @@ static int __init riscv_intc_init(struct device_node *node,
 	 * for each INTC DT node. We only need to do INTC initialization
 	 * for the INTC DT node belonging to boot CPU (or boot HART).
 	 */
-	if (riscv_hartid_to_cpuid(hartid) != smp_processor_id())
+	if (riscv_hartid_to_cpuid(hartid) != smp_processor_id()) {
+		fwnode_dev_initialized(of_node_to_fwnode(node), true);
 		return 0;
+	}
 
 	return riscv_intc_init_common(of_node_to_fwnode(node));
 }
@@ -179,8 +181,10 @@ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
 	 * for each INTC. We only do INTC initialization
 	 * for the INTC belonging to the boot CPU (or boot HART).
 	 */
-	if (riscv_hartid_to_cpuid(rintc->hart_id) != smp_processor_id())
+	if (riscv_hartid_to_cpuid(rintc->hart_id) != smp_processor_id()) {
+		fwnode_dev_initialized(of_node_to_fwnode(node), true);
 		return 0;
+	}
 
 	fn = irq_domain_alloc_named_fwnode("RISCV-INTC");
 	if (!fn) {
