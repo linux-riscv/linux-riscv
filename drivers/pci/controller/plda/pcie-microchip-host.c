@@ -810,13 +810,15 @@ static const struct plda_event_ops mc_event_ops = {
 };
 
 static const struct plda_event mc_event = {
+	.domain_ops             = &mc_event_domain_ops,
 	.event_ops              = &mc_event_ops,
 	.request_event_irq      = mc_request_event_irq,
 	.intx_event             = EVENT_LOCAL_PM_MSI_INT_INTX,
 	.msi_event              = EVENT_LOCAL_PM_MSI_INT_MSI,
 };
 
-static int plda_pcie_init_irq_domains(struct plda_pcie_rp *port)
+static int plda_pcie_init_irq_domains(struct plda_pcie_rp *port,
+				      const struct irq_domain_ops *ops)
 {
 	struct device *dev = port->dev;
 	struct device_node *node = dev->of_node;
@@ -830,7 +832,8 @@ static int plda_pcie_init_irq_domains(struct plda_pcie_rp *port)
 	}
 
 	port->event_domain = irq_domain_add_linear(pcie_intc_node, port->num_events,
-						   &mc_event_domain_ops, port);
+						   ops, port);
+
 	if (!port->event_domain) {
 		dev_err(dev, "failed to get event domain\n");
 		of_node_put(pcie_intc_node);
@@ -923,13 +926,16 @@ static int plda_init_interrupts(struct platform_device *pdev,
 	int irq;
 	int i, intx_irq, msi_irq, event_irq;
 	int ret;
+	const struct irq_domain_ops *irq_dom_ops;
 
 	if (!event->event_ops || !event->event_ops->get_events) {
 		dev_err(dev, "no get events ops\n");
 		return -EINVAL;
 	}
 
-	ret = plda_pcie_init_irq_domains(port);
+	irq_dom_ops = event->domain_ops ? event->domain_ops : &mc_event_domain_ops;
+
+	ret = plda_pcie_init_irq_domains(port, irq_dom_ops);
 	if (ret) {
 		dev_err(dev, "failed creating IRQ domains\n");
 		return ret;
