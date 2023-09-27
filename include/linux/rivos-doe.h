@@ -39,6 +39,7 @@ struct rivos_fidl_header {
 #define RIVOS_DOE_ROT_ERROR_VALIDATION_ERROR 5
 #define RIVOS_DOE_ROT_ERROR_AUTHENTICATION_ERROR 6
 #define RIVOS_DOE_ROT_ERROR_INVALID_STATE 7
+#define RIVOS_DOE_ROT_ERROR_NOT_IMPLEMENTED 8
 
 /* Define the connection status. Requester/responder imply "connected". */
 #define RIVOS_DOE_ISBDM_STATUS_DISCONNECTED 0x0
