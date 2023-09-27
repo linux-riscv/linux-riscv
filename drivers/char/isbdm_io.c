@@ -532,6 +532,11 @@ static int isbdm_do_send(struct isbdm_qp *qp, struct isbdm_wqe *wqe)
 		isbdm_process_ib_recv(ii, hdr, &local_list, true);
 		mutex_unlock(&ii->rx_ring.lock);
 
+		mutex_lock(&ii->tx_ring.lock);
+		list_for_each_entry_safe(buf, tmp, &local_list, node) {
+			put_buf(ii, &ii->tx_ring, buf);
+		}
+		mutex_unlock(&ii->tx_ring.lock);
 	} else {
 
 		/*
