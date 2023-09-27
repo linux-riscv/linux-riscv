@@ -20067,6 +20067,7 @@ SOPHGO DEVICETREES
 M:	Chao Wei <chao.wei@sophgo.com>
 M:	Chen Wang <unicornxw@gmail.com>
 S:	Maintained
+F:	arch/riscv/boot/dts/sophgo/
 F:	Documentation/devicetree/bindings/interrupt-controller/sophgo,sg2042-clint-mswi.yaml
 F:	Documentation/devicetree/bindings/riscv/sophgo.yaml
 F:	Documentation/devicetree/bindings/timer/sophgo,sg2042-clint-mtimer.yaml
