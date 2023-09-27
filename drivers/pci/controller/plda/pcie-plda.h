@@ -163,7 +163,6 @@ struct plda_event {
 	int msi_event;
 };
 
-irqreturn_t plda_event_handler(int irq, void *dev_id);
 int plda_init_interrupts(struct platform_device *pdev,
 			 struct plda_pcie_rp *port,
 			 const struct plda_event *event);

@@ -254,7 +254,7 @@ static const struct irq_domain_ops intx_domain_ops = {
 	.map = plda_pcie_intx_map,
 };
 
-irqreturn_t plda_event_handler(int irq, void *dev_id)
+static irqreturn_t plda_event_handler(int irq, void *dev_id)
 {
 	return IRQ_HANDLED;
 }
@@ -362,7 +362,7 @@ static int plda_pcie_event_map(struct irq_domain *domain, unsigned int irq,
 	return 0;
 }
 
-struct irq_domain_ops plda_evt_dom_ops = {
+static const struct irq_domain_ops plda_evt_dom_ops = {
 	.map = plda_pcie_event_map,
 };
 
