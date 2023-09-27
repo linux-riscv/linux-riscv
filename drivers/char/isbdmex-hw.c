@@ -1621,13 +1621,9 @@ static void isbdm_update_rot_link_state(struct isbdm *ii) {
 
 	error = le32_to_cpu(response.error);
 
-	/*
-	 * TODO: Ted Logan was going to add a NOT_IMPLEMENTED error that could
-	 * be more safely ignored.
-	 */
-	if (error == RIVOS_DOE_ROT_ERROR_NOT_SUPPORTED) {
+	if (error == RIVOS_DOE_ROT_ERROR_NOT_IMPLEMENTED) {
 		dev_dbg(&ii->pdev->dev,
-			"Ignoring not_supported error updating RoT\n");
+			"Ignoring not_implemented error updating RoT status\n");
 
 	} else if (error != RIVOS_DOE_ROT_ERROR_SUCCESS) {
 		dev_warn(&ii->pdev->dev,
