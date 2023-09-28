@@ -1301,23 +1301,34 @@ static struct riscv_iommu_dc *riscv_iommu_get_dc(struct riscv_iommu_device *iomm
 	return (struct riscv_iommu_dc *)ddtp;
 }
 
+static int riscv_iommu_match_node(struct device *dev, const void *data)
+{
+	return device_match_fwnode(dev, data);
+}
+extern struct pci_driver riscv_iommu_pci_driver;
+
+static struct riscv_iommu_device *riscv_iommu_get_by_fwnode(struct fwnode_handle *fwnode)
+{
+	struct device *dev = driver_find_device(&riscv_iommu_pci_driver.driver, NULL,
+						fwnode, riscv_iommu_match_node);
+	put_device(dev);
+
+	return dev ? (struct riscv_iommu_device *)dev_get_drvdata(dev) : NULL;
+}
+
 static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 {
 	struct riscv_iommu_device *iommu;
 	struct riscv_iommu_endpoint *ep;
-	struct iommu_fwspec *fwspec;
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 
-	fwspec = dev_iommu_fwspec_get(dev);
-	if (!fwspec || fwspec->ops != &riscv_iommu_ops ||
-	    !fwspec->iommu_fwnode || !fwspec->iommu_fwnode->dev)
+	if (!fwspec || fwspec->ops != &riscv_iommu_ops)
 		return ERR_PTR(-ENODEV);
 
-	iommu = dev_get_drvdata(fwspec->iommu_fwnode->dev);
+	iommu = riscv_iommu_get_by_fwnode(fwspec->iommu_fwnode);
+
 	if (!iommu)
 		return ERR_PTR(-ENODEV);
-
-	if (dev_iommu_priv_get(dev))
-		return &iommu->iommu;
 
 	ep = kzalloc(sizeof(*ep), GFP_KERNEL);
 	if (!ep)

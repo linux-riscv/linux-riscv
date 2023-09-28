@@ -155,7 +155,7 @@ static const struct of_device_id riscv_iommu_of_match[] = {
 
 MODULE_DEVICE_TABLE(of, riscv_iommu_of_match);
 
-static struct pci_driver riscv_iommu_pci_driver = {
+struct pci_driver riscv_iommu_pci_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = riscv_iommu_pci_tbl,
 	.probe = riscv_iommu_pci_probe,
