@@ -54,7 +54,7 @@ static unsigned int riscv_clock_event_irq;
 static DEFINE_PER_CPU(struct clock_event_device, riscv_clock_event) = {
 	.name			= "riscv_timer_clockevent",
 	.features		= CLOCK_EVT_FEAT_ONESHOT,
-	.rating			= 100,
+	.rating			= 400,
 	.set_next_event		= riscv_clock_next_event,
 };
 
