@@ -2171,3 +2171,12 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	iopf_queue_free(iommu->pq_work);
 	return ret;
 }
+
+static __init int riscv_iommu_request_acs(void)
+{
+	pci_request_acs();
+
+	return 0;
+}
+
+arch_initcall(riscv_iommu_request_acs);
