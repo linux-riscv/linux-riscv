@@ -879,6 +879,7 @@ static int dce_sync(struct dce_submitter_ctx *ctx)
 {
 	struct dce_driver_priv *priv = ctx->priv;
 	struct work_queue *wq;
+	int res;
 
 	/*
 	 * FIXME: This can be changed elsewhere, should be locked...
@@ -900,10 +901,11 @@ static int dce_sync(struct dce_submitter_ctx *ctx)
 		return -EBADFD;
 	}
 
-	/* TODO: Retry for ever? */
-	while (dce_wait_for_clean(priv, ctx->wq_num, ctx->clean_treshold)) {
-		dev_dbg(&priv->dev, "Interrupted sync, retrying");
-		spin_lock(&wq->lock);
+	/* lock is released by dce_wait_for_clean */
+	res = dce_wait_for_clean(priv, ctx->wq_num, ctx->clean_treshold);
+	if (res) {
+		dev_dbg(&priv->dev, "Interrupted sync?");
+		return res;
 	}
 
 	return 0;
