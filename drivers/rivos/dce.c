@@ -1228,6 +1228,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(&pdev->dev, "DCE: MSI enable failed\n");
 	}
 
+#ifdef DCE_VF_BOOTIME_BRINGUP
 	if (isPF) {
 		err = pci_enable_sriov(pdev, DCE_NR_VIRTFN);
 		if (err < 0) {
@@ -1235,7 +1236,7 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			goto disable_device_and_fail;
 		}
 	}
-
+#endif
 
 	/* work queue setup */
 	INIT_WORK(&drv_priv->clean_up_worker, clean_up_work);
