@@ -30,6 +30,10 @@
 #define PCI_DEVICE_ID_RIVOS_IOMMU       0xedf1
 #endif
 
+#ifndef PCI_DEVICE_ID_RIVOS_IOMMU_A0
+#define PCI_DEVICE_ID_RIVOS_IOMMU_A0    0x0008
+#endif
+
 static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct device *dev = &pdev->dev;
@@ -142,6 +146,8 @@ static DEFINE_SIMPLE_DEV_PM_OPS(riscv_iommu_pm_ops, riscv_iommu_suspend,
 
 static const struct pci_device_id riscv_iommu_pci_tbl[] = {
 	{PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_IOMMU,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_RIVOS, PCI_DEVICE_ID_RIVOS_IOMMU_A0,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0,}
 };
