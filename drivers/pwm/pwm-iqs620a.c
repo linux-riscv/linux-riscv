@@ -209,6 +209,7 @@ static int iqs620_pwm_probe(struct platform_device *pdev)
 	iqs620_pwm->chip.dev = &pdev->dev;
 	iqs620_pwm->chip.ops = &iqs620_pwm_ops;
 	iqs620_pwm->chip.npwm = 1;
+	iqs620_pwm->chip.can_sleep = true;
 
 	mutex_init(&iqs620_pwm->lock);
 

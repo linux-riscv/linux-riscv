@@ -356,6 +356,7 @@ static int twl_pwm_probe(struct platform_device *pdev)
 
 	twl->chip.dev = &pdev->dev;
 	twl->chip.npwm = 2;
+	twl->chip.can_sleep = true;
 
 	mutex_init(&twl->mutex);
 

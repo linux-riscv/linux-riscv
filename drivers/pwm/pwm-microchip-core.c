@@ -474,6 +474,7 @@ static int mchp_core_pwm_probe(struct platform_device *pdev)
 	mchp_core_pwm->chip.dev = &pdev->dev;
 	mchp_core_pwm->chip.ops = &mchp_core_pwm_ops;
 	mchp_core_pwm->chip.npwm = 16;
+	mchp_core_pwm->chip.can_sleep = true;
 
 	mchp_core_pwm->channel_enabled = readb_relaxed(mchp_core_pwm->base + MCHPCOREPWM_EN(0));
 	mchp_core_pwm->channel_enabled |=

@@ -405,6 +405,7 @@ static int fsl_pwm_probe(struct platform_device *pdev)
 
 	fpc->soc = of_device_get_match_data(&pdev->dev);
 	fpc->chip.dev = &pdev->dev;
+	fpc->chip.can_sleep = true;
 
 	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))

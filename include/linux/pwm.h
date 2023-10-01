@@ -287,6 +287,7 @@ struct pwm_ops {
  * @ops: callbacks for this PWM controller
  * @base: number of first PWM controlled by this chip
  * @npwm: number of PWMs controlled by this chip
+ * @can_sleep: can the driver sleep in pwm_apply_state
  * @of_xlate: request a PWM device given a device tree PWM specifier
  * @of_pwm_n_cells: number of cells expected in the device tree PWM specifier
  * @list: list node for internal use
@@ -297,6 +298,7 @@ struct pwm_chip {
 	const struct pwm_ops *ops;
 	int base;
 	unsigned int npwm;
+	bool can_sleep;
 
 	struct pwm_device * (*of_xlate)(struct pwm_chip *chip,
 					const struct of_phandle_args *args);
@@ -380,6 +382,18 @@ static inline void pwm_disable(struct pwm_device *pwm)
 	pwm_apply_state(pwm, &state);
 }
 
+/**
+ * pwm_can_sleep() - can a pwm driver sleep in pwm_apply_state()
+ * @pwm: PWM device
+ *
+ * Returns: true if the driver may sleep, false if pwm_apply_state()
+ * can be called from atomic context.
+ */
+static inline bool pwm_can_sleep(struct pwm_device *pwm)
+{
+	return pwm->chip->can_sleep;
+}
+
 /* PWM provider APIs */
 int pwm_capture(struct pwm_device *pwm, struct pwm_capture *result,
 		unsigned long timeout);
@@ -411,7 +425,7 @@ struct pwm_device *devm_fwnode_pwm_get(struct device *dev,
 static inline int pwm_apply_state(struct pwm_device *pwm,
 				  const struct pwm_state *state)
 {
-	might_sleep();
+	might_sleep_if(pwm_can_sleep(pwm));
 	return -ENOTSUPP;
 }
 
@@ -423,19 +437,24 @@ static inline int pwm_adjust_config(struct pwm_device *pwm)
 static inline int pwm_config(struct pwm_device *pwm, int duty_ns,
 			     int period_ns)
 {
-	might_sleep();
+	might_sleep_if(pwm_can_sleep(pwm));
 	return -EINVAL;
 }
 
 static inline int pwm_enable(struct pwm_device *pwm)
 {
-	might_sleep();
+	might_sleep_if(pwm_can_sleep(pwm));
 	return -EINVAL;
 }
 
 static inline void pwm_disable(struct pwm_device *pwm)
 {
-	might_sleep();
+	might_sleep_if(pwm_can_sleep(pwm));
+}
+
+static inline bool pwm_can_sleep(struct pwm_device *pwm)
+{
+	return true;
 }
 
 static inline int pwm_capture(struct pwm_device *pwm,

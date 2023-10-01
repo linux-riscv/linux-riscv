@@ -505,7 +505,7 @@ int pwm_apply_state(struct pwm_device *pwm, const struct pwm_state *state)
 	 * is a bad idea. So make it explicit that calling this function might
 	 * sleep.
 	 */
-	might_sleep();
+	might_sleep_if(pwm_can_sleep(pwm));
 
 	if (!pwm || !state || !state->period ||
 	    state->duty_cycle > state->period)

@@ -636,6 +636,7 @@ static int stm32_pwm_probe(struct platform_device *pdev)
 	priv->chip.dev = dev;
 	priv->chip.ops = &stm32pwm_ops;
 	priv->chip.npwm = stm32_pwm_detect_channels(priv);
+	priv->chip.can_sleep = true;
 
 	ret = devm_pwmchip_add(dev, &priv->chip);
 	if (ret < 0)

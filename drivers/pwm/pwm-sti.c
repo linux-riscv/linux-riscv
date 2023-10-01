@@ -643,6 +643,7 @@ static int sti_pwm_probe(struct platform_device *pdev)
 	pc->chip.dev = dev;
 	pc->chip.ops = &sti_pwm_ops;
 	pc->chip.npwm = pc->cdata->pwm_num_devs;
+	pc->chip.can_sleep = true;
 
 	ret = pwmchip_add(&pc->chip);
 	if (ret < 0) {

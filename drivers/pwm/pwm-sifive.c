@@ -240,6 +240,7 @@ static int pwm_sifive_probe(struct platform_device *pdev)
 	chip->dev = dev;
 	chip->ops = &pwm_sifive_ops;
 	chip->npwm = 4;
+	chip->can_sleep = true;
 
 	ddata->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ddata->regs))
