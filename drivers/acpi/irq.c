@@ -59,7 +59,8 @@ int acpi_register_gsi(struct device *dev, u32 gsi, int trigger,
 	struct irq_fwspec fwspec;
 
 	fwspec.fwnode = acpi_get_gsi_domain_id(gsi);
-	if (WARN_ON(!fwspec.fwnode)) {
+	//if (WARN_ON(!fwspec.fwnode)) {
+	if (!fwspec.fwnode) {
 		pr_warn("GSI: No registered irqchip, giving up\n");
 		return -EINVAL;
 	}
