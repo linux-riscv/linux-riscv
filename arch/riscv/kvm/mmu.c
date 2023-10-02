@@ -101,7 +101,7 @@ static bool gstage_get_leaf_entry(struct kvm *kvm, gpa_t addr,
 	u32 current_level = gstage_pgd_levels - 1;
 
 	*ptep_level = current_level;
-	ptep = (pte_t *)kvm->arch.pgd;
+	ptep = (pte_t *)kvm->arch.pgdp;
 	ptep = &ptep[gstage_pte_index(addr, current_level)];
 	while (ptep && pte_val(*ptep)) {
 		if (gstage_pte_leaf(ptep)) {
@@ -139,7 +139,7 @@ static int gstage_set_pte(struct kvm *kvm, u32 level,
 			   gpa_t addr, const pte_t *new_pte)
 {
 	u32 current_level = gstage_pgd_levels - 1;
-	pte_t *next_ptep = (pte_t *)kvm->arch.pgd;
+	pte_t *next_ptep = (pte_t *)kvm->arch.pgdp;
 	pte_t *ptep = &next_ptep[gstage_pte_index(addr, current_level)];
 
 	if (current_level < level)
@@ -541,7 +541,7 @@ out:
 
 bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
 {
-	if (!kvm->arch.pgd)
+	if (!kvm->arch.pgdp)
 		return false;
 
 	gstage_unmap_range(kvm, range->start << PAGE_SHIFT,
@@ -555,7 +555,7 @@ bool kvm_set_spte_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 	int ret;
 	kvm_pfn_t pfn = pte_pfn(range->arg.pte);
 
-	if (!kvm->arch.pgd)
+	if (!kvm->arch.pgdp)
 		return false;
 
 	WARN_ON(range->end - range->start != 1);
@@ -576,7 +576,7 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 	u32 ptep_level = 0;
 	u64 size = (range->end - range->start) << PAGE_SHIFT;
 
-	if (!kvm->arch.pgd)
+	if (!kvm->arch.pgdp)
 		return false;
 
 	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
@@ -594,7 +594,7 @@ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 	u32 ptep_level = 0;
 	u64 size = (range->end - range->start) << PAGE_SHIFT;
 
-	if (!kvm->arch.pgd)
+	if (!kvm->arch.pgdp)
 		return false;
 
 	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
@@ -712,7 +712,7 @@ int kvm_riscv_gstage_alloc_pgd(struct kvm *kvm)
 {
 	struct page *pgd_page;
 
-	if (kvm->arch.pgd != NULL) {
+	if (kvm->arch.pgdp != NULL) {
 		kvm_err("kvm_arch already initialized?\n");
 		return -EINVAL;
 	}
@@ -721,7 +721,7 @@ int kvm_riscv_gstage_alloc_pgd(struct kvm *kvm)
 				get_order(gstage_pgd_size));
 	if (!pgd_page)
 		return -ENOMEM;
-	kvm->arch.pgd = page_to_virt(pgd_page);
+	kvm->arch.pgdp = page_to_virt(pgd_page);
 	kvm->arch.pgd_phys = page_to_phys(pgd_page);
 
 	return 0;
@@ -732,10 +732,10 @@ void kvm_riscv_gstage_free_pgd(struct kvm *kvm)
 	void *pgd = NULL;
 
 	spin_lock(&kvm->mmu_lock);
-	if (kvm->arch.pgd) {
+	if (kvm->arch.pgdp) {
 		gstage_unmap_range(kvm, 0UL, gstage_gpa_size, false);
-		pgd = READ_ONCE(kvm->arch.pgd);
-		kvm->arch.pgd = NULL;
+		pgd = READ_ONCE(kvm->arch.pgdp);
+		kvm->arch.pgdp = NULL;
 		kvm->arch.pgd_phys = 0;
 	}
 	spin_unlock(&kvm->mmu_lock);

@@ -16,65 +16,65 @@
 #include <asm-generic/pgalloc.h>
 
 static inline void pmd_populate_kernel(struct mm_struct *mm,
-	pmd_t *pmd, pte_t *pte)
+	pmd_t *pmdp, pte_t *ptep)
 {
-	unsigned long pfn = virt_to_pfn(pte);
+	unsigned long pfn = virt_to_pfn(ptep);
 
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmdp, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
 static inline void pmd_populate(struct mm_struct *mm,
-	pmd_t *pmd, pgtable_t pte)
+	pmd_t *pmdp, pgtable_t pte)
 {
 	unsigned long pfn = virt_to_pfn(page_address(pte));
 
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmdp, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED
-static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
+static inline void pud_populate(struct mm_struct *mm, pud_t *pudp, pmd_t *pmdp)
 {
-	unsigned long pfn = virt_to_pfn(pmd);
+	unsigned long pfn = virt_to_pfn(pmdp);
 
-	set_pud(pud, __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pud(pudp, __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
-static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
+static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4dp, pud_t *pudp)
 {
 	if (pgtable_l4_enabled) {
-		unsigned long pfn = virt_to_pfn(pud);
+		unsigned long pfn = virt_to_pfn(pudp);
 
-		set_p4d(p4d, __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+		set_p4d(p4dp, __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
-static inline void p4d_populate_safe(struct mm_struct *mm, p4d_t *p4d,
-				     pud_t *pud)
+static inline void p4d_populate_safe(struct mm_struct *mm, p4d_t *p4dp,
+				     pud_t *pudp)
 {
 	if (pgtable_l4_enabled) {
-		unsigned long pfn = virt_to_pfn(pud);
+		unsigned long pfn = virt_to_pfn(pudp);
 
-		set_p4d_safe(p4d,
+		set_p4d_safe(p4dp,
 			     __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
-static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, p4d_t *p4d)
+static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgdp, p4d_t *p4dp)
 {
 	if (pgtable_l5_enabled) {
-		unsigned long pfn = virt_to_pfn(p4d);
+		unsigned long pfn = virt_to_pfn(p4dp);
 
-		set_pgd(pgd, __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+		set_pgd(pgdp, __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
-static inline void pgd_populate_safe(struct mm_struct *mm, pgd_t *pgd,
-				     p4d_t *p4d)
+static inline void pgd_populate_safe(struct mm_struct *mm, pgd_t *pgdp,
+				     p4d_t *p4dp)
 {
 	if (pgtable_l5_enabled) {
-		unsigned long pfn = virt_to_pfn(p4d);
+		unsigned long pfn = virt_to_pfn(p4dp);
 
-		set_pgd_safe(pgd,
+		set_pgd_safe(pgdp,
 			     __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
@@ -89,13 +89,13 @@ static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 }
 
 #define pud_free pud_free
-static inline void pud_free(struct mm_struct *mm, pud_t *pud)
+static inline void pud_free(struct mm_struct *mm, pud_t *pudp)
 {
 	if (pgtable_l4_enabled)
-		__pud_free(mm, pud);
+		__pud_free(mm, pudp);
 }
 
-#define __pud_free_tlb(tlb, pud, addr)  pud_free((tlb)->mm, pud)
+#define __pud_free_tlb(tlb, pudp, addr)  pud_free((tlb)->mm, pudp)
 
 #define p4d_alloc_one p4d_alloc_one
 static inline p4d_t *p4d_alloc_one(struct mm_struct *mm, unsigned long addr)
@@ -111,52 +111,52 @@ static inline p4d_t *p4d_alloc_one(struct mm_struct *mm, unsigned long addr)
 	return NULL;
 }
 
-static inline void __p4d_free(struct mm_struct *mm, p4d_t *p4d)
+static inline void __p4d_free(struct mm_struct *mm, p4d_t *p4dp)
 {
-	BUG_ON((unsigned long)p4d & (PAGE_SIZE-1));
-	free_page((unsigned long)p4d);
+	BUG_ON((unsigned long)p4dp & (PAGE_SIZE-1));
+	free_page((unsigned long)p4dp);
 }
 
 #define p4d_free p4d_free
-static inline void p4d_free(struct mm_struct *mm, p4d_t *p4d)
+static inline void p4d_free(struct mm_struct *mm, p4d_t *p4dp)
 {
 	if (pgtable_l5_enabled)
-		__p4d_free(mm, p4d);
+		__p4d_free(mm, p4dp);
 }
 
 #define __p4d_free_tlb(tlb, p4d, addr)  p4d_free((tlb)->mm, p4d)
 #endif /* __PAGETABLE_PMD_FOLDED */
 
-static inline void sync_kernel_mappings(pgd_t *pgd)
+static inline void sync_kernel_mappings(pgd_t *pgdp)
 {
-	memcpy(pgd + USER_PTRS_PER_PGD,
+	memcpy(pgdp + USER_PTRS_PER_PGD,
 	       init_mm.pgd + USER_PTRS_PER_PGD,
 	       (PTRS_PER_PGD - USER_PTRS_PER_PGD) * sizeof(pgd_t));
 }
 
 static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 {
-	pgd_t *pgd;
+	pgd_t *pgdp;
 
-	pgd = (pgd_t *)__get_free_page(GFP_KERNEL);
-	if (likely(pgd != NULL)) {
-		memset(pgd, 0, USER_PTRS_PER_PGD * sizeof(pgd_t));
+	pgdp = (pgd_t *)__get_free_page(GFP_KERNEL);
+	if (likely(pgdp != NULL)) {
+		memset(pgdp, 0, USER_PTRS_PER_PGD * sizeof(pgd_t));
 		/* Copy kernel mappings */
-		sync_kernel_mappings(pgd);
+		sync_kernel_mappings(pgdp);
 	}
-	return pgd;
+	return pgdp;
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED
 
-#define __pmd_free_tlb(tlb, pmd, addr)  pmd_free((tlb)->mm, pmd)
+#define __pmd_free_tlb(tlb, pmdp, addr)  pmd_free((tlb)->mm, pmdp)
 
 #endif /* __PAGETABLE_PMD_FOLDED */
 
-#define __pte_free_tlb(tlb, pte, buf)			\
-do {							\
-	pagetable_pte_dtor(page_ptdesc(pte));		\
-	tlb_remove_page_ptdesc((tlb), page_ptdesc(pte));\
+#define __pte_free_tlb(tlb, ptep, buf)				\
+do {								\
+	pagetable_pte_dtor(page_ptdesc(ptep));			\
+	tlb_remove_page_ptdesc((tlb), page_ptdesc(ptep));	\
 } while (0)
 #endif /* CONFIG_MMU */
 

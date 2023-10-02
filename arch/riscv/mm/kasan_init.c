@@ -26,17 +26,17 @@ static pgd_t tmp_pg_dir[PTRS_PER_PGD] __page_aligned_bss;
 static p4d_t tmp_p4d[PTRS_PER_P4D] __page_aligned_bss;
 static pud_t tmp_pud[PTRS_PER_PUD] __page_aligned_bss;
 
-static void __init kasan_populate_pte(pmd_t *pmd, unsigned long vaddr, unsigned long end)
+static void __init kasan_populate_pte(pmd_t *pmdp, unsigned long vaddr, unsigned long end)
 {
 	phys_addr_t phys_addr;
 	pte_t *ptep, *p;
 
-	if (pmd_none(*pmd)) {
+	if (pmd_none(*pmdp)) {
 		p = memblock_alloc(PTRS_PER_PTE * sizeof(pte_t), PAGE_SIZE);
-		set_pmd(pmd, pfn_pmd(PFN_DOWN(__pa(p)), PAGE_TABLE));
+		set_pmd(pmdp, pfn_pmd(PFN_DOWN(__pa(p)), PAGE_TABLE));
 	}
 
-	ptep = pte_offset_kernel(pmd, vaddr);
+	ptep = pte_offset_kernel(pmdp, vaddr);
 
 	do {
 		if (pte_none(*ptep)) {
@@ -47,18 +47,18 @@ static void __init kasan_populate_pte(pmd_t *pmd, unsigned long vaddr, unsigned 
 	} while (ptep++, vaddr += PAGE_SIZE, vaddr != end);
 }
 
-static void __init kasan_populate_pmd(pud_t *pud, unsigned long vaddr, unsigned long end)
+static void __init kasan_populate_pmd(pud_t *pudp, unsigned long vaddr, unsigned long end)
 {
 	phys_addr_t phys_addr;
 	pmd_t *pmdp, *p;
 	unsigned long next;
 
-	if (pud_none(*pud)) {
+	if (pud_none(*pudp)) {
 		p = memblock_alloc(PTRS_PER_PMD * sizeof(pmd_t), PAGE_SIZE);
-		set_pud(pud, pfn_pud(PFN_DOWN(__pa(p)), PAGE_TABLE));
+		set_pud(pudp, pfn_pud(PFN_DOWN(__pa(p)), PAGE_TABLE));
 	}
 
-	pmdp = pmd_offset(pud, vaddr);
+	pmdp = pmd_offset(pudp, vaddr);
 
 	do {
 		next = pmd_addr_end(vaddr, end);
@@ -76,19 +76,19 @@ static void __init kasan_populate_pmd(pud_t *pud, unsigned long vaddr, unsigned 
 	} while (pmdp++, vaddr = next, vaddr != end);
 }
 
-static void __init kasan_populate_pud(p4d_t *p4d,
+static void __init kasan_populate_pud(p4d_t *p4dp,
 				      unsigned long vaddr, unsigned long end)
 {
 	phys_addr_t phys_addr;
 	pud_t *pudp, *p;
 	unsigned long next;
 
-	if (p4d_none(*p4d)) {
+	if (p4d_none(*p4dp)) {
 		p = memblock_alloc(PTRS_PER_PUD * sizeof(pud_t), PAGE_SIZE);
-		set_p4d(p4d, pfn_p4d(PFN_DOWN(__pa(p)), PAGE_TABLE));
+		set_p4d(p4dp, pfn_p4d(PFN_DOWN(__pa(p)), PAGE_TABLE));
 	}
 
-	pudp = pud_offset(p4d, vaddr);
+	pudp = pud_offset(p4dp, vaddr);
 
 	do {
 		next = pud_addr_end(vaddr, end);
@@ -106,19 +106,19 @@ static void __init kasan_populate_pud(p4d_t *p4d,
 	} while (pudp++, vaddr = next, vaddr != end);
 }
 
-static void __init kasan_populate_p4d(pgd_t *pgd,
+static void __init kasan_populate_p4d(pgd_t *pgdp,
 				      unsigned long vaddr, unsigned long end)
 {
 	phys_addr_t phys_addr;
 	p4d_t *p4dp, *p;
 	unsigned long next;
 
-	if (pgd_none(*pgd)) {
+	if (pgd_none(*pgdp)) {
 		p = memblock_alloc(PTRS_PER_P4D * sizeof(p4d_t), PAGE_SIZE);
-		set_pgd(pgd, pfn_pgd(PFN_DOWN(__pa(p)), PAGE_TABLE));
+		set_pgd(pgdp, pfn_pgd(PFN_DOWN(__pa(p)), PAGE_TABLE));
 	}
 
-	p4dp = p4d_offset(pgd, vaddr);
+	p4dp = p4d_offset(pgdp, vaddr);
 
 	do {
 		next = p4d_addr_end(vaddr, end);
@@ -162,14 +162,14 @@ static void __init kasan_populate_pgd(pgd_t *pgdp,
 static void __init kasan_early_clear_pud(p4d_t *p4dp,
 					 unsigned long vaddr, unsigned long end)
 {
-	pud_t *pudp, *base_pud;
+	pud_t *pudp, *base_pudp;
 	unsigned long next;
 
 	if (!pgtable_l4_enabled) {
 		pudp = (pud_t *)p4dp;
 	} else {
-		base_pud = pt_ops.get_pud_virt(pfn_to_phys(_p4d_pfn(*p4dp)));
-		pudp = base_pud + pud_index(vaddr);
+		base_pudp = pt_ops.get_pud_virt(pfn_to_phys(_p4d_pfn(*p4dp)));
+		pudp = base_pudp + pud_index(vaddr);
 	}
 
 	do {
@@ -187,14 +187,14 @@ static void __init kasan_early_clear_pud(p4d_t *p4dp,
 static void __init kasan_early_clear_p4d(pgd_t *pgdp,
 					 unsigned long vaddr, unsigned long end)
 {
-	p4d_t *p4dp, *base_p4d;
+	p4d_t *p4dp, *base_p4dp;
 	unsigned long next;
 
 	if (!pgtable_l5_enabled) {
 		p4dp = (p4d_t *)pgdp;
 	} else {
-		base_p4d = pt_ops.get_p4d_virt(pfn_to_phys(_pgd_pfn(*pgdp)));
-		p4dp = base_p4d + p4d_index(vaddr);
+		base_p4dp = pt_ops.get_p4d_virt(pfn_to_phys(_pgd_pfn(*pgdp)));
+		p4dp = base_p4dp + p4d_index(vaddr);
 	}
 
 	do {
@@ -232,15 +232,15 @@ static void __init kasan_early_populate_pud(p4d_t *p4dp,
 					    unsigned long vaddr,
 					    unsigned long end)
 {
-	pud_t *pudp, *base_pud;
+	pud_t *pudp, *base_pudp;
 	phys_addr_t phys_addr;
 	unsigned long next;
 
 	if (!pgtable_l4_enabled) {
 		pudp = (pud_t *)p4dp;
 	} else {
-		base_pud = pt_ops.get_pud_virt(pfn_to_phys(_p4d_pfn(*p4dp)));
-		pudp = base_pud + pud_index(vaddr);
+		base_pudp = pt_ops.get_pud_virt(pfn_to_phys(_p4d_pfn(*p4dp)));
+		pudp = base_pudp + pud_index(vaddr);
 	}
 
 	do {
@@ -261,7 +261,7 @@ static void __init kasan_early_populate_p4d(pgd_t *pgdp,
 					    unsigned long vaddr,
 					    unsigned long end)
 {
-	p4d_t *p4dp, *base_p4d;
+	p4d_t *p4dp, *base_p4dp;
 	phys_addr_t phys_addr;
 	unsigned long next;
 
@@ -277,8 +277,8 @@ static void __init kasan_early_populate_p4d(pgd_t *pgdp,
 	if (!pgtable_l5_enabled) {
 		p4dp = (p4d_t *)pgdp;
 	} else {
-		base_p4d = pt_ops.get_p4d_virt(pfn_to_phys(_pgd_pfn(*pgdp)));
-		p4dp = base_p4d + p4d_index(vaddr);
+		base_p4dp = pt_ops.get_p4d_virt(pfn_to_phys(_pgd_pfn(*pgdp)));
+		p4dp = base_p4dp + p4d_index(vaddr);
 	}
 
 	do {
@@ -371,63 +371,63 @@ static void __init kasan_populate(void *start, void *end)
 	kasan_populate_pgd(pgd_offset_k(vaddr), vaddr, vend);
 }
 
-static void __init kasan_shallow_populate_pud(p4d_t *p4d,
+static void __init kasan_shallow_populate_pud(p4d_t *p4dp,
 					      unsigned long vaddr, unsigned long end)
 {
 	unsigned long next;
 	void *p;
-	pud_t *pud_k = pud_offset(p4d, vaddr);
+	pud_t *pudp_k = pud_offset(p4dp, vaddr);
 
 	do {
 		next = pud_addr_end(vaddr, end);
 
-		if (pud_none(*pud_k)) {
+		if (pud_none(*pudp_k)) {
 			p = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-			set_pud(pud_k, pfn_pud(PFN_DOWN(__pa(p)), PAGE_TABLE));
+			set_pud(pudp_k, pfn_pud(PFN_DOWN(__pa(p)), PAGE_TABLE));
 			continue;
 		}
 
 		BUG();
-	} while (pud_k++, vaddr = next, vaddr != end);
+	} while (pudp_k++, vaddr = next, vaddr != end);
 }
 
-static void __init kasan_shallow_populate_p4d(pgd_t *pgd,
+static void __init kasan_shallow_populate_p4d(pgd_t *pgdp,
 					      unsigned long vaddr, unsigned long end)
 {
 	unsigned long next;
 	void *p;
-	p4d_t *p4d_k = p4d_offset(pgd, vaddr);
+	p4d_t *p4dp_k = p4d_offset(pgdp, vaddr);
 
 	do {
 		next = p4d_addr_end(vaddr, end);
 
-		if (p4d_none(*p4d_k)) {
+		if (p4d_none(*p4dp_k)) {
 			p = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-			set_p4d(p4d_k, pfn_p4d(PFN_DOWN(__pa(p)), PAGE_TABLE));
+			set_p4d(p4dp_k, pfn_p4d(PFN_DOWN(__pa(p)), PAGE_TABLE));
 			continue;
 		}
 
-		kasan_shallow_populate_pud(p4d_k, vaddr, end);
-	} while (p4d_k++, vaddr = next, vaddr != end);
+		kasan_shallow_populate_pud(p4dp_k, vaddr, end);
+	} while (p4dp_k++, vaddr = next, vaddr != end);
 }
 
 static void __init kasan_shallow_populate_pgd(unsigned long vaddr, unsigned long end)
 {
 	unsigned long next;
 	void *p;
-	pgd_t *pgd_k = pgd_offset_k(vaddr);
+	pgd_t *pgdp_k = pgd_offset_k(vaddr);
 
 	do {
 		next = pgd_addr_end(vaddr, end);
 
-		if (pgd_none(*pgd_k)) {
+		if (pgd_none(*pgdp_k)) {
 			p = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-			set_pgd(pgd_k, pfn_pgd(PFN_DOWN(__pa(p)), PAGE_TABLE));
+			set_pgd(pgdp_k, pfn_pgd(PFN_DOWN(__pa(p)), PAGE_TABLE));
 			continue;
 		}
 
-		kasan_shallow_populate_p4d(pgd_k, vaddr, next);
-	} while (pgd_k++, vaddr = next, vaddr != end);
+		kasan_shallow_populate_p4d(pgdp_k, vaddr, next);
+	} while (pgdp_k++, vaddr = next, vaddr != end);
 }
 
 static void __init kasan_shallow_populate(void *start, void *end)
@@ -441,7 +441,7 @@ static void __init kasan_shallow_populate(void *start, void *end)
 static void __init create_tmp_mapping(void)
 {
 	void *ptr;
-	p4d_t *base_p4d;
+	p4d_t *base_p4dp;
 
 	/*
 	 * We need to clean the early mapping: this is hard to achieve "in-place",
@@ -455,16 +455,16 @@ static void __init create_tmp_mapping(void)
 		memcpy(tmp_p4d, ptr, sizeof(p4d_t) * PTRS_PER_P4D);
 		set_pgd(&tmp_pg_dir[pgd_index(KASAN_SHADOW_END)],
 			pfn_pgd(PFN_DOWN(__pa(tmp_p4d)), PAGE_TABLE));
-		base_p4d = tmp_p4d;
+		base_p4dp = tmp_p4d;
 	} else {
-		base_p4d = (p4d_t *)tmp_pg_dir;
+		base_p4dp = (p4d_t *)tmp_pg_dir;
 	}
 
 	/* Copy the last pud since it is shared with the kernel mapping. */
 	if (pgtable_l4_enabled) {
 		ptr = (pud_t *)p4d_page_vaddr(*(base_p4d + p4d_index(KASAN_SHADOW_END)));
 		memcpy(tmp_pud, ptr, sizeof(pud_t) * PTRS_PER_PUD);
-		set_p4d(&base_p4d[p4d_index(KASAN_SHADOW_END)],
+		set_p4d(&base_p4dp[p4d_index(KASAN_SHADOW_END)],
 			pfn_p4d(PFN_DOWN(__pa(tmp_pud)), PAGE_TABLE));
 	}
 }

@@ -307,10 +307,10 @@ static inline int p4d_bad(p4d_t p4d)
 	return 0;
 }
 
-static inline void p4d_clear(p4d_t *p4d)
+static inline void p4d_clear(p4d_t *p4dp)
 {
 	if (pgtable_l4_enabled)
-		set_p4d(p4d, __p4d(0));
+		set_p4d(p4dp, __p4d(0));
 }
 
 static inline p4d_t pfn_p4d(unsigned long pfn, pgprot_t prot)
@@ -340,12 +340,12 @@ static inline struct page *p4d_page(p4d_t p4d)
 #define pud_index(addr) (((addr) >> PUD_SHIFT) & (PTRS_PER_PUD - 1))
 
 #define pud_offset pud_offset
-static inline pud_t *pud_offset(p4d_t *p4d, unsigned long address)
+static inline pud_t *pud_offset(p4d_t *p4dp, unsigned long address)
 {
 	if (pgtable_l4_enabled)
-		return p4d_pgtable(*p4d) + pud_index(address);
+		return p4d_pgtable(*p4dp) + pud_index(address);
 
-	return (pud_t *)p4d;
+	return (pud_t *)p4dp;
 }
 
 static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
@@ -380,10 +380,10 @@ static inline int pgd_bad(pgd_t pgd)
 	return 0;
 }
 
-static inline void pgd_clear(pgd_t *pgd)
+static inline void pgd_clear(pgd_t *pgdp)
 {
 	if (pgtable_l5_enabled)
-		set_pgd(pgd, __pgd(0));
+		set_pgd(pgdp, __pgd(0));
 }
 
 static inline p4d_t *pgd_pgtable(pgd_t pgd)
@@ -404,12 +404,12 @@ static inline struct page *pgd_page(pgd_t pgd)
 #define p4d_index(addr) (((addr) >> P4D_SHIFT) & (PTRS_PER_P4D - 1))
 
 #define p4d_offset p4d_offset
-static inline p4d_t *p4d_offset(pgd_t *pgd, unsigned long address)
+static inline p4d_t *p4d_offset(pgd_t *pgdp, unsigned long address)
 {
 	if (pgtable_l5_enabled)
-		return pgd_pgtable(*pgd) + p4d_index(address);
+		return pgd_pgtable(*pgdp) + p4d_index(address);
 
-	return (p4d_t *)pgd;
+	return (p4d_t *)pgdp;
 }
 
 #endif /* _ASM_RISCV_PGTABLE_64_H */

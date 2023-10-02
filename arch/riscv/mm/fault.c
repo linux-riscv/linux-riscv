@@ -111,11 +111,11 @@ bad_area(struct pt_regs *regs, struct mm_struct *mm, int code,
 
 static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long addr)
 {
-	pgd_t *pgd, *pgd_k;
-	pud_t *pud_k;
-	p4d_t *p4d_k;
-	pmd_t *pmd_k;
-	pte_t *pte_k;
+	pgd_t *pgdp, *pgdp_k;
+	pud_t *pudp_k;
+	p4d_t *p4dp_k;
+	pmd_t *pmdp_k;
+	pte_t *ptep_k;
 	int index;
 	unsigned long pfn;
 
@@ -133,39 +133,39 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 */
 	index = pgd_index(addr);
 	pfn = csr_read(CSR_SATP) & SATP_PPN;
-	pgd = (pgd_t *)pfn_to_virt(pfn) + index;
-	pgd_k = init_mm.pgd + index;
+	pgdp = (pgd_t *)pfn_to_virt(pfn) + index;
+	pgdp_k = init_mm.pgd + index;
 
-	if (!pgd_present(*pgd_k)) {
+	if (!pgd_present(*pgdp_k)) {
 		no_context(regs, addr);
 		return;
 	}
-	set_pgd(pgd, *pgd_k);
+	set_pgd(pgdp, *pgdp_k);
 
-	p4d_k = p4d_offset(pgd_k, addr);
-	if (!p4d_present(*p4d_k)) {
+	p4dp_k = p4d_offset(pgdp_k, addr);
+	if (!p4d_present(*p4dp_k)) {
 		no_context(regs, addr);
 		return;
 	}
 
-	pud_k = pud_offset(p4d_k, addr);
-	if (!pud_present(*pud_k)) {
+	pudp_k = pud_offset(p4dp_k, addr);
+	if (!pud_present(*pudp_k)) {
 		no_context(regs, addr);
 		return;
 	}
-	if (pud_leaf(*pud_k))
+	if (pud_leaf(*pudp_k))
 		goto flush_tlb;
 
 	/*
 	 * Since the vmalloc area is global, it is unnecessary
 	 * to copy individual PTEs
 	 */
-	pmd_k = pmd_offset(pud_k, addr);
-	if (!pmd_present(*pmd_k)) {
+	pmdp_k = pmd_offset(pudp_k, addr);
+	if (!pmd_present(*pmdp_k)) {
 		no_context(regs, addr);
 		return;
 	}
-	if (pmd_leaf(*pmd_k))
+	if (pmd_leaf(*pmdp_k))
 		goto flush_tlb;
 
 	/*
@@ -174,8 +174,8 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 * addresses. If we don't do this, this will just
 	 * silently loop forever.
 	 */
-	pte_k = pte_offset_kernel(pmd_k, addr);
-	if (!pte_present(*pte_k)) {
+	ptep_k = pte_offset_kernel(pmdp_k, addr);
+	if (!pte_present(*ptep_k)) {
 		no_context(regs, addr);
 		return;
 	}

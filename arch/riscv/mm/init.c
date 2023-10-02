@@ -885,7 +885,7 @@ static void __init relocate_kernel(void)
 #endif /* CONFIG_RELOCATABLE */
 
 #ifdef CONFIG_XIP_KERNEL
-static void __init create_kernel_page_table(pgd_t *pgdir,
+static void __init create_kernel_page_table(pgd_t *pgdp,
 					    __always_unused bool early)
 {
 	uintptr_t va, end_va;
@@ -893,25 +893,25 @@ static void __init create_kernel_page_table(pgd_t *pgdir,
 	/* Map the flash resident part */
 	end_va = kernel_map.virt_addr + kernel_map.xiprom_sz;
 	for (va = kernel_map.virt_addr; va < end_va; va += PMD_SIZE)
-		create_pgd_mapping(pgdir, va,
+		create_pgd_mapping(pgdp, va,
 				   kernel_map.xiprom + (va - kernel_map.virt_addr),
 				   PMD_SIZE, PAGE_KERNEL_EXEC);
 
 	/* Map the data in RAM */
 	end_va = kernel_map.virt_addr + XIP_OFFSET + kernel_map.size;
 	for (va = kernel_map.virt_addr + XIP_OFFSET; va < end_va; va += PMD_SIZE)
-		create_pgd_mapping(pgdir, va,
+		create_pgd_mapping(pgdp, va,
 				   kernel_map.phys_addr + (va - (kernel_map.virt_addr + XIP_OFFSET)),
 				   PMD_SIZE, PAGE_KERNEL);
 }
 #else
-static void __init create_kernel_page_table(pgd_t *pgdir, bool early)
+static void __init create_kernel_page_table(pgd_t *pgdp, bool early)
 {
 	uintptr_t va, end_va;
 
 	end_va = kernel_map.virt_addr + kernel_map.size;
 	for (va = kernel_map.virt_addr; va < end_va; va += PMD_SIZE)
-		create_pgd_mapping(pgdir, va,
+		create_pgd_mapping(pgdp, va,
 				   kernel_map.phys_addr + (va - kernel_map.virt_addr),
 				   PMD_SIZE,
 				   early ?
@@ -1523,30 +1523,30 @@ static void __init preallocate_pgd_pages_range(unsigned long start, unsigned lon
 	const char *lvl;
 
 	for (addr = start; addr < end && addr >= start; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
-		pgd_t *pgd = pgd_offset_k(addr);
-		p4d_t *p4d;
-		pud_t *pud;
-		pmd_t *pmd;
+		pgd_t *pgdp = pgd_offset_k(addr);
+		p4d_t *p4dp;
+		pud_t *pudp;
+		pmd_t *pmdp;
 
 		lvl = "p4d";
-		p4d = p4d_alloc(&init_mm, pgd, addr);
-		if (!p4d)
+		p4dp = p4d_alloc(&init_mm, pgdp, addr);
+		if (!p4dp)
 			goto failed;
 
 		if (pgtable_l5_enabled)
 			continue;
 
 		lvl = "pud";
-		pud = pud_alloc(&init_mm, p4d, addr);
-		if (!pud)
+		pudp = pud_alloc(&init_mm, p4dp, addr);
+		if (!pudp)
 			goto failed;
 
 		if (pgtable_l4_enabled)
 			continue;
 
 		lvl = "pmd";
-		pmd = pmd_alloc(&init_mm, pud, addr);
-		if (!pmd)
+		pmdp = pmd_alloc(&init_mm, pudp, addr);
+		if (!pmdp)
 			goto failed;
 	}
 	return;

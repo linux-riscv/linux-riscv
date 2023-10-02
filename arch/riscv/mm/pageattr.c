@@ -25,65 +25,65 @@ static unsigned long set_pageattr_masks(unsigned long val, struct mm_walk *walk)
 	return new_val;
 }
 
-static int pageattr_pgd_entry(pgd_t *pgd, unsigned long addr,
+static int pageattr_pgd_entry(pgd_t *pgdp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pgd_t val = READ_ONCE(*pgd);
+	pgd_t val = READ_ONCE(*pgdp);
 
 	if (pgd_leaf(val)) {
 		val = __pgd(set_pageattr_masks(pgd_val(val), walk));
-		set_pgd(pgd, val);
+		set_pgd(pgdp, val);
 	}
 
 	return 0;
 }
 
-static int pageattr_p4d_entry(p4d_t *p4d, unsigned long addr,
+static int pageattr_p4d_entry(p4d_t *p4dp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	p4d_t val = READ_ONCE(*p4d);
+	p4d_t val = READ_ONCE(*p4dp);
 
 	if (p4d_leaf(val)) {
 		val = __p4d(set_pageattr_masks(p4d_val(val), walk));
-		set_p4d(p4d, val);
+		set_p4d(p4dp, val);
 	}
 
 	return 0;
 }
 
-static int pageattr_pud_entry(pud_t *pud, unsigned long addr,
+static int pageattr_pud_entry(pud_t *pudp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pud_t val = READ_ONCE(*pud);
+	pud_t val = READ_ONCE(*pudp);
 
 	if (pud_leaf(val)) {
 		val = __pud(set_pageattr_masks(pud_val(val), walk));
-		set_pud(pud, val);
+		set_pud(pudp, val);
 	}
 
 	return 0;
 }
 
-static int pageattr_pmd_entry(pmd_t *pmd, unsigned long addr,
+static int pageattr_pmd_entry(pmd_t *pmdp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pmd_t val = READ_ONCE(*pmd);
+	pmd_t val = READ_ONCE(*pmdp);
 
 	if (pmd_leaf(val)) {
 		val = __pmd(set_pageattr_masks(pmd_val(val), walk));
-		set_pmd(pmd, val);
+		set_pmd(pmdp, val);
 	}
 
 	return 0;
 }
 
-static int pageattr_pte_entry(pte_t *pte, unsigned long addr,
+static int pageattr_pte_entry(pte_t *ptep, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pte_t val = READ_ONCE(*pte);
+	pte_t val = READ_ONCE(*ptep);
 
 	val = __pte(set_pageattr_masks(pte_val(val), walk));
-	set_pte(pte, val);
+	set_pte(ptep, val);
 
 	return 0;
 }
@@ -209,36 +209,40 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
 bool kernel_page_present(struct page *page)
 {
 	unsigned long addr = (unsigned long)page_address(page);
-	pgd_t *pgd;
-	pud_t *pud;
-	p4d_t *p4d;
-	pmd_t *pmd;
-	pte_t *pte;
+	pgd_t *pgdp, pgd;
+	pud_t *pudp, pud;
+	p4d_t *p4dp, p4d;
+	pmd_t *pmdp, pmd;
+	pte_t *ptep;
 
-	pgd = pgd_offset_k(addr);
-	if (!pgd_present(*pgd))
+	pgdp = pgd_offset_k(addr);
+	pgd = *pgdp;
+	if (!pgd_present(pgd))
 		return false;
-	if (pgd_leaf(*pgd))
+	if (pgd_leaf(pgd))
 		return true;
 
-	p4d = p4d_offset(pgd, addr);
-	if (!p4d_present(*p4d))
+	p4dp = p4d_offset(pgdp, addr);
+	p4d = *p4dp;
+	if (!p4d_present(p4d))
 		return false;
-	if (p4d_leaf(*p4d))
+	if (p4d_leaf(p4d))
 		return true;
 
-	pud = pud_offset(p4d, addr);
-	if (!pud_present(*pud))
+	pudp = pud_offset(p4dp, addr);
+	pud = *pudp;
+	if (!pud_present(pud))
 		return false;
-	if (pud_leaf(*pud))
+	if (pud_leaf(pud))
 		return true;
 
-	pmd = pmd_offset(pud, addr);
-	if (!pmd_present(*pmd))
+	pmdp = pmd_offset(pudp, addr);
+	pmd = *pmdp;
+	if (!pmd_present(pmd))
 		return false;
-	if (pmd_leaf(*pmd))
+	if (pmd_leaf(pmd))
 		return true;
 
-	pte = pte_offset_kernel(pmd, addr);
-	return pte_present(*pte);
+	ptep = pte_offset_kernel(pmdp, addr);
+	return pte_present(*ptep);
 }

@@ -33,52 +33,52 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 		      unsigned long sz)
 {
 	unsigned long order;
-	pte_t *pte = NULL;
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
+	pte_t *ptep = NULL;
+	pgd_t *pgdp;
+	p4d_t *p4dp;
+	pud_t *pudp;
+	pmd_t *pmdp;
 
-	pgd = pgd_offset(mm, addr);
-	p4d = p4d_alloc(mm, pgd, addr);
-	if (!p4d)
+	pgdp = pgd_offset(mm, addr);
+	p4dp = p4d_alloc(mm, pgdp, addr);
+	if (!p4dp)
 		return NULL;
 
-	pud = pud_alloc(mm, p4d, addr);
-	if (!pud)
+	pudp = pud_alloc(mm, p4dp, addr);
+	if (!pudp)
 		return NULL;
 
 	if (sz == PUD_SIZE) {
-		pte = (pte_t *)pud;
+		ptep = (pte_t *)pudp;
 		goto out;
 	}
 
 	if (sz == PMD_SIZE) {
-		if (want_pmd_share(vma, addr) && pud_none(*pud))
-			pte = huge_pmd_share(mm, vma, addr, pud);
+		if (want_pmd_share(vma, addr) && pud_none(*pudp))
+			ptep = huge_pmd_share(mm, vma, addr, pudp);
 		else
-			pte = (pte_t *)pmd_alloc(mm, pud, addr);
+			ptep = (pte_t *)pmd_alloc(mm, pudp, addr);
 		goto out;
 	}
 
-	pmd = pmd_alloc(mm, pud, addr);
-	if (!pmd)
+	pmdp = pmd_alloc(mm, pudp, addr);
+	if (!pmdp)
 		return NULL;
 
 	for_each_napot_order(order) {
 		if (napot_cont_size(order) == sz) {
-			pte = pte_alloc_huge(mm, pmd, addr & napot_cont_mask(order));
+			ptep = pte_alloc_huge(mm, pmdp, addr & napot_cont_mask(order));
 			break;
 		}
 	}
 
 out:
-	if (pte) {
-		pte_t pteval = ptep_get_lockless(pte);
+	if (ptep) {
+		pte_t pteval = ptep_get_lockless(ptep);
 
 		WARN_ON_ONCE(pte_present(pteval) && !pte_huge(pteval));
 	}
-	return pte;
+	return ptep;
 }
 
 pte_t *huge_pte_offset(struct mm_struct *mm,
@@ -86,43 +86,43 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 		       unsigned long sz)
 {
 	unsigned long order;
-	pte_t *pte = NULL;
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
+	pte_t *ptep = NULL;
+	pgd_t *pgdp;
+	p4d_t *p4dp;
+	pud_t *pudp;
+	pmd_t *pmdp;
 
-	pgd = pgd_offset(mm, addr);
-	if (!pgd_present(*pgd))
+	pgdp = pgd_offset(mm, addr);
+	if (!pgd_present(*pgdp))
 		return NULL;
 
-	p4d = p4d_offset(pgd, addr);
-	if (!p4d_present(*p4d))
+	p4dp = p4d_offset(pgdp, addr);
+	if (!p4d_present(*p4dp))
 		return NULL;
 
-	pud = pud_offset(p4d, addr);
+	pudp = pud_offset(p4dp, addr);
 	if (sz == PUD_SIZE)
 		/* must be pud huge, non-present or none */
-		return (pte_t *)pud;
+		return (pte_t *)pudp;
 
-	if (!pud_present(*pud))
+	if (!pud_present(*pudp))
 		return NULL;
 
-	pmd = pmd_offset(pud, addr);
+	pmdp = pmd_offset(pudp, addr);
 	if (sz == PMD_SIZE)
 		/* must be pmd huge, non-present or none */
-		return (pte_t *)pmd;
+		return (pte_t *)pmdp;
 
-	if (!pmd_present(*pmd))
+	if (!pmd_present(*pmdp))
 		return NULL;
 
 	for_each_napot_order(order) {
 		if (napot_cont_size(order) == sz) {
-			pte = pte_offset_huge(pmd, addr & napot_cont_mask(order));
+			ptep = pte_offset_huge(pmdp, addr & napot_cont_mask(order));
 			break;
 		}
 	}
-	return pte;
+	return ptep;
 }
 
 static pte_t get_clear_contig(struct mm_struct *mm,

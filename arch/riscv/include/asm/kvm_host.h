@@ -93,7 +93,7 @@ struct kvm_arch {
 	struct kvm_vmid vmid;
 
 	/* G-stage page table */
-	pgd_t *pgd;
+	pgd_t *pgdp;
 	phys_addr_t pgd_phys;
 
 	/* Guest Timer */
