@@ -28,7 +28,7 @@ static unsigned long set_pageattr_masks(unsigned long val, struct mm_walk *walk)
 static int pageattr_pgd_entry(pgd_t *pgdp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pgd_t val = READ_ONCE(*pgdp);
+	pgd_t val = pgdp_get(pgdp);
 
 	if (pgd_leaf(val)) {
 		val = __pgd(set_pageattr_masks(pgd_val(val), walk));
@@ -41,7 +41,7 @@ static int pageattr_pgd_entry(pgd_t *pgdp, unsigned long addr,
 static int pageattr_p4d_entry(p4d_t *p4dp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	p4d_t val = READ_ONCE(*p4dp);
+	p4d_t val = p4dp_get(p4dp);
 
 	if (p4d_leaf(val)) {
 		val = __p4d(set_pageattr_masks(p4d_val(val), walk));
@@ -54,7 +54,7 @@ static int pageattr_p4d_entry(p4d_t *p4dp, unsigned long addr,
 static int pageattr_pud_entry(pud_t *pudp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pud_t val = READ_ONCE(*pudp);
+	pud_t val = pudp_get(pudp);
 
 	if (pud_leaf(val)) {
 		val = __pud(set_pageattr_masks(pud_val(val), walk));
@@ -67,7 +67,7 @@ static int pageattr_pud_entry(pud_t *pudp, unsigned long addr,
 static int pageattr_pmd_entry(pmd_t *pmdp, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pmd_t val = READ_ONCE(*pmdp);
+	pmd_t val = pmdp_get(pmdp);
 
 	if (pmd_leaf(val)) {
 		val = __pmd(set_pageattr_masks(pmd_val(val), walk));
@@ -80,7 +80,7 @@ static int pageattr_pmd_entry(pmd_t *pmdp, unsigned long addr,
 static int pageattr_pte_entry(pte_t *ptep, unsigned long addr,
 			      unsigned long next, struct mm_walk *walk)
 {
-	pte_t val = READ_ONCE(*ptep);
+	pte_t val = ptep_get(ptep);
 
 	val = __pte(set_pageattr_masks(pte_val(val), walk));
 	set_pte(ptep, val);
@@ -216,33 +216,33 @@ bool kernel_page_present(struct page *page)
 	pte_t *ptep;
 
 	pgdp = pgd_offset_k(addr);
-	pgd = *pgdp;
+	pgd = pgdp_get(pgdp);
 	if (!pgd_present(pgd))
 		return false;
 	if (pgd_leaf(pgd))
 		return true;
 
 	p4dp = p4d_offset(pgdp, addr);
-	p4d = *p4dp;
+	p4d = p4dp_get(p4dp);
 	if (!p4d_present(p4d))
 		return false;
 	if (p4d_leaf(p4d))
 		return true;
 
 	pudp = pud_offset(p4dp, addr);
-	pud = *pudp;
+	pud = pudp_get(pudp);
 	if (!pud_present(pud))
 		return false;
 	if (pud_leaf(pud))
 		return true;
 
 	pmdp = pmd_offset(pudp, addr);
-	pmd = *pmdp;
+	pmd = pmdp_get(pmdp);
 	if (!pmd_present(pmd))
 		return false;
 	if (pmd_leaf(pmd))
 		return true;
 
 	ptep = pte_offset_kernel(pmdp, addr);
-	return pte_present(*ptep);
+	return pte_present(ptep_get(ptep));
 }

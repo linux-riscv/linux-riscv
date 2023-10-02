@@ -136,24 +136,24 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	pgdp = (pgd_t *)pfn_to_virt(pfn) + index;
 	pgdp_k = init_mm.pgd + index;
 
-	if (!pgd_present(*pgdp_k)) {
+	if (!pgd_present(pgdp_get(pgdp_k))) {
 		no_context(regs, addr);
 		return;
 	}
-	set_pgd(pgdp, *pgdp_k);
+	set_pgd(pgdp, pgdp_get(pgdp_k));
 
 	p4dp_k = p4d_offset(pgdp_k, addr);
-	if (!p4d_present(*p4dp_k)) {
+	if (!p4d_present(p4dp_get(p4dp_k))) {
 		no_context(regs, addr);
 		return;
 	}
 
 	pudp_k = pud_offset(p4dp_k, addr);
-	if (!pud_present(*pudp_k)) {
+	if (!pud_present(pudp_get(pudp_k))) {
 		no_context(regs, addr);
 		return;
 	}
-	if (pud_leaf(*pudp_k))
+	if (pud_leaf(pudp_get(pudp_k)))
 		goto flush_tlb;
 
 	/*
@@ -161,11 +161,11 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 * to copy individual PTEs
 	 */
 	pmdp_k = pmd_offset(pudp_k, addr);
-	if (!pmd_present(*pmdp_k)) {
+	if (!pmd_present(pmdp_get(pmdp_k))) {
 		no_context(regs, addr);
 		return;
 	}
-	if (pmd_leaf(*pmdp_k))
+	if (pmd_leaf(pmdp_get(pmdp_k)))
 		goto flush_tlb;
 
 	/*
@@ -175,7 +175,7 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 * silently loop forever.
 	 */
 	ptep_k = pte_offset_kernel(pmdp_k, addr);
-	if (!pte_present(*ptep_k)) {
+	if (!pte_present(ptep_get(ptep_k))) {
 		no_context(regs, addr);
 		return;
 	}
