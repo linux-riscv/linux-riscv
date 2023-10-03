@@ -27,7 +27,7 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 
-#include "daffy_defs.h"
+#include "duc_structs.h"
 
 #define DPA_FW_QUEUE_SIZE 16
 

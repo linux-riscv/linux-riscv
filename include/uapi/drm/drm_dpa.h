@@ -102,17 +102,7 @@ struct drm_dpa_set_notification_queue {
 #define DRM_IOCTL_DPA_SET_NOTIFICATION_QUEUE \
 	DPA_IOCTL(IOWR, SET_NOTIFICATION_QUEUE, set_notification_queue)
 
-/* Each signal takes one 64B cacheline */
-struct drm_dpa_signal {
-	__u64 signal_value;
-	__u64 timestamp_us;
-	__u64 pad[6];
-};
-
 #define DPA_DRM_MAX_SIGNAL_PAGES (4)
-#define DPA_DRM_SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct drm_dpa_signal))
-#define DPA_DRM_MAX_SIGNALS_PER_PASID (DPA_DRM_MAX_SIGNAL_PAGES * \
-	DPA_DRM_SIGNALS_PER_PAGE)
 
 #define DPA_MAX_QUEUE_PRIORITY		15
 

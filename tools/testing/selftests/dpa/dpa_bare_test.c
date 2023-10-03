@@ -15,7 +15,7 @@
 #include <drm/drm.h>
 #include <drm_dpa.h>
 
-#include "duc_packets.h"
+#include "../../../../drivers/gpu/drm/rivos/duc_structs.h"
 
 // Doorbells are 8B long, 64B aligned, 64 per doorbell page
 struct Doorbell {
@@ -75,11 +75,11 @@ static void alloc_gpu_memory(void **ptr, size_t size)
 	alloc_aligned_host_memory(ptr, size);
 }
 
-static struct drm_dpa_signal *get_signal_page()
+static struct duc_signal *get_signal_page()
 {
 	int ret;
 	struct drm_dpa_set_signal_pages args;
-	struct drm_dpa_signal *event_page;
+	struct duc_signal *event_page;
 
 	alloc_aligned_host_memory((void **)&event_page, getpagesize());
 	memset(&args, 0, sizeof(args));
@@ -151,7 +151,7 @@ static void create_queue(void *queue_base, uint32_t num_packets,
 	*q_id = args.queue_id;
 }
 
-static void print_aql_packet(hsa_kernel_dispatch_packet_t *pkt)
+static void print_aql_packet(struct duc_kernel_dispatch_packet *pkt)
 {
 	fprintf(stderr, "\nPrinting AQL packet....\n");
 	fprintf(stderr, "header: 0x%x\n", pkt->header);
@@ -211,22 +211,22 @@ int main(int argc, char *argv[])
 	size_t doorbell_size;
 	size_t queue_packets = 64;
 	size_t queue_size = sizeof(struct queue_metadata) +
-		queue_packets * sizeof(struct hsa_kernel_dispatch_packet_s);
+		queue_packets * sizeof(union duc_queue_packet);
 	size_t kernel_size = 0;
 
 	uint64_t doorbell_offset;
 	uint32_t queue_id;
 
 	struct queue_metadata *meta = NULL;
-	void *ring = NULL;
+	union duc_queue_packet *ring = NULL;
 
 	void *doorbell_map;
 	volatile struct Doorbell *doorbell;
 
-	hsa_kernel_dispatch_packet_t *aql_packet;
-	hsa_barrier_and_packet_t *aql_barrier_packet;
+	struct duc_kernel_dispatch_packet *aql_packet;
+	struct duc_barrier_and_packet *aql_barrier_packet;
 
-	struct drm_dpa_signal *signal_page, *signal;
+	struct duc_signal *signal_page, *signal;
 	int ret = 0;
 
 	if (init_null_kernel(&kern_ptr, &kernel_size)) {
@@ -253,7 +253,7 @@ int main(int argc, char *argv[])
 	ring = queue_ptr + sizeof(*meta);
 
 	// set all packets to invalid -- 1
-	memset(ring, 1, queue_packets * sizeof(*aql_packet));
+	memset(ring, 1, queue_packets * sizeof(*ring));
 
 	meta->read_index.value = 0;
 	meta->write_index.value = 0;
@@ -269,16 +269,16 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "kern_ptr: 0x%lx\n", (unsigned long)kern_ptr);
 
 		// send an empty barrier packet first to test multiple packets
-		aql_barrier_packet = (hsa_barrier_and_packet_t *)ring;
+		aql_barrier_packet = &ring[0].barrier_and;
 		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
-		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
+		aql_barrier_packet->header = DUC_PACKET_TYPE_BARRIER_AND;
 
 		// this is the kernel dispatch packet
-		aql_packet = (hsa_kernel_dispatch_packet_t *)(ring + sizeof(*aql_barrier_packet));
+		aql_packet = &ring[1].kernel_dispatch;
 		memset(aql_packet, 0, sizeof(*aql_packet));
 
 		// Stub these fields for now
-		aql_packet->header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+		aql_packet->header = DUC_PACKET_TYPE_KERNEL_DISPATCH;
 		aql_packet->workgroup_size_x = 32;
 		aql_packet->workgroup_size_y = 1;
 		aql_packet->workgroup_size_z = 1;
@@ -321,13 +321,12 @@ int main(int argc, char *argv[])
 		}
 
 		// Add another barrier packet with a signal attached so we can wait on that
-		aql_barrier_packet = (hsa_barrier_and_packet_t *)
-			(ring + meta->write_index.value * sizeof(*aql_barrier_packet));
+		aql_barrier_packet = &ring[2].barrier_and;
 		memset(aql_barrier_packet, 0, sizeof(*aql_barrier_packet));
 		aql_barrier_packet->completion_signal.index = 0;
 		aql_barrier_packet->completion_signal.flags =
 			DUC_SIGNAL_VALID | DUC_SIGNAL_NOTIFY_ON_WRITE;
-		aql_barrier_packet->header = HSA_PACKET_TYPE_BARRIER_AND;
+		aql_barrier_packet->header = DUC_PACKET_TYPE_BARRIER_AND;
 		meta->write_index.value += 1;
 		doorbell->doorbell_write_offset = 1;
 		// wait 1 second

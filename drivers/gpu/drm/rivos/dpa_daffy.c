@@ -26,9 +26,9 @@
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 
-#include "daffy_defs.h"
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
+#include "duc_structs.h"
 
 #define DAFFY_ENABLE_TIMEOUT_US	500000
 
@@ -174,8 +174,8 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 			pkt->hdr.response = DAFFY_RESP_ERROR;
 			break;
 		case DAFFY_CMD_UPDATE_SIGNAL: {
-			u64 signal_idx = pkt->u.dusc.signal_idx;
-			u32 pasid = pkt->u.dusc.pasid;
+			u64 signal_idx = pkt->u.update_signal.signal_idx;
+			u32 pasid = pkt->u.update_signal.pasid;
 
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
@@ -313,14 +313,13 @@ int daffy_get_info_cmd(struct dpa_device *dpa,
 	if (ret < 0)
 		return ret;
 
-	memcpy(&args->pe_enable_mask, &pkt.u.dgic.pe_enable_mask,
+	memcpy(&args->pe_enable_mask, &pkt.u.get_info.pe_enable_mask,
 	       sizeof(args->pe_enable_mask));
 	return 0;
 }
 
 int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid,
-			     u32 *db_offset,
-			     u32 *db_size)
+			     u32 *db_offset, u32 *db_size)
 {
 	struct daffy_queue_pkt pkt;
 	struct daffy_register_pasid_cmd *cmd;
@@ -328,15 +327,15 @@ int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid,
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_REGISTER_PASID;
-	cmd = &pkt.u.drpc;
+	cmd = &pkt.u.register_pasid;
 	cmd->pasid = pasid;
 
 	ret = daffy_submit_sync(dpa, &pkt);
 	if (ret)
 		return ret;
 
-	*db_offset = pkt.u.drpc.doorbell_offset;
-	*db_size = pkt.u.drpc.doorbell_size;
+	*db_offset = cmd->doorbell_offset;
+	*db_size = cmd->doorbell_size;
 
 	return 0;
 }
@@ -348,7 +347,7 @@ int daffy_unregister_pasid_cmd(struct dpa_device *dpa, u32 pasid)
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_UNREGISTER_PASID;
-	cmd = &pkt.u.durpc;
+	cmd = &pkt.u.unregister_pasid;
 	cmd->pasid = pasid;
 
 	return daffy_submit_sync(dpa, &pkt);
@@ -360,7 +359,7 @@ int daffy_destroy_queue_cmd(struct dpa_device *dpa, u32 queue_id)
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_DESTROY_QUEUE;
-	pkt.u.ddqc.queue_id = queue_id;
+	pkt.u.destroy_queue.queue_id = queue_id;
 
 	return daffy_submit_sync(dpa, &pkt);
 }
@@ -375,7 +374,7 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_CREATE_QUEUE;
-	cmd = &pkt.u.dcqc;
+	cmd = &pkt.u.create_queue;
 	cmd->pasid = p->pasid;
 	cmd->ring_base_address = args->ring_base_address;
 	cmd->ring_size = args->ring_size;
@@ -386,11 +385,10 @@ int daffy_create_queue_cmd(struct dpa_device *dpa,
 	if (ret < 0)
 		return ret;
 
-	args->queue_id = pkt.u.dcqc.queue_id;
+	args->queue_id = cmd->queue_id;
 	// fw gives us the offset into the entire 16 page region
 	// user process should get offset into the mmaped doorbell region
-	args->doorbell_offset = pkt.u.dcqc.doorbell_offset -
-		p->doorbell_offset;
+	args->doorbell_offset = cmd->doorbell_offset - p->doorbell_offset;
 
 	return 0;
 }
@@ -404,7 +402,7 @@ int daffy_set_signal_pages_cmd(struct dpa_device *dpa, struct dpa_process *p,
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_SET_SIGNAL_PAGES;
-	cmd = &pkt.u.dsspc;
+	cmd = &pkt.u.set_signal_pages;
 	cmd->base_address = args->va;
 	cmd->num_pages = num_pages;
 	cmd->pasid = p->pasid;
@@ -421,7 +419,7 @@ int daffy_set_notification_queue_cmd(struct dpa_device *dpa,
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_SET_NOTIFICATION_QUEUE;
-	cmd = &pkt.u.dsnqc;
+	cmd = &pkt.u.set_notification_queue;
 	cmd->base_address = args->base_address;
 	cmd->ring_size = args->ring_size;
 	cmd->pasid = p->pasid;

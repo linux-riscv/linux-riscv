@@ -36,8 +36,10 @@
 #include <linux/pm_runtime.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
+
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
+#include "duc_structs.h"
 
 static void dpa_release_process(struct kref *ref);
 
@@ -268,14 +270,16 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 	return 0;
 }
 
+#define SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct duc_signal))
+
 static bool check_signals(struct dpa_process *p, u8 *ids, u32 num)
 {
 	int i;
 
 	for (i = 0; i < num; i++) {
-		unsigned int pg = ids[i] / DPA_DRM_SIGNALS_PER_PAGE;
-		unsigned int index = ids[i] % DPA_DRM_SIGNALS_PER_PAGE;
-		struct drm_dpa_signal *signals = page_to_virt(p->signal_pages[pg]);
+		unsigned int pg = ids[i] / SIGNALS_PER_PAGE;
+		unsigned int index = ids[i] % SIGNALS_PER_PAGE;
+		struct duc_signal *signals = page_to_virt(p->signal_pages[pg]);
 
 		if (READ_ONCE(signals[index].signal_value) == 0)
 			return true;
@@ -353,8 +357,7 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	spin_lock_irqsave(&p->signal_lock, flags);
 	/* Verify signal IDs are in bounds. */
 	for (i = 0; i < args->num_signals; i++) {
-		unsigned int pg = args->signal_ids[i] /
-			DPA_DRM_SIGNALS_PER_PAGE;
+		unsigned int pg = args->signal_ids[i] / SIGNALS_PER_PAGE;
 
 		if (pg >= p->num_signal_pages) {
 			spin_unlock_irqrestore(&p->signal_lock, flags);
