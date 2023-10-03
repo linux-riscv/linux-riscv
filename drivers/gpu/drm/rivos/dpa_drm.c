@@ -427,34 +427,67 @@ out:
 	return ret;
 }
 
+int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause)
+{
+	struct dpa_process *p;
+
+	p = dpa_get_process_by_pasid(dpa, pasid);
+	if (!p)
+		return -ENOENT;
+
+	/*
+	 * TODO: Handle DUC-initiated KILL: Mark PASID as having been killed,
+	 * wake up threads blocked in signal_wait, and reject any further ioctls
+	 * from the process.
+	 */
+	dev_dbg(dpa->dev, "DUC completed kill for PASID %u\n", pasid);
+	complete(&p->kill_done);
+	return 0;
+}
+
+#define KILL_TIMEOUT_MS	5000
+
+static int dpa_kill_process(struct dpa_process *p)
+{
+	unsigned long timeout = msecs_to_jiffies(KILL_TIMEOUT_MS);
+	int ret;
+
+	ret = daffy_kill_pasid_cmd(p->dev, p->pasid);
+	if (ret != -EINPROGRESS)
+		return ret;
+
+	ret = wait_for_completion_timeout(&p->kill_done, timeout);
+	if (ret < 0)
+		return ret;
+	if (ret == 0)
+		return -ETIMEDOUT;
+
+	return 0;
+}
+
 static void dpa_release_process(struct kref *ref)
 {
 	struct dpa_process *p = container_of(ref, struct dpa_process, ref);
 	struct dpa_device *dpa = p->dev;
 	int ret;
 
-	dev_warn(dpa->dev, "%s: freeing process %d\n", __func__,
-		 current->tgid);
+	dev_dbg(dpa->dev, "DPA releasing process %d (PASID %u)\n",
+		current->tgid, p->pasid);
 
+	ret = daffy_unregister_pasid_cmd(p->dev, p->pasid);
+	if (ret) {
+		dev_warn(dpa->dev, "DUC failed to unregister PASID %u\n",
+			 p->pasid);
+	}
+
+	/* UNREGISTER_PASID will release all the queues on the DUC side. */
 	while (!list_empty(&p->queue_list)) {
 		struct dpa_aql_queue *q;
 
 		q = list_first_entry(&p->queue_list, struct dpa_aql_queue,
 				     list);
 		list_del(&q->list);
-
-		ret = daffy_destroy_queue_cmd(p->dev, q->id);
-		if (ret < 0) {
-			dev_warn(p->dev->dev, "failed to destroy queue %u\n",
-				 q->id);
-		}
 		kfree(q);
-	}
-
-	ret = daffy_unregister_pasid_cmd(p->dev, p->pasid);
-	if (ret) {
-		dev_warn(dpa->dev, "%s: Failed to unregister pasid %d from DUC\n",
-			__func__, p->pasid);
 	}
 
 	/*
@@ -479,6 +512,7 @@ static void dpa_driver_release_kms(struct drm_device *dev, struct drm_file *file
 {
 	struct dpa_process *p = file_priv->driver_priv;
 
+	WARN_ON(dpa_kill_process(p));
 	kref_put(&p->ref, dpa_release_process);
 }
 
@@ -542,6 +576,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	for (i = 0; i < ARRAY_SIZE(dpa_app->signal_wqs); i++)
 		init_waitqueue_head(&dpa_app->signal_wqs[i]);
 	spin_lock_init(&dpa_app->signal_lock);
+
+	init_completion(&dpa_app->kill_done);
 
 	dpa->dpa_process_count++;
 	INIT_LIST_HEAD(&dpa_app->dpa_process_list);

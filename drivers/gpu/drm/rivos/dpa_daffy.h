@@ -67,6 +67,7 @@ int daffy_register_pasid_cmd(struct dpa_device *dpa, u32 pasid,
 			     u32 *db_offset,
 			     u32 *db_size);
 int daffy_unregister_pasid_cmd(struct dpa_device *dpa, u32 pasid);
+int daffy_kill_pasid_cmd(struct dpa_device *dpa, u32 pasid);
 int daffy_create_queue_cmd(struct dpa_device *dpa,
 			   struct dpa_process *p,
 			   struct drm_dpa_create_queue *args);

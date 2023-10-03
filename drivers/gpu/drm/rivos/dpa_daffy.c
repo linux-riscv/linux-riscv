@@ -181,6 +181,15 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 			dpa_signal_wake(dpa, pasid, signal_idx);
 			break;
 		}
+		case DAFFY_CMD_KILL_PASID: {
+			u32 pasid = pkt->u.kill_pasid.pasid;
+			u32 cause = pkt->u.kill_pasid.cause;
+
+			dev_dbg(dpa->dev, "killed PASID %u, cause %u\n",
+				pasid, cause);
+			dpa_kill_done(dpa, pasid, cause);
+			break;
+		}
 		default:
 			dev_warn(dpa->dev, "%s: Received unexpected Daffy command %x\n",
 				__func__, pkt->hdr.command);
@@ -289,9 +298,14 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 	}
 	dev_dbg(dpa->dev, "pkt id %llu completed, cmd: %#x, resp: %#x\n",
 		pkt->hdr.id, pkt->hdr.command, pkt->hdr.response);
-	if (pkt->hdr.response != DAFFY_RESP_SUCCESS)
+	switch (pkt->hdr.response) {
+	case DAFFY_RESP_SUCCESS:
+		return 0;
+	case DAFFY_RESP_IN_PROGRESS:
+		return -EINPROGRESS;
+	default:
 		return -EIO;
-	return 0;
+	}
 
 out_unlock:
 	spin_unlock_irq(&daffy->h_lock);
@@ -345,6 +359,19 @@ int daffy_unregister_pasid_cmd(struct dpa_device *dpa, u32 pasid)
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.hdr.command = DAFFY_CMD_UNREGISTER_PASID;
 	cmd = &pkt.u.unregister_pasid;
+	cmd->pasid = pasid;
+
+	return daffy_submit_sync(dpa, &pkt);
+}
+
+int daffy_kill_pasid_cmd(struct dpa_device *dpa, u32 pasid)
+{
+	struct daffy_queue_pkt pkt;
+	struct daffy_kill_pasid_cmd *cmd;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DAFFY_CMD_KILL_PASID;
+	cmd = &pkt.u.kill_pasid;
 	cmd->pasid = pasid;
 
 	return daffy_submit_sync(dpa, &pkt);

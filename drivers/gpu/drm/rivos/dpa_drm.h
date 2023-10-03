@@ -20,6 +20,7 @@
 #ifndef _DPA_DRM_H_
 #define _DPA_DRM_H_
 
+#include <linux/completion.h>
 #include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/kernel.h>
@@ -115,6 +116,8 @@ struct dpa_process {
 	phys_addr_t doorbell_base;
 	u32 doorbell_offset;
 	u32 doorbell_size;
+
+	struct completion kill_done;
 };
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
@@ -133,5 +136,6 @@ static inline void dpa_fwq_write(struct dpa_device *dpa, u64 val, u64 offset)
 }
 
 int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx);
+int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause);
 
 #endif /* _DPA_DRM_H_ */
