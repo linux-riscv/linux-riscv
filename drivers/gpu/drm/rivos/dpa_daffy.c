@@ -171,7 +171,6 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 		case DAFFY_CMD_INVALID:
 			dev_warn(dpa->dev, "%s: Processing invalid Daffy packet\n",
 				__func__);
-			pkt->hdr.response = DAFFY_RESP_ERROR;
 			break;
 		case DAFFY_CMD_UPDATE_SIGNAL: {
 			u64 signal_idx = pkt->u.update_signal.signal_idx;
@@ -179,17 +178,12 @@ static void daffy_process_device_queue(struct dpa_device *dpa)
 
 			dev_dbg(dpa->dev, "%s: Processing update_signal Daffy packet\n",
 				__func__);
-			if (dpa_signal_wake(dpa, pasid, signal_idx) < 0)
-				pkt->hdr.response = DAFFY_RESP_ERROR;
-			else
-				pkt->hdr.response = DAFFY_RESP_SUCCESS;
-
+			dpa_signal_wake(dpa, pasid, signal_idx);
 			break;
 		}
 		default:
 			dev_warn(dpa->dev, "%s: Received unexpected Daffy command %x\n",
 				__func__, pkt->hdr.command);
-			pkt->hdr.response = DAFFY_RESP_ERROR;
 			break;
 		}
 
