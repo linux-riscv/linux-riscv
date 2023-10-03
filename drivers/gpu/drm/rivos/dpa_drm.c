@@ -61,17 +61,27 @@ static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
 	return dpa_app;
 }
 
-static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
-			     u32 doorbell_offset)
+static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
+				      struct drm_file *file)
 {
-	struct dpa_aql_queue *q = kzalloc(sizeof(*q), GFP_KERNEL);
+	struct dpa_process *p = file->driver_priv;
+	struct drm_dpa_create_queue *args = data;
+	struct dpa_aql_queue *q;
+	int ret;
 
+	q = kzalloc(sizeof(*q), GFP_KERNEL);
 	if (!q)
 		return -ENOMEM;
 
+	ret = daffy_create_queue_cmd(p->dev, p, args);
+	if (ret) {
+		kfree(q);
+		return ret;
+	}
+
 	INIT_LIST_HEAD(&q->list);
-	q->id = queue_id;
-	q->mmap_offset = doorbell_offset;
+	q->id = args->queue_id;
+	q->mmap_offset = args->doorbell_offset;
 
 	mutex_lock(&p->lock);
 	list_add_tail(&q->list, &p->queue_list);
@@ -80,15 +90,18 @@ static int dpa_add_aql_queue(struct dpa_process *p, u32 queue_id,
 	return 0;
 }
 
-static int dpa_del_aql_queue(struct dpa_process *p, u32 queue_id)
+static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
+				       struct drm_file *file)
 {
-	struct dpa_aql_queue *q, *tmp;
+	struct dpa_process *p = file->driver_priv;
+	struct drm_dpa_destroy_queue *args = data;
+	struct dpa_aql_queue *q;
+	int ret;
 
 	mutex_lock(&p->lock);
-	list_for_each_entry_safe(q, tmp, &p->queue_list, list) {
-		if (q->id == queue_id) {
-			dev_warn(p->dev->dev, "%s: deleteing aql queue %u\n",
-				 __func__, queue_id);
+	list_for_each_entry(q,  &p->queue_list, list) {
+		if (q->id == args->queue_id) {
+			list_del_init(&q->list);
 			break;
 		}
 	}
@@ -96,74 +109,18 @@ static int dpa_del_aql_queue(struct dpa_process *p, u32 queue_id)
 	if (!q)
 		return -ENOENT;
 
-	list_del(&q->list);
+	ret = daffy_destroy_queue_cmd(p->dev, q->id);
+	if (ret < 0) {
+		dev_dbg(p->dev->dev, "failed to destroy queue %u\n", q->id);
+		mutex_lock(&p->lock);
+		list_add_tail(&q->list, &p->queue_list);
+		mutex_unlock(&p->lock);
+
+		return ret;
+	}
 	kfree(q);
 
 	return 0;
-}
-
-static void dpa_del_all_queues(struct dpa_process *p)
-{
-	struct list_head queues;
-
-	INIT_LIST_HEAD(&queues);
-	mutex_lock(&p->lock);
-	list_splice_init(&p->queue_list, &queues);
-	mutex_unlock(&p->lock);
-
-	while (!list_empty(&queues)) {
-		struct dpa_aql_queue *q;
-		int ret;
-
-		q = list_first_entry(&queues, struct dpa_aql_queue, list);
-		list_del(&q->list);
-		ret = daffy_destroy_queue_cmd(p->dev, q->id);
-		if (ret)
-			dev_warn(p->dev->dev, "%s: failed to destroy q %u\n",
-				 __func__, q->id);
-		kfree(q);
-	}
-}
-
-static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
-				      struct drm_file *file)
-{
-	struct dpa_process *p = file->driver_priv;
-	struct drm_dpa_create_queue *args = data;
-	u64 doorbell_mmap_offset;
-	int ret = daffy_create_queue_cmd(p->dev, p, args);
-
-	if (ret)
-		return ret;
-
-	doorbell_mmap_offset = args->doorbell_offset;
-	ret = dpa_add_aql_queue(p, args->queue_id, args->doorbell_offset);
-	if (ret) {
-		dev_warn(p->dev->dev, "%s: unable to add aql queue to process, destroying id %u\n",
-			__func__, args->queue_id);
-		daffy_destroy_queue_cmd(p->dev, args->queue_id);
-	}
-	args->doorbell_offset = doorbell_mmap_offset;
-	return ret;
-}
-
-static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
-				       struct drm_file *file)
-{
-	struct dpa_process *p = file->driver_priv;
-	struct drm_dpa_destroy_queue *args = data;
-	int ret;
-
-	ret = dpa_del_aql_queue(p, args->queue_id);
-
-	if (ret) {
-		dev_warn(p->dev->dev, "%s: queue id %u not found\n", __func__,
-			 args->queue_id);
-		return -EINVAL;
-	}
-	ret = daffy_destroy_queue_cmd(p->dev, args->queue_id);
-
-	return ret;
 }
 
 static int dpa_drm_ioctl_update_queue(struct drm_device *drm, void *data,
@@ -479,7 +436,20 @@ static void dpa_release_process(struct kref *ref)
 	dev_warn(dpa->dev, "%s: freeing process %d\n", __func__,
 		 current->tgid);
 
-	dpa_del_all_queues(p);
+	while (!list_empty(&p->queue_list)) {
+		struct dpa_aql_queue *q;
+
+		q = list_first_entry(&p->queue_list, struct dpa_aql_queue,
+				     list);
+		list_del(&q->list);
+
+		ret = daffy_destroy_queue_cmd(p->dev, q->id);
+		if (ret < 0) {
+			dev_warn(p->dev->dev, "failed to destroy queue %u\n",
+				 q->id);
+		}
+		kfree(q);
+	}
 
 	ret = daffy_unregister_pasid_cmd(p->dev, p->pasid);
 	if (ret) {
