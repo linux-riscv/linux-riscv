@@ -235,15 +235,24 @@ enum daffy_cmd_type {
 	DAFFY_CMD_SET_NOTIFICATION_QUEUE = 11,
 	DAFFY_CMD_UPDATE_SIGNAL = 13,
 	DAFFY_CMD_FLUSH_LLCH = 14,
+	DAFFY_CMD_KILL_PASID = 15,
 };
 
 enum daffy_response {
 	DAFFY_RESP_SUCCESS = 1,
 	DAFFY_RESP_ERROR = 2,
+	DAFFY_RESP_IN_PROGRESS = 3,
 };
 
 enum daffy_create_queue_flags {
 	DAFFY_CREATE_QUEUE_DEBUG = (1 << 0),
+};
+
+enum daffy_kill_pasid_cause {
+	/* Kill was explicilty requested by the host. */
+	DAFFY_KILL_REQUESTED = 1,
+	/* Kill was in response to a device exception. */
+	DAFFY_KILL_EXCEPTION = 2,
 };
 
 struct daffy_pkt_header {
@@ -274,6 +283,14 @@ struct daffy_unregister_pasid_cmd {
 	uint32_t pasid;
 
 	uint32_t reserved[11];
+};
+
+struct daffy_kill_pasid_cmd {
+	uint32_t pasid;
+	/* set in DUC -> host direction */
+	uint32_t cause;
+
+	uint64_t reserved[5];
 };
 
 struct daffy_create_queue_cmd {
@@ -326,6 +343,7 @@ struct daffy_queue_pkt {
 		struct daffy_get_info_cmd get_info;
 		struct daffy_register_pasid_cmd register_pasid;
 		struct daffy_unregister_pasid_cmd unregister_pasid;
+		struct daffy_kill_pasid_cmd kill_pasid;
 		struct daffy_create_queue_cmd create_queue;
 		struct daffy_destroy_queue_cmd destroy_queue;
 		struct daffy_set_signal_pages_cmd set_signal_pages;
