@@ -13,12 +13,18 @@
  * PCS without having to adjust device tree / ACPI / firmware etc.
  */
 
+#include <linux/iommu.h>
 #include <linux/irqdomain.h>
 #include <linux/moduleparam.h>
 #include <linux/of.h>
 #include <linux/pci.h>
 #include <linux/pci-ecam.h>
 #include <linux/platform_device.h>
+
+#define pr_fmt(fmt) "rivos-pcs-stub : " fmt
+
+static struct platform_device *rivos_pcs_stub_pdev;
+static struct device_node *rivos_pcs_stub_iommu_node;
 
 static struct resource rivos_pcs_stub_bus_range = {
 	.start = 0,
@@ -40,7 +46,7 @@ static struct resource rivos_pcs_stub_hmmio = {
 };
 static u16 rivos_pcs_stub_pci_domain;
 
-static struct platform_device *rivos_pcs_stub_pdev;
+static char *rivos_pcs_stub_iommu_path;
 
 static int rivos_pcs_stub_resource_param_set(const char *val,
 					     const struct kernel_param *kp)
@@ -74,6 +80,30 @@ module_param_cb(lmmio, &rivos_pcs_stub_resource_param_ops,
 module_param_cb(hmmio, &rivos_pcs_stub_resource_param_ops,
 		&rivos_pcs_stub_hmmio, 0400);
 module_param_named(pci_domain, rivos_pcs_stub_pci_domain, ushort, 0400);
+module_param_named(iommu_path, rivos_pcs_stub_iommu_path, charp, 0400);
+
+int rivos_pcs_stub_bus_notify(struct notifier_block *nb, unsigned long action,
+			      void *data)
+{
+	struct pci_dev *pdev = to_pci_dev(data);
+	struct pci_host_bridge *bridge = pci_find_host_bridge(pdev->bus);
+	struct fwnode_handle *fwnode = &rivos_pcs_stub_iommu_node->fwnode;
+
+	if (bridge->dev.parent != &rivos_pcs_stub_pdev->dev)
+		return 0;
+
+	if (action == BUS_NOTIFY_ADD_DEVICE) {
+		iommu_fwspec_init(&pdev->dev, fwnode,
+				  iommu_ops_from_fwnode(fwnode));
+	}
+
+	return 0;
+}
+
+static struct notifier_block rivos_pcs_stub_bus_nb = {
+	.notifier_call = rivos_pcs_stub_bus_notify,
+	.priority = 1,  /* make sure this runs before iommu_bus_notifier */
+};
 
 static int __init rivos_pcs_stub_init(void)
 {
@@ -82,9 +112,41 @@ static int __init rivos_pcs_stub_init(void)
 	struct pci_config_window *cfg = NULL;
 	struct irq_domain *irq_domain = NULL;
 	struct device *dev = NULL;
+	int ret = 0;
 
 	if (rivos_pcs_stub_ecam.end == 0)
 		return 0;
+
+	/*
+	 * This locates the first IMSIC MSI PCI IRQ domain we can find. This is
+	 * good enough for now, but if anything more sophisticated is ever
+	 * needed, we could alternatively configure via another parameter that
+	 * identifies the IRQ domain in OF or ACPI.
+	 */
+	for_each_compatible_node(imsic_node, NULL, "riscv,imsics") {
+		irq_domain =
+			irq_find_matching_host(imsic_node, DOMAIN_BUS_PCI_MSI);
+		if (irq_domain)
+			break;
+	}
+
+	if (!irq_domain) {
+		pr_warn("Failed to find IRQ domain!");
+		return -ENODEV;
+	}
+
+	if (rivos_pcs_stub_iommu_path && *rivos_pcs_stub_iommu_path) {
+		rivos_pcs_stub_iommu_node =
+			of_find_node_by_path(rivos_pcs_stub_iommu_path);
+		if (!rivos_pcs_stub_iommu_node) {
+			pr_warn("Failed to obtain IOMMU handle");
+			return -ENODEV;
+		}
+	}
+
+	ret = bus_register_notifier(&pci_bus_type, &rivos_pcs_stub_bus_nb);
+	if (ret != 0)
+		return ret;
 
 	rivos_pcs_stub_pdev =
 		platform_device_register_simple("rivos-pcs-stub", 0, NULL, 0);
@@ -115,30 +177,17 @@ static int __init rivos_pcs_stub_init(void)
 	bridge->sysdata = cfg;
 	bridge->ops = (struct pci_ops *)&pci_generic_ecam_ops.pci_ops;
 	bridge->domain_nr = rivos_pcs_stub_pci_domain;
-
-	/*
-	 * This locates the first IMSIC MSI PCI IRQ domain we can find. This is
-	 * good enough for now, but if anything more sophisticated is ever
-	 * needed, we could alternatively configure via another parameter that
-	 * identifies the IRQ domain in OF or ACPI.
-	 */
-	for_each_compatible_node(imsic_node, NULL, "riscv,imsics") {
-		irq_domain =
-			irq_find_matching_host(imsic_node, DOMAIN_BUS_PCI_MSI);
-		if (irq_domain)
-			break;
-	}
-
-	if (!irq_domain) {
-		dev_warn(dev, "Failed to find IRQ domain!");
-		return -ENODEV;
-	}
 	dev_set_msi_domain(&bridge->dev, irq_domain);
 
 	return pci_host_probe(bridge);
 }
 
-device_initcall(rivos_pcs_stub_init);
+/*
+ * This is late_initcall so it runs after device_initcall, making sure that
+ * initialization of the iommu (which may be on a different PCI root) has
+ * completed.
+ */
+late_initcall(rivos_pcs_stub_init);
 
 MODULE_DESCRIPTION("Rivos PCS stub");
 MODULE_LICENSE("GPL");
