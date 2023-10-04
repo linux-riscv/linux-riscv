@@ -107,6 +107,7 @@ SYM_CODE_START(handle_exception)
 1:
 	tail do_trap_unknown
 SYM_CODE_END(handle_exception)
+ASM_NOKPROBE(handle_exception)
 
 /*
  * The ret_from_exception must be called with interrupt disabled. Here is the
@@ -176,6 +177,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	sret
 #endif
 SYM_CODE_END(ret_from_exception)
+ASM_NOKPROBE(ret_from_exception)
 
 #ifdef CONFIG_VMAP_STACK
 SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
@@ -211,6 +213,7 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	move a0, sp
 	tail handle_bad_stack
 SYM_CODE_END(handle_kernel_stack_overflow)
+ASM_NOKPROBE(handle_kernel_stack_overflow)
 #endif
 
 SYM_CODE_START(ret_from_fork)
