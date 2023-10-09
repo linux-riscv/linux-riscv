@@ -636,6 +636,21 @@ static int populate_efficiency_class(void)
 	return 0;
 }
 
+
+static void cppc_cpufreq_set_capacity_ref_freq(struct cpufreq_policy *policy)
+{
+	struct cppc_perf_caps *perf_caps;
+	struct cppc_cpudata *cpu_data;
+	unsigned int ref_freq;
+
+	cpu_data = policy->driver_data;
+	perf_caps = &cpu_data->perf_caps;
+
+	ref_freq = cppc_cpufreq_perf_to_khz(cpu_data, perf_caps->highest_perf);
+
+	per_cpu(capacity_ref_freq, policy->cpu) = ref_freq;
+}
+
 static void cppc_cpufreq_register_em(struct cpufreq_policy *policy)
 {
 	struct cppc_cpudata *cpu_data;
@@ -643,6 +658,9 @@ static void cppc_cpufreq_register_em(struct cpufreq_policy *policy)
 		EM_ADV_DATA_CB(cppc_get_cpu_power, cppc_get_cpu_cost);
 
 	cpu_data = policy->driver_data;
+
+	cppc_cpufreq_set_capacity_ref_freq(policy);
+
 	em_dev_register_perf_domain(get_cpu_device(policy->cpu),
 			get_perf_level_count(policy), &em_cb,
 			cpu_data->shared_cpu_map, 0);
