@@ -8,6 +8,7 @@
 #include <linux/acpi.h>
 #include <linux/irqdomain.h>
 #include <linux/platform_device.h>
+#include <linux/pnp.h>
 #include <linux/sort.h>
 
 
@@ -165,4 +166,10 @@ static int __init plic_parse_madt(union acpi_subtable_headers *header,
 void __init riscv_acpi_plic_platform_init(void)
 {
 	acpi_table_parse_madt(ACPI_MADT_TYPE_PLIC, plic_parse_madt, 0);
+}
+
+void arch_pnp_reconfigure_irq(struct pnp_dev *dev, unsigned int index, struct resource *res)
+{
+	if (has_acpi_companion(&dev->dev))
+		acpi_irq_get(ACPI_HANDLE(&dev->dev), index, res);
 }
