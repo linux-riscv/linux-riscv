@@ -25,5 +25,6 @@
 void riscv_set_intc_hwnode_fn(struct fwnode_handle *(*fn)(void));
 
 struct fwnode_handle *riscv_get_intc_hwnode(void);
+int acpi_imsic_probe(struct fwnode_handle *parent);
 
 #endif /* _ASM_RISCV_IRQ_H */

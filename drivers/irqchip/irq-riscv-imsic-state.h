@@ -62,6 +62,6 @@ static inline void imsic_ids_remote_sync(void)
 int imsic_ids_alloc(unsigned int order);
 void imsic_ids_free(unsigned int base_id, unsigned int order);
 
-int imsic_setup_state(struct fwnode_handle *fwnode);
+int imsic_setup_state(struct fwnode_handle *fwnode, void *opaque);
 
 #endif
