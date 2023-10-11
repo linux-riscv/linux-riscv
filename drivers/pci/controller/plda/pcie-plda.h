@@ -40,6 +40,7 @@
 #define  P_ATR_EVT_DISCARD_ERR_SHIFT		22
 #define  P_ATR_EVT_DOORBELL_MASK		0x00000000u
 #define  P_ATR_EVT_DOORBELL_SHIFT		23
+#define  ERROR_AND_DOORBELL_MASK		GENMASK(23, 16)
 #define  PM_MSI_INT_INTA_MASK			0x01000000u
 #define  PM_MSI_INT_INTA_SHIFT			24
 #define  PM_MSI_INT_INTB_MASK			0x02000000u
@@ -58,6 +59,7 @@
 #define  PM_MSI_INT_EVENTS_SHIFT		30
 #define  PM_MSI_INT_SYS_ERR_MASK		0x80000000u
 #define  PM_MSI_INT_SYS_ERR_SHIFT		31
+#define  SYS_AND_MSI_MASK			GENMASK(31, 28)
 #define  NUM_LOCAL_EVENTS			15
 #define ISTATUS_LOCAL				0x184
 #define IMASK_HOST				0x188
@@ -101,6 +103,32 @@
 #define EVENT_PM_MSI_INT_EVENTS			11
 #define EVENT_PM_MSI_INT_SYS_ERR		12
 #define NUM_PLDA_EVENTS				13
+
+/*
+ * PLDA local interrupt register
+ *
+ * 31         27     23              15           7          0
+ * +--+--+--+-+------+-+-+-+-+-+-+-+-+-----------+-----------+
+ * |12|11|10|9| intx |7|6|5|4|3|2|1|0| DMA error | DMA end   |
+ * +--+--+--+-+------+-+-+-+-+-+-+-+-+-----------+-----------+
+ * 0:  AXI post error
+ * 1:  AXI fetch error
+ * 2:  AXI discard error
+ * 3:  AXI doorbell
+ * 4:  PCIe post error
+ * 5:  PCIe fetch error
+ * 6:  PCIe discard error
+ * 7:  PCIe doorbell
+ * 8:  4 INTx interruts
+ * 9:  MSI interrupt
+ * 10: AER event
+ * 11: PM/LTR/Hotplug
+ * 12: System error
+ * DMA error : reserved for vendor implement
+ * DMA end : reserved for vendor implement
+ */
+
+#define PM_MSI_TO_MASK_OFFSET			19
 
 struct plda_pcie_rp;
 
