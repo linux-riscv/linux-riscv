@@ -120,6 +120,7 @@ struct plda_pcie_rp {
 	void __iomem *bridge_addr;
 };
 
+irqreturn_t plda_event_handler(int irq, void *dev_id);
 void plda_pcie_setup_window(void __iomem *bridge_base_addr, u32 index,
 			    phys_addr_t axi_addr, phys_addr_t pci_addr,
 			    size_t size);
