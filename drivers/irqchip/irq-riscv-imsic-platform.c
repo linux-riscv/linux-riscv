@@ -4,6 +4,7 @@
  * Copyright (C) 2022 Ventana Micro Systems Inc.
  */
 
+#include <linux/acpi.h>
 #include <linux/bitmap.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
@@ -231,35 +232,35 @@ static struct msi_domain_info imsic_plat_domain_info = {
 	.chip	= &imsic_plat_irq_chip,
 };
 
-static int imsic_irq_domains_init(struct device *dev)
+static int imsic_irq_domains_init(struct fwnode_handle *fwnode)
 {
 	/* Create Base IRQ domain */
-	imsic->base_domain = irq_domain_create_tree(dev->fwnode,
+	imsic->base_domain = irq_domain_create_tree(fwnode,
 					&imsic_base_domain_ops, imsic);
 	if (!imsic->base_domain) {
-		dev_err(dev, "failed to create IMSIC base domain\n");
+		pr_err("%pfwP: failed to create IMSIC base domain\n", fwnode);
 		return -ENOMEM;
 	}
 	irq_domain_update_bus_token(imsic->base_domain, DOMAIN_BUS_NEXUS);
 
 #ifdef CONFIG_RISCV_IMSIC_PCI
 	/* Create PCI MSI domain */
-	imsic->pci_domain = pci_msi_create_irq_domain(dev->fwnode,
+	imsic->pci_domain = pci_msi_create_irq_domain(fwnode,
 						&imsic_pci_domain_info,
 						imsic->base_domain);
 	if (!imsic->pci_domain) {
-		dev_err(dev, "failed to create IMSIC PCI domain\n");
+		pr_err("%pfwP: failed to create IMSIC PCI domain\n", fwnode);
 		irq_domain_remove(imsic->base_domain);
 		return -ENOMEM;
 	}
 #endif
 
 	/* Create Platform MSI domain */
-	imsic->plat_domain = platform_msi_create_irq_domain(dev->fwnode,
+	imsic->plat_domain = platform_msi_create_irq_domain(fwnode,
 						&imsic_plat_domain_info,
 						imsic->base_domain);
 	if (!imsic->plat_domain) {
-		dev_err(dev, "failed to create IMSIC platform domain\n");
+		pr_err("%pfwP: failed to create IMSIC platform domain\n", fwnode);
 		if (imsic->pci_domain)
 			irq_domain_remove(imsic->pci_domain);
 		irq_domain_remove(imsic->base_domain);
@@ -269,39 +270,43 @@ static int imsic_irq_domains_init(struct device *dev)
 	return 0;
 }
 
-static int imsic_platform_probe(struct platform_device *pdev)
+static int imsic_platform_probe_common(struct fwnode_handle *fwnode)
 {
-	struct device *dev = &pdev->dev;
 	struct imsic_global_config *global;
 	int rc;
 
 	if (!imsic) {
-		dev_err(dev, "early driver not probed\n");
+		pr_err("%pfwP: early driver not probed\n", fwnode);
 		return -ENODEV;
 	}
 
 	if (imsic->base_domain) {
-		dev_err(dev, "irq domain already created\n");
+		pr_err("%pfwP: irq domain already created\n", fwnode);
 		return -ENODEV;
 	}
 
 	global = &imsic->global;
 
 	/* Initialize IRQ and MSI domains */
-	rc = imsic_irq_domains_init(dev);
+	rc = imsic_irq_domains_init(fwnode);
 	if (rc) {
-		dev_err(dev, "failed to initialize IRQ and MSI domains\n");
+		pr_err("%pfwP: failed to initialize IRQ and MSI domains\n", fwnode);
 		return rc;
 	}
 
-	dev_info(dev, "  hart-index-bits: %d,  guest-index-bits: %d\n",
+	pr_info("%pfwP: hart-index-bits: %d,  guest-index-bits: %d\n", fwnode,
 		 global->hart_index_bits, global->guest_index_bits);
-	dev_info(dev, " group-index-bits: %d, group-index-shift: %d\n",
+	pr_info("%pfwP: group-index-bits: %d, group-index-shift: %d\n", fwnode,
 		 global->group_index_bits, global->group_index_shift);
-	dev_info(dev, " mapped %d interrupts at base PPN %pa\n",
+	pr_info("%pfwP: mapped %d interrupts at base PPN %pa\n", fwnode,
 		 global->nr_ids, &global->base_addr);
 
 	return 0;
+}
+
+static int imsic_platform_dt_probe(struct platform_device *pdev)
+{
+	return imsic_platform_probe_common(pdev->dev.fwnode);
 }
 
 static const struct of_device_id imsic_platform_match[] = {
@@ -314,6 +319,6 @@ static struct platform_driver imsic_platform_driver = {
 		.name		= "riscv-imsic",
 		.of_match_table	= imsic_platform_match,
 	},
-	.probe = imsic_platform_probe,
+	.probe = imsic_platform_dt_probe,
 };
 builtin_platform_driver(imsic_platform_driver);
