@@ -235,6 +235,8 @@ static inline bool daffy_host_queue_full(struct dpa_daffy *daffy)
 		DPA_FW_QUEUE_SIZE;
 }
 
+#define DAFFY_SUBMIT_TIMEOUT_MS	1000
+
 static int daffy_submit_sync(struct dpa_device *dpa,
 			     struct daffy_queue_pkt *pkt)
 {
@@ -242,6 +244,7 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 	struct dpa_fwq *fwq = daffy->fwq;
 	struct dpa_fwq_waiter waiter;
 	struct daffy_queue_pkt *head;
+	unsigned long timeout = msecs_to_jiffies(DAFFY_SUBMIT_TIMEOUT_MS);
 	unsigned int index;
 	int ret;
 
@@ -250,11 +253,12 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 	waiter.pkt = pkt;
 
 	spin_lock_irq(&daffy->h_lock);
-	ret = wait_event_interruptible_lock_irq(daffy->h_full_wq,
-						!daffy_host_queue_full(daffy),
-						daffy->h_lock);
-	if (ret < 0)
-		goto out;
+	if (!wait_event_lock_irq_timeout(daffy->h_full_wq,
+					 !daffy_host_queue_full(daffy),
+					 daffy->h_lock, timeout)) {
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
 
 	index = fwq->desc.h_write_index & (fwq->desc.h_qsize - 1);
 	head = &fwq->h_ring[index];
@@ -262,7 +266,7 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 		dev_warn(dpa->dev, "%s: head packet not invalid 0x%x\n",
 			 __func__, head->hdr.command);
 		ret = -EIO;
-		goto out;
+		goto out_unlock;
 	}
 	pkt->hdr.id = fwq->desc.h_write_index;
 
@@ -277,12 +281,11 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 
 	dpa_fwq_write(dpa, 1, DPA_FWQ_QUEUE_DOORBELL);
 
-	ret = wait_for_completion_interruptible(&waiter.done);
-	if (ret < 0) {
+	if (!wait_for_completion_timeout(&waiter.done, timeout)) {
 		spin_lock_irq(&daffy->h_lock);
 		list_del(&waiter.node);
 		spin_unlock_irq(&daffy->h_lock);
-		return ret;
+		return -ETIMEDOUT;
 	}
 	dev_dbg(dpa->dev, "pkt id %llu completed, cmd: %#x, resp: %#x\n",
 		pkt->hdr.id, pkt->hdr.command, pkt->hdr.response);
@@ -290,7 +293,7 @@ static int daffy_submit_sync(struct dpa_device *dpa,
 		return -EIO;
 	return 0;
 
-out:
+out_unlock:
 	spin_unlock_irq(&daffy->h_lock);
 	return ret;
 }
