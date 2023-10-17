@@ -224,7 +224,7 @@ static void dce_cancel_wq(struct dce_driver_priv *priv, int wq_num)
 
 	set_queue_enable(priv, wq_num, false);
 	poll_res = readx_poll_timeout(ioread8,
-			(void __iomem *) (priv->mmio_start + DCE_WQCR(wq_num)),
+			(void __iomem *) (priv->mmio_start + DCE_WQCR_STATUS(wq_num)),
 			wqcr, (wqcr & 1) == 0, 1000, 1000000);
 	if (poll_res == -ETIMEDOUT)
 		dev_err(&priv->dev, "Timeout on wq %d abort!\n", wq_num);
