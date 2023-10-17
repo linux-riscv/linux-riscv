@@ -562,6 +562,17 @@ config TPS6594_PFSM
 	  This driver can also be built as a module.  If so, the module
 	  will be called tps6594-pfsm.
 
+config RIVOS_RASD
+	tristate "Rivos RASD card support"
+	default n
+	help
+	  Support for the Rivos Accelerator Super Duper card.
+
+config RIVOS_ROT
+	tristate "Rivos Root of Trust PCI driver"
+	depends on PCI
+	select PCI_DOE
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
