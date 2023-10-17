@@ -19,6 +19,9 @@ void flush_icache_all(void)
 {
 	local_flush_icache_all();
 
+	if (num_online_cpus() == 1)
+		return;
+
 	if (IS_ENABLED(CONFIG_RISCV_SBI) && !riscv_use_ipi_for_rfence())
 		sbi_remote_fence_i(NULL);
 	else
