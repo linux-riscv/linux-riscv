@@ -178,6 +178,7 @@ static void aplic_msi_write_msg(struct msi_desc *desc, struct msi_msg *msg)
 int aplic_msi_setup(struct device *dev, void __iomem *regs)
 {
 	const struct imsic_global_config *imsic_global;
+	struct irq_domain *msi_domain;
 	struct irq_domain *irqdomain;
 	struct aplic_priv *priv;
 	struct aplic_msicfg *mc;
@@ -263,6 +264,12 @@ int aplic_msi_setup(struct device *dev, void __iomem *regs)
 		 */
 		if (is_of_node(dev->fwnode))
 			of_msi_configure(dev, to_of_node(dev->fwnode));
+		else {
+			msi_domain = irq_find_matching_fwnode(imsic_acpi_get_fwnode(dev),
+							      DOMAIN_BUS_PLATFORM_MSI);
+			if (msi_domain)
+				dev_set_msi_domain(dev, msi_domain);
+		}
 	}
 
 	/* Create irq domain instance for the APLIC MSI-mode */
@@ -276,6 +283,7 @@ int aplic_msi_setup(struct device *dev, void __iomem *regs)
 		return -ENOMEM;
 	}
 
+	dev_set_drvdata(dev, priv);
 	/* Advertise the interrupt controller */
 	pa = priv->msicfg.base_ppn << APLIC_xMSICFGADDR_PPN_SHIFT;
 	dev_info(dev, "%d interrupts forwared to MSI base %pa\n",
