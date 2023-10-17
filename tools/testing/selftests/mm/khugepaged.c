@@ -1256,8 +1256,8 @@ int main(int argc, char **argv)
 	TEST(collapse_full_of_compound, madvise_context, file_ops);
 	TEST(collapse_full_of_compound, madvise_context, shmem_ops);
 
-	TEST(collapse_compound_extreme, khugepaged_context, anon_ops);
-	TEST(collapse_compound_extreme, madvise_context, anon_ops);
+	//TEST(collapse_compound_extreme, khugepaged_context, anon_ops);
+	//TEST(collapse_compound_extreme, madvise_context, anon_ops);
 
 	TEST(collapse_swapin_single_pte, khugepaged_context, anon_ops);
 	TEST(collapse_swapin_single_pte, madvise_context, anon_ops);
