@@ -192,6 +192,7 @@ static void hwprobe_isa_ext0(struct riscv_hwprobe *pair,
 		if (has_fpu()) {
 			CHECK_ISA_EXT(ZFH);
 			CHECK_ISA_EXT(ZFHMIN);
+			CHECK_ISA_EXT(ZFA);
 		}
 #undef CHECK_ISA_EXT
 	}
