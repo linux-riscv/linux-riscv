@@ -422,7 +422,7 @@ struct isbdm_handshake_packet {
 /* Offsets within the DVSEC */
 #define ISBDM_DVSEC_VENLENREV_OFFSET 0x4
 #define ISBDM_DVSEC_ID_OFFSET 0x8
-#define ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET 0x94
+#define ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET 0x98
 
 /* DVSEC Vendor ID, length, and revision fields. */
 #define ISBDM_DVSEC_LENGTH 0x1A4
@@ -431,10 +431,6 @@ struct isbdm_handshake_packet {
 
 /* DVSEC Identifier */
 #define ISBDM_DVSEC_ID 0x7
-
-/* PCI Link Control 2 and Link Status 2 offset */
-#define ISBDM_DVSEC_LINK_CONTROL_STATUS2 \
-    (ISBDM_DVSEC_OFFSET + ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET)
 
 /* Define the PCIe control/status 2 register bits, proxied through via DVSEC. */
 /* Crosslink Resolution */
