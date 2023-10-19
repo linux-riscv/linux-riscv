@@ -1603,10 +1603,6 @@ static enum isbdm_link_status isbdm_query_link(struct isbdm *ii)
 		return ISBDM_LINK_DOWN;
 	}
 
-/* Hybrid sim doesn't report connection status. */
-#ifdef CONFIG_RIVOS_ISBDM_HYBRID_SIM
-	return ISBDM_LINK_DOWNSTREAM;
-#else
 	crosslink = ctrlsts2 & PCIE_CTRL_STS2_CROSSLINK_MASK;
 	if (crosslink == PCIE_CTRL_STS2_CROSSLINK_DOWNSTREAM) {
 		return ISBDM_LINK_DOWNSTREAM;
@@ -1621,7 +1617,6 @@ static enum isbdm_link_status isbdm_query_link(struct isbdm *ii)
 	}
 
 	return ISBDM_LINK_DOWN;
-#endif
 }
 
 /* Query the status of the physical link and do setup/teardown. */
