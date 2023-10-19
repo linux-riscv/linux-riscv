@@ -13,6 +13,9 @@
 #include <linux/panic_notifier.h>
 #include <linux/platform_device.h>
 
+#include <asm/csr.h>
+#include <asm/smp.h>
+
 #define MAGICBOX_EXIT_OFFSET	0x0
 #define MAGICBOX_DUMP_OFFSET	0x4
 
@@ -25,8 +28,21 @@ struct rivos_magicbox {
 	struct notifier_block restart_nb;
 };
 
+static void dump_perf_counter(void *info)
+{
+	unsigned long time = csr_read(CSR_TIME);
+	unsigned long instret = csr_read(CSR_INSTRET);
+	int cpu = smp_processor_id();
+
+	pr_err("[CPU %d, HART %ld] time: %ld, instret: %ld\n",
+	       cpu, cpuid_to_hartid_map(cpu), time, instret);
+}
+
 static void magicbox_exit(struct rivos_magicbox *mb, u32 exit)
 {
+	if (exit == 1)
+		on_each_cpu(dump_perf_counter, NULL, 1);
+
 	writel(exit, mb->regs + MAGICBOX_EXIT_OFFSET);
 }
 
