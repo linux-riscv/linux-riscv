@@ -1115,7 +1115,7 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
  */
 int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
 {
-	int idx, prev_alloced_rmbi;
+	int idx;
 
 	/* This member being zero is representative of a free slot. */
 	WARN_ON_ONCE(rmb->sw_avail == 0);
@@ -1127,10 +1127,10 @@ int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
 
 	/* Hunt for a free entry in the hardware. */
 	mutex_lock(&ii->rmb_table_lock);
-	prev_alloced_rmbi = ii->prev_alloced_rmbi;
-	idx = prev_alloced_rmbi + 1;
+	idx = ii->prev_alloced_rmbi;
 	do {
-		if (idx == ISBDMEX_RMB_TABLE_SIZE)
+		idx++;
+		if (idx >= ISBDMEX_RMB_TABLE_SIZE)
 			idx = 0;
 
 		if (ii->rmb_table[idx].sw_avail == 0) {
@@ -1139,8 +1139,7 @@ int isbdm_alloc_rmb(struct isbdm *ii, struct isbdm_remote_buffer *rmb)
 			trace_isbdm_rmb_alloc(ii, idx, rmb);
 			goto out;
 		}
-		idx++;
-	} while (idx != prev_alloced_rmbi);
+	} while (idx != ii->prev_alloced_rmbi);
 
 	idx = -ENOSPC;
 
