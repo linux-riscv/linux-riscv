@@ -19,6 +19,15 @@
 
 #include "pcie-plda.h"
 
+void __iomem *plda_pcie_map_bus(struct pci_bus *bus, unsigned int devfn,
+				int where)
+{
+	struct plda_pcie_rp *pcie = bus->sysdata;
+
+	return pcie->config_base + PCIE_ECAM_OFFSET(bus->number, devfn, where);
+}
+EXPORT_SYMBOL_GPL(plda_pcie_map_bus);
+
 static void plda_handle_msi(struct irq_desc *desc)
 {
 	struct plda_pcie_rp *port = irq_desc_get_handler_data(desc);
@@ -586,6 +595,11 @@ int plda_pcie_host_init(struct plda_pcie_rp *port, struct pci_ops *ops)
 	if (IS_ERR(port->config_base))
 		return dev_err_probe(dev, PTR_ERR(port->config_base),
 				     "failed to map config memory\n");
+
+	port->phy = devm_phy_optional_get(dev, NULL);
+	if (IS_ERR(port->phy))
+		return dev_err_probe(dev, PTR_ERR(port->phy),
+				     "failed to get pcie phy\n");
 
 	bridge = devm_pci_alloc_host_bridge(dev, 0);
 	if (!bridge)
