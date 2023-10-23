@@ -34,7 +34,9 @@ static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 		generic_handle_domain_nmi(intc_domain, cause);
 		nmi_exit();
 	} else {
+		enable_nmis();
 		generic_handle_domain_irq(intc_domain, cause);
+		disable_nmis();
 	}
 }
 

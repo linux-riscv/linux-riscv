@@ -348,20 +348,11 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 }
 #endif
 
-static void noinstr handle_riscv_irq(struct pt_regs *regs)
+static void noinstr do_interrupt(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs;
 
-	irq_enter_rcu();
 	old_regs = set_irq_regs(regs);
-	handle_arch_irq(regs);
-	set_irq_regs(old_regs);
-	irq_exit_rcu();
-}
-
-asmlinkage void noinstr do_irq(struct pt_regs *regs)
-{
-	irqentry_state_t state = irqentry_enter(regs);
 #ifdef CONFIG_IRQ_STACKS
 	if (on_thread_stack()) {
 		ulong *sp = per_cpu(irq_stack_ptr, smp_processor_id())
@@ -374,7 +365,9 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 		"addi	s0, sp, 2*"RISCV_SZPTR "\n"
 		"move	sp, %[sp]		\n"
 		"move	a0, %[regs]		\n"
-		"call	handle_riscv_irq	\n"
+		"la	t0, handle_arch_irq	\n"
+		REG_L"	t1, (t0)		\n"
+		"jalr	t1			\n"
 		"addi	sp, s0, -2*"RISCV_SZPTR"\n"
 		REG_L"  s0, (sp)		\n"
 		"addi	sp, sp, "RISCV_SZPTR   "\n"
@@ -390,9 +383,36 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 		  "memory");
 	} else
 #endif
-		handle_riscv_irq(regs);
+		handle_arch_irq(regs);
+	set_irq_regs(old_regs);
+}
+
+static __always_inline void __do_nmi(struct pt_regs *regs)
+{
+	irqentry_state_t state = irqentry_nmi_enter(regs);
+
+	do_interrupt(regs);
+
+	irqentry_nmi_exit(regs, state);
+}
+
+static __always_inline void __do_irq(struct pt_regs *regs)
+{
+	irqentry_state_t state = irqentry_enter(regs);
+
+	irq_enter_rcu();
+	do_interrupt(regs);
+	irq_exit_rcu();
 
 	irqentry_exit(regs, state);
+}
+
+asmlinkage void noinstr do_irq(struct pt_regs *regs)
+{
+	if (IS_ENABLED(CONFIG_RISCV_PSEUDO_NMI) && regs_irqs_disabled(regs))
+		__do_nmi(regs);
+	else
+		__do_irq(regs);
 }
 
 #ifdef CONFIG_GENERIC_BUG
