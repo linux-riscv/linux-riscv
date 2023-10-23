@@ -29,6 +29,16 @@ static inline void set_nmi(int irq) {}
 
 static inline void unset_nmi(int irq) {}
 
+static inline void enable_nmis(void)
+{
+	csr_set(CSR_IE, ALLOWED_NMI_MASK);
+}
+
+static inline void disable_nmis(void)
+{
+	csr_clear(CSR_IE, ALLOWED_NMI_MASK);
+}
+
 static inline void local_irq_switch_on(void)
 {
 	csr_set(CSR_STATUS, SR_IE);
@@ -127,6 +137,9 @@ static inline void arch_local_irq_restore(unsigned long flags)
 {
 	csr_set(CSR_STATUS, flags & SR_IE);
 }
+
+static inline void enable_nmis(void) {}
+static inline void disable_nmis(void) {}
 
 #endif /* !CONFIG_RISCV_PSEUDO_NMI */
 

@@ -84,4 +84,11 @@ do {							\
 	((last) = __switch_to(__prev, __next));		\
 } while (0)
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+
+#define prepare_arch_switch(next)			disable_nmis()
+#define finish_arch_post_lock_switch()			enable_nmis()
+
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
+
 #endif /* _ASM_RISCV_SWITCH_TO_H */
