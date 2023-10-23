@@ -65,6 +65,10 @@ _save_context:
 	REG_S s3, PT_BADADDR(sp)
 	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	csrr s0, CSR_IE
+	REG_S s0, PT_IE(sp)
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
 
 	/*
 	 * Set the scratch register to 0, so that if a recursive exception
@@ -152,6 +156,11 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 
 	csrw CSR_STATUS, a0
 	csrw CSR_EPC, a2
+
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	REG_L s0, PT_IE(sp)
+	csrw CSR_IE, s0
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
 
 	REG_L x1,  PT_RA(sp)
 	REG_L x3,  PT_GP(sp)
@@ -251,6 +260,10 @@ restore_caller_reg:
 	REG_S s3, PT_BADADDR(sp)
 	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	csrr s0, CSR_IE
+	REG_S s0, PT_IE(sp)
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
 	move a0, sp
 	tail handle_bad_stack
 SYM_CODE_END(handle_kernel_stack_overflow)

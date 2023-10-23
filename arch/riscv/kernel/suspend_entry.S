@@ -47,6 +47,7 @@ ENTRY(__cpu_suspend_enter)
 	REG_S	t0, (SUSPEND_CONTEXT_REGS + PT_EPC)(a0)
 	csrr	t0, CSR_STATUS
 	REG_S	t0, (SUSPEND_CONTEXT_REGS + PT_STATUS)(a0)
+	/* There is no need to save CSR_IE as it is maintained in memory */
 	csrr	t0, CSR_TVAL
 	REG_S	t0, (SUSPEND_CONTEXT_REGS + PT_BADADDR)(a0)
 	csrr	t0, CSR_CAUSE

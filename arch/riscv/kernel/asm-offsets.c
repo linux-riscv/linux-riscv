@@ -112,6 +112,9 @@ void asm_offsets(void)
 	OFFSET(PT_GP, pt_regs, gp);
 	OFFSET(PT_ORIG_A0, pt_regs, orig_a0);
 	OFFSET(PT_STATUS, pt_regs, status);
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	OFFSET(PT_IE, pt_regs, ie);
+#endif
 	OFFSET(PT_BADADDR, pt_regs, badaddr);
 	OFFSET(PT_CAUSE, pt_regs, cause);
 

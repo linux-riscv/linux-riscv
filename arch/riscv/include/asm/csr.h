@@ -7,6 +7,7 @@
 #define _ASM_RISCV_CSR_H
 
 #include <asm/asm.h>
+#include <asm/hwcap.h>
 #include <linux/bits.h>
 
 /* Status register flags */
@@ -450,6 +451,22 @@
 #define IE_SIE		(_AC(0x1, UL) << RV_IRQ_SOFT)
 #define IE_TIE		(_AC(0x1, UL) << RV_IRQ_TIMER)
 #define IE_EIE		(_AC(0x1, UL) << RV_IRQ_EXT)
+
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+#define IRQS_ENABLED_IE			(IE_SIE | IE_TIE | IE_EIE)
+#define irqs_enabled_ie						\
+({								\
+	unsigned long __v;					\
+	asm (ALTERNATIVE(					\
+		"li %0, " __stringify(IRQS_ENABLED_IE) "\n\t"	\
+		"nop",						\
+		"li %0, " __stringify(IRQS_ENABLED_IE | SIP_LCOFIP),\
+		0, RISCV_ISA_EXT_SSCOFPMF,			\
+		CONFIG_RISCV_PSEUDO_NMI)			\
+		: "=r"(__v) : :	);				\
+	__v;							\
+})
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
 
 #ifndef __ASSEMBLY__
 
