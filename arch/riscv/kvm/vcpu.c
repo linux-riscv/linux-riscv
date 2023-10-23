@@ -621,6 +621,14 @@ static void noinstr kvm_riscv_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	guest_state_exit_irqoff();
 }
 
+#ifndef local_irq_enable_vcpu_run
+#define local_irq_enable_vcpu_run		local_irq_enable
+#endif
+
+#ifndef local_irq_disable_vcpu_run
+#define local_irq_disable_vcpu_run		local_irq_disable
+#endif
+
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 {
 	int ret;
@@ -685,7 +693,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 			continue;
 		}
 
-		local_irq_disable();
+		local_irq_disable_vcpu_run();
 
 		/*
 		 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -712,7 +720,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 		    kvm_request_pending(vcpu) ||
 		    xfer_to_guest_mode_work_pending()) {
 			vcpu->mode = OUTSIDE_GUEST_MODE;
-			local_irq_enable();
+			local_irq_enable_vcpu_run();
 			preempt_enable();
 			kvm_vcpu_srcu_read_lock(vcpu);
 			continue;
@@ -757,12 +765,12 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 		 * recognised, so we just hope that the CPU takes any pending
 		 * interrupts between the enable and disable.
 		 */
-		local_irq_enable();
-		local_irq_disable();
+		local_irq_enable_vcpu_run();
+		local_irq_disable_vcpu_run();
 
 		guest_timing_exit_irqoff();
 
-		local_irq_enable();
+		local_irq_enable_vcpu_run();
 
 		preempt_enable();
 
