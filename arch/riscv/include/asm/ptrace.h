@@ -178,7 +178,11 @@ static inline unsigned long regs_get_kernel_argument(struct pt_regs *regs,
 
 static inline int regs_irqs_disabled(struct pt_regs *regs)
 {
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	return (regs->ie != irqs_enabled_ie);
+#else
 	return !(regs->status & SR_PIE);
+#endif
 }
 
 #endif /* __ASSEMBLY__ */

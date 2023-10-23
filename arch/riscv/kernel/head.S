@@ -169,6 +169,10 @@ secondary_start_sbi:
 	call relocate_enable_mmu
 #endif
 	call setup_trap_vector
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	li t0, SR_IE
+	csrs CSR_STATUS, t0
+#endif
 	tail smp_callin
 #endif /* CONFIG_SMP */
 
@@ -320,6 +324,12 @@ clear_bss_done:
 #ifdef CONFIG_KASAN
 	call kasan_early_init
 #endif
+
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	li t0, SR_IE
+	csrs CSR_STATUS, t0
+#endif
+
 	/* Start the kernel */
 	call soc_early_init
 	tail start_kernel

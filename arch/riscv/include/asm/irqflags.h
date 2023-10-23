@@ -10,6 +10,62 @@
 #include <asm/processor.h>
 #include <asm/csr.h>
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+
+static inline void local_irq_switch_on(void)
+{
+	csr_set(CSR_STATUS, SR_IE);
+}
+
+static inline void local_irq_switch_off(void)
+{
+	csr_clear(CSR_STATUS, SR_IE);
+}
+
+/* read interrupt enabled status */
+static inline unsigned long arch_local_save_flags(void)
+{
+	return csr_read(CSR_IE);
+}
+
+/* unconditionally enable interrupts */
+static inline void arch_local_irq_enable(void)
+{
+	csr_set(CSR_IE, irqs_enabled_ie);
+}
+
+/* unconditionally disable interrupts */
+static inline void arch_local_irq_disable(void)
+{
+	csr_clear(CSR_IE, irqs_enabled_ie);
+}
+
+/* get status and disable interrupts */
+static inline unsigned long arch_local_irq_save(void)
+{
+	return csr_read_clear(CSR_IE, irqs_enabled_ie);
+}
+
+/* test flags */
+static inline int arch_irqs_disabled_flags(unsigned long flags)
+{
+	return (flags != irqs_enabled_ie);
+}
+
+/* test hardware interrupt enable bit */
+static inline int arch_irqs_disabled(void)
+{
+	return arch_irqs_disabled_flags(arch_local_save_flags());
+}
+
+/* set interrupt enabled status */
+static inline void arch_local_irq_restore(unsigned long flags)
+{
+	csr_write(CSR_IE, flags);
+}
+
+#else /* CONFIG_RISCV_PSEUDO_NMI */
+
 /* read interrupt enabled status */
 static inline unsigned long arch_local_save_flags(void)
 {
@@ -51,5 +107,7 @@ static inline void arch_local_irq_restore(unsigned long flags)
 {
 	csr_set(CSR_STATUS, flags & SR_IE);
 }
+
+#endif /* !CONFIG_RISCV_PSEUDO_NMI */
 
 #endif /* _ASM_RISCV_IRQFLAGS_H */

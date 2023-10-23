@@ -66,8 +66,13 @@ _save_context:
 	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
 #ifdef CONFIG_RISCV_PSEUDO_NMI
-	csrr s0, CSR_IE
+	csrrw s0, CSR_IE, x0
 	REG_S s0, PT_IE(sp)
+	andi s1, s1, SR_PIE
+	beqz s1, 1f
+	li s1, SR_IE
+	csrs CSR_STATUS, s1
+1:
 #endif /* CONFIG_RISCV_PSEUDO_NMI */
 
 	/*
