@@ -133,7 +133,9 @@ asmlinkage __visible __trap_section void name(struct pt_regs *regs)		\
 {										\
 	if (user_mode(regs)) {							\
 		irqentry_enter_from_user_mode(regs);				\
+		enable_nmis();							\
 		do_trap_error(regs, signo, code, regs->epc, "Oops - " str);	\
+		disable_nmis();							\
 		irqentry_exit_to_user_mode(regs);				\
 	} else {								\
 		irqentry_state_t state = irqentry_nmi_enter(regs);		\
@@ -284,7 +286,11 @@ asmlinkage __visible __trap_section void do_trap_break(struct pt_regs *regs)
 	if (user_mode(regs)) {
 		irqentry_enter_from_user_mode(regs);
 
+		enable_nmis();
+
 		handle_break(regs);
+
+		disable_nmis();
 
 		irqentry_exit_to_user_mode(regs);
 	} else {
@@ -330,9 +336,13 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 {
 	irqentry_state_t state = irqentry_enter(regs);
 
+	enable_nmis();
+
 	handle_page_fault(regs);
 
 	local_irq_disable();
+
+	disable_nmis();
 
 	irqentry_exit(regs, state);
 }
