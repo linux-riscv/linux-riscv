@@ -20,6 +20,26 @@
 
 static struct irq_domain *intc_domain;
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+
+static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
+{
+	unsigned long cause = regs->cause & ~CAUSE_IRQ_FLAG;
+
+	if (unlikely(cause >= BITS_PER_LONG))
+		panic("unexpected interrupt cause");
+
+	if (is_nmi(cause)) {
+		nmi_enter();
+		generic_handle_domain_nmi(intc_domain, cause);
+		nmi_exit();
+	} else {
+		generic_handle_domain_irq(intc_domain, cause);
+	}
+}
+
+#else /* CONFIG_RISCV_PSEUDO_NMI */
+
 static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 {
 	unsigned long cause = regs->cause & ~CAUSE_IRQ_FLAG;
@@ -29,6 +49,8 @@ static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 
 	generic_handle_domain_irq(intc_domain, cause);
 }
+
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
 
 /*
  * On RISC-V systems local interrupts are masked or unmasked by writing
