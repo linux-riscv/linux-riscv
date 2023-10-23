@@ -756,6 +756,7 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
 
 static int pmu_sbi_starting_cpu(unsigned int cpu, struct hlist_node *node)
 {
+	int ret = 0;
 	struct riscv_pmu *pmu = hlist_entry_safe(node, struct riscv_pmu, node);
 	struct cpu_hw_events *cpu_hw_evt = this_cpu_ptr(pmu->hw_events);
 
@@ -774,20 +775,30 @@ static int pmu_sbi_starting_cpu(unsigned int cpu, struct hlist_node *node)
 	if (riscv_pmu_use_irq) {
 		cpu_hw_evt->irq = riscv_pmu_irq;
 		csr_clear(CSR_IP, BIT(riscv_pmu_irq_num));
-#ifndef CONFIG_RISCV_PSEUDO_NMI
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+		ret = prepare_percpu_nmi(riscv_pmu_irq);
+		if (ret != 0) {
+			pr_err("Failed to prepare percpu nmi:%d\n", ret);
+			return ret;
+		}
+		enable_percpu_nmi(riscv_pmu_irq, IRQ_TYPE_NONE);
+#else
 		csr_set(CSR_IE, BIT(riscv_pmu_irq_num));
-#endif
 		enable_percpu_irq(riscv_pmu_irq, IRQ_TYPE_NONE);
+#endif
 	}
 
-	return 0;
+	return ret;
 }
 
 static int pmu_sbi_dying_cpu(unsigned int cpu, struct hlist_node *node)
 {
 	if (riscv_pmu_use_irq) {
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+		disable_percpu_nmi(riscv_pmu_irq);
+		teardown_percpu_nmi(riscv_pmu_irq);
+#else
 		disable_percpu_irq(riscv_pmu_irq);
-#ifndef CONFIG_RISCV_PSEUDO_NMI
 		csr_clear(CSR_IE, BIT(riscv_pmu_irq_num));
 #endif
 	}
@@ -831,7 +842,11 @@ static int pmu_sbi_setup_irqs(struct riscv_pmu *pmu, struct platform_device *pde
 		return -ENODEV;
 	}
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	ret = request_percpu_nmi(riscv_pmu_irq, pmu_sbi_ovf_handler, "riscv-pmu", hw_events);
+#else
 	ret = request_percpu_irq(riscv_pmu_irq, pmu_sbi_ovf_handler, "riscv-pmu", hw_events);
+#endif
 	if (ret) {
 		pr_err("registering percpu irq failed [%d]\n", ret);
 		return ret;
