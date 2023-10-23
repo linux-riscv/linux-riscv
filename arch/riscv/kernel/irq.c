@@ -15,6 +15,23 @@
 #include <asm/softirq_stack.h>
 #include <asm/stacktrace.h>
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+
+void wait_for_interrupt(void)
+{
+	if (irqs_disabled()) {
+		local_irq_switch_off();
+		local_irq_enable();
+		__asm__ __volatile__ ("wfi");
+		local_irq_disable();
+		local_irq_switch_on();
+	} else {
+		__asm__ __volatile__ ("wfi");
+	}
+}
+
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
+
 static struct fwnode_handle *(*__get_intc_node)(void);
 
 void riscv_set_intc_hwnode_fn(struct fwnode_handle *(*fn)(void))

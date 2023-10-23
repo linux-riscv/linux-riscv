@@ -111,10 +111,14 @@ extern void start_thread(struct pt_regs *regs,
 extern unsigned long __get_wchan(struct task_struct *p);
 
 
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 static inline void wait_for_interrupt(void)
 {
 	__asm__ __volatile__ ("wfi");
 }
+#else
+void wait_for_interrupt(void);
+#endif
 
 struct device_node;
 int riscv_of_processor_hartid(struct device_node *node, unsigned long *hartid);
