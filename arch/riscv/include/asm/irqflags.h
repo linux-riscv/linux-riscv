@@ -12,7 +12,7 @@
 
 #ifdef CONFIG_RISCV_PSEUDO_NMI
 
-#define __ALLOWED_NMI_MASK			0
+#define __ALLOWED_NMI_MASK			BIT(IRQ_PMU_OVF)
 #define ALLOWED_NMI_MASK			(__ALLOWED_NMI_MASK & irqs_enabled_ie)
 
 static inline bool nmi_allowed(int irq)
