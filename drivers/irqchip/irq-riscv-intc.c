@@ -39,12 +39,16 @@ static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 
 static void riscv_intc_irq_mask(struct irq_data *d)
 {
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_clear(CSR_IE, BIT(d->hwirq));
+#endif
 }
 
 static void riscv_intc_irq_unmask(struct irq_data *d)
 {
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_set(CSR_IE, BIT(d->hwirq));
+#endif
 }
 
 static void riscv_intc_irq_eoi(struct irq_data *d)

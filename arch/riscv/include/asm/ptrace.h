@@ -47,6 +47,9 @@ struct pt_regs {
 	unsigned long t6;
 	/* Supervisor/Machine CSRs */
 	unsigned long status;
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	unsigned long ie;
+#endif
 	unsigned long badaddr;
 	unsigned long cause;
 	/* a0 value before the syscall */

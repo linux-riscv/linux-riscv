@@ -114,7 +114,9 @@ static int clint_clock_next_event(unsigned long delta,
 	void __iomem *r = clint_timer_cmp +
 			  cpuid_to_hartid_map(smp_processor_id());
 
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_set(CSR_IE, IE_TIE);
+#endif
 	writeq_relaxed(clint_get_cycles64() + delta, r);
 	return 0;
 }
@@ -155,7 +157,9 @@ static irqreturn_t clint_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evdev = this_cpu_ptr(&clint_clock_event);
 
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_clear(CSR_IE, IE_TIE);
+#endif
 	evdev->event_handler(evdev);
 
 	return IRQ_HANDLED;

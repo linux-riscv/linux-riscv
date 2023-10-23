@@ -115,6 +115,9 @@ void start_thread(struct pt_regs *regs, unsigned long pc,
 	unsigned long sp)
 {
 	regs->status = SR_PIE;
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	regs->ie = irqs_enabled_ie;
+#endif
 	if (has_fpu()) {
 		regs->status |= SR_FS_INITIAL;
 		/*
@@ -189,6 +192,9 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		childregs->gp = gp_in_global;
 		/* Supervisor/Machine, irqs on: */
 		childregs->status = SR_PP | SR_PIE;
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+		childregs->ie = irqs_enabled_ie;
+#endif
 
 		p->thread.s[0] = (unsigned long)args->fn;
 		p->thread.s[1] = (unsigned long)args->fn_arg;

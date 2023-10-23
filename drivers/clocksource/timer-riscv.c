@@ -36,7 +36,9 @@ static int riscv_clock_next_event(unsigned long delta,
 {
 	u64 next_tval = get_cycles64() + delta;
 
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_set(CSR_IE, IE_TIE);
+#endif
 	if (static_branch_likely(&riscv_sstc_available)) {
 #if defined(CONFIG_32BIT)
 		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
@@ -119,7 +121,9 @@ static irqreturn_t riscv_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *evdev = this_cpu_ptr(&riscv_clock_event);
 
+#ifndef CONFIG_RISCV_PSEUDO_NMI
 	csr_clear(CSR_IE, IE_TIE);
+#endif
 	evdev->event_handler(evdev);
 
 	return IRQ_HANDLED;
