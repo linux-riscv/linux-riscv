@@ -12,6 +12,23 @@
 
 #ifdef CONFIG_RISCV_PSEUDO_NMI
 
+#define __ALLOWED_NMI_MASK			0
+#define ALLOWED_NMI_MASK			(__ALLOWED_NMI_MASK & irqs_enabled_ie)
+
+static inline bool nmi_allowed(int irq)
+{
+	return (BIT(irq) & ALLOWED_NMI_MASK);
+}
+
+static inline bool is_nmi(int irq)
+{
+	return (BIT(irq) & ALLOWED_NMI_MASK);
+}
+
+static inline void set_nmi(int irq) {}
+
+static inline void unset_nmi(int irq) {}
+
 static inline void local_irq_switch_on(void)
 {
 	csr_set(CSR_STATUS, SR_IE);

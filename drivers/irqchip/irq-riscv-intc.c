@@ -67,11 +67,49 @@ static void riscv_intc_irq_eoi(struct irq_data *d)
 	 */
 }
 
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+
+static int riscv_intc_irq_nmi_setup(struct irq_data *d)
+{
+	unsigned int hwirq = d->hwirq;
+	struct irq_desc *desc = irq_to_desc(d->irq);
+
+	if (WARN_ON((hwirq >= BITS_PER_LONG) || !nmi_allowed(hwirq)))
+		return -EINVAL;
+
+	desc->handle_irq = handle_percpu_devid_fasteoi_nmi;
+	set_nmi(hwirq);
+
+	return 0;
+}
+
+static void riscv_intc_irq_nmi_teardown(struct irq_data *d)
+{
+	unsigned int hwirq = d->hwirq;
+	struct irq_desc *desc = irq_to_desc(d->irq);
+
+	if (WARN_ON(hwirq >= BITS_PER_LONG))
+		return;
+
+	if (WARN_ON(!is_nmi(hwirq)))
+		return;
+
+	desc->handle_irq = handle_percpu_devid_irq;
+	unset_nmi(hwirq);
+}
+
+#endif /* CONFIG_RISCV_PSEUDO_NMI */
+
 static struct irq_chip riscv_intc_chip = {
 	.name = "RISC-V INTC",
 	.irq_mask = riscv_intc_irq_mask,
 	.irq_unmask = riscv_intc_irq_unmask,
 	.irq_eoi = riscv_intc_irq_eoi,
+#ifdef CONFIG_RISCV_PSEUDO_NMI
+	.irq_nmi_setup = riscv_intc_irq_nmi_setup,
+	.irq_nmi_teardown = riscv_intc_irq_nmi_teardown,
+	.flags = IRQCHIP_SUPPORTS_NMI,
+#endif
 };
 
 static int riscv_intc_domain_map(struct irq_domain *d, unsigned int irq,
