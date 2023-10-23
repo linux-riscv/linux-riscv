@@ -64,6 +64,9 @@ static inline void arch_local_irq_restore(unsigned long flags)
 	csr_write(CSR_IE, flags);
 }
 
+#define local_irq_enable_vcpu_run		local_irq_switch_on
+#define local_irq_disable_vcpu_run		local_irq_switch_off
+
 #else /* CONFIG_RISCV_PSEUDO_NMI */
 
 /* read interrupt enabled status */
