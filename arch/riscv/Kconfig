@@ -672,7 +672,7 @@ config RISCV_BOOT_SPINWAIT
 config RISCV_PSEUDO_NMI
 	bool "Support for NMI-like interrupts"
 	depends on !RISCV_M_MODE
-	default n
+	default y
 	help
 	  Adds support for mimicking Non-Maskable Interrupts through the use of
 	  CSR_IE register.
