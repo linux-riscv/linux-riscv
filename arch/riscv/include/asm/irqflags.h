@@ -54,13 +54,13 @@ static inline void arch_local_irq_enable(void)
 /* unconditionally disable interrupts */
 static inline void arch_local_irq_disable(void)
 {
-	csr_clear(CSR_IE, irqs_enabled_ie);
+	csr_clear(CSR_IE, ~ALLOWED_NMI_MASK);
 }
 
 /* get status and disable interrupts */
 static inline unsigned long arch_local_irq_save(void)
 {
-	return csr_read_clear(CSR_IE, irqs_enabled_ie);
+	return csr_read_clear(CSR_IE, ~ALLOWED_NMI_MASK);
 }
 
 /* test flags */
