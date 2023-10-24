@@ -23,9 +23,9 @@ SYM_CODE_START(handle_exception)
 	 * register will contain 0, and we should continue on the current TP.
 	 */
 	csrrw tp, CSR_SCRATCH, tp
-	bnez tp, _save_context
+	bnez tp, .Lsave_context
 
-_restore_kernel_tpsp:
+.Lrestore_kernel_tpsp:
 	csrr tp, CSR_SCRATCH
 	REG_S sp, TASK_TI_KERNEL_SP(tp)
 
@@ -37,7 +37,7 @@ _restore_kernel_tpsp:
 	REG_L sp, TASK_TI_KERNEL_SP(tp)
 #endif
 
-_save_context:
+.Lsave_context:
 	REG_S sp, TASK_TI_USER_SP(tp)
 	REG_L sp, TASK_TI_KERNEL_SP(tp)
 	addi sp, sp, -(PT_SIZE_ON_STACK)
@@ -207,10 +207,10 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	REG_S x30, PT_T5(sp)
 	REG_S x31, PT_T6(sp)
 
-	la ra, restore_caller_reg
+	la ra, .Lrestore_caller_reg
 	tail get_overflow_stack
 
-restore_caller_reg:
+.Lrestore_caller_reg:
 	//save per-cpu overflow stack
 	REG_S a0, -8(sp)
 	//restore caller register from shadow_stack
