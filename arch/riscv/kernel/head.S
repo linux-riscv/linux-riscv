@@ -28,9 +28,13 @@ SYM_CODE_START(_start)
 	 */
 #ifdef CONFIG_EFI
 	/*
-	 * This instruction decodes to "MZ" ASCII required by UEFI.
+	 * The compressed (C extension) "c.li s4,-13" instruction
+	 * decodes to 0x5a4d/"MZ" (ASCII), which is required by UEFI.
+	 *
+	 * In order to support non-compressed EFI kernels, the
+	 * instruction is written in hex.
 	 */
-	c.li s4,-13
+	.word 0x5a4d5a4d
 	j _start_kernel
 #else
 	/* jump to start kernel */
