@@ -657,6 +657,7 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 	struct DescriptorRing *ring = &wq->descriptor_ring;
 	int size = length * sizeof(struct DCEDescriptor);
 	int DSCSZ;
+	u64 head;
 
 	if (wq->type != RESERVED_WQ) {
 		dev_dbg(&dce_priv->dev,
@@ -677,6 +678,22 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 	/* TODO: Check alignment for both*/
 	ring->descriptors = (struct DCEDescriptor *)ua->descriptors;
 	ring->hti = (struct HeadTailIndex *)ua->hti;
+
+	/* Setup head/tail from persistent HW value */
+	head = dce_reg_read(dce_priv, DCE_WQHEAD(wq_num));
+
+	if (copy_to_user((char __user *) ring->hti, &head, sizeof(head))) {
+		dev_warn(&dce_priv->dev,
+			"Error writing head index to userspace");
+		return -EFAULT;
+	}
+
+	if (copy_to_user((char __user *) ring->hti + 64 /*TAIL_OFFSET*/,
+		  &head, sizeof(head))) {
+		dev_warn(&dce_priv->dev,
+			"Error writing tail index to userspace");
+		return -EFAULT;
+	}
 
 	/*Setup WQITE */
 	dce_priv->WQIT[wq_num].DSCBA  = ((u64) ring->descriptors) >> 12;
@@ -765,8 +782,10 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 		err = -ENOMEM;
 		goto hti_alloc_error;
 	}
-	ring->hti->head = 0;
-	ring->hti->tail = 0;
+
+/* Head value is persistent between resets */
+	ring->hti->head = dce_reg_read(dce_priv, DCE_WQHEAD(wq_num));
+	ring->hti->tail = ring->hti->head;
 
 	/* populate WQITE */
 	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma >> 12;

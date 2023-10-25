@@ -46,6 +46,8 @@
 #define DCE_WQCR_PAGE0      0x1
 #define DCE_REG_WQCR        0x0
 #define DCE_WQCR(wq) ((DCE_WQCR_PAGE0 + wq) * DCE_PAGE_SIZE + DCE_REG_WQCR)
+#define DCE_REG_WQHEAD      0x8
+#define DCE_WQHEAD(wq) ((DCE_WQCR_PAGE0 + wq) * DCE_PAGE_SIZE + DCE_REG_WQHEAD)
 #define WQCR_STATUS_OFFSET  0x2
 #define DCE_WQCR_STATUS(wq) (DCE_WQCR(wq) + WQCR_STATUS_OFFSET)
 
