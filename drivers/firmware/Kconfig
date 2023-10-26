@@ -226,6 +226,16 @@ config QCOM_SCM_DOWNLOAD_MODE_DEFAULT
 
 	  Say Y here to enable "download mode" by default.
 
+config RISCV_SSE
+	bool
+	depends on RISCV_SBI
+	default y
+	help
+	  The Supervisor Software Events support allow the SBI to deliver
+	  NMI-like notifications to the supervisor mode software. When enable,
+	  this option provides support to register callbacks on specific SSE
+	  events.
+
 config SYSFB
 	bool
 	select BOOT_VESA_SUPPORT

@@ -14,17 +14,49 @@
 #include <asm/asm-offsets.h>
 #include <asm/errata_list.h>
 
+#ifdef CONFIG_RISCV_SSE
+#define IN_TP			0
+#define IN_SSCRATCH		1
+#define PRV_U_TASK_LOC(loc)	(loc << 0)
+#define PRV_S_TASK_LOC(loc)	(loc << 1)
+#define TASK_LOC(s_loc, u_loc)	(PRV_U_TASK_LOC(u_loc) | PRV_S_TASK_LOC(s_loc))
+#define TASK_LOC_ENTRY_SIZE	(RISCV_SZPTR + 1)
+
+/* __SSE_TASK_LOC - Annotate e'xception code with the location of current task
+ *		    struct when coming from S/U mode
+ *
+ * When entering handle_exception(), the current task struct is located either
+ * in tp or sscratch depending on interrupted mode. Since SSE handlers can be
+ * triggered at any time during the execution of the kernel, we need to be able
+ * to retrieve the current task struct even if in handle_exception. This macro
+ * create an entry into the __task_loc section that holds the location of
+ * the current task struct for the subsequent assembly located after that up to
+ * _ret_from_exception_end or the next __TASK_LOC.
+ */
+#define __SSE_TASK_LOC(s_loc, u_loc)			\
+	.pushsection __task_loc,"a";	\
+	RISCV_PTR 99f;				\
+	.byte TASK_LOC(s_loc, u_loc);		\
+	.popsection;				\
+	99:
+#else
+#define __SSE_TASK_LOC(s_loc, u_loc)
+#endif
+
 SYM_CODE_START(handle_exception)
 	/*
 	 * If coming from userspace, preserve the user thread pointer and load
 	 * the kernel thread pointer.  If we came from the kernel, the scratch
 	 * register will contain 0, and we should continue on the current TP.
 	 */
+__SSE_TASK_LOC(IN_TP, IN_SSCRATCH)
 	csrrw tp, CSR_SCRATCH, tp
+__SSE_TASK_LOC(IN_SSCRATCH, IN_TP)
 	bnez tp, _save_context
 
 _restore_kernel_tpsp:
 	csrr tp, CSR_SCRATCH
+__SSE_TASK_LOC(IN_TP, IN_TP)
 	REG_S sp, TASK_TI_KERNEL_SP(tp)
 
 #ifdef CONFIG_VMAP_STACK
@@ -151,6 +183,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	REG_SC x0, a2, PT_EPC(sp)
 
 	csrw CSR_STATUS, a0
+__SSE_TASK_LOC(IN_TP, IN_SSCRATCH)
 	csrw CSR_EPC, a2
 
 	REG_L x1,  PT_RA(sp)
@@ -166,6 +199,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 #else
 	sret
 #endif
+_ret_from_exception_end:
 SYM_CODE_END(ret_from_exception)
 
 #ifdef CONFIG_VMAP_STACK
@@ -268,6 +302,125 @@ SYM_CODE_START(ret_from_fork)
 	tail syscall_exit_to_user_mode
 SYM_CODE_END(ret_from_fork)
 
+#ifdef CONFIG_RISCV_SSE
+SYM_CODE_START(handle_sse)
+	move s3, a0
+	/*
+	 * Depending on where the sse event interrupted the kernel execution,
+	 * sscratch content might be 0 or not even if kernel was interrupted.
+	 * This might happen if the sse event was triggered while in
+	 * handle_exception() right after entry. In that case, sscratch might
+	 * contain 0 if coming from kernel. In order to handle that easily,
+	 * simply save sscratch content and restore it when returning from sse
+	 * event.
+	 */
+	csrr s4, CSR_SSCRATCH
+	/*
+	 * Save CAUSE and TVAL in case of nested exceptions, EPC/STATUS are
+	 * already saved/restored by handle_exception() for nested exceptions.
+	 */
+	csrr s5, CSR_SCAUSE
+	csrr s6, CSR_STVAL
+	REG_L t0, SSE_INTERRUPTED_EXEC_MODE(a1)
+	andi t1, t0, 0x1
+
+	/* Userspace was interrupted, simply restore TP from scratch */
+	bnez t1, _sse_from_kernel
+	move tp, s4
+	j _call_do_sse
+
+_sse_from_kernel:
+	REG_L t0, SSE_INTERRUPTED_PC(a1)
+#ifdef CONFIG_FRAME_POINTER
+	/*
+	 * Else, kernel was interrupted and we will create a correct stack frame
+	 * from interrupted context.
+	 */
+	addi sp, sp, -(STACKFRAME_SIZE_ON_STACK)
+	REG_L t2, SSE_INTERRUPTED_S0(a1)
+	REG_S t2, STACKFRAME_FP(sp)
+	REG_S t0, STACKFRAME_RA(sp)
+	addi s0, sp, STACKFRAME_SIZE_ON_STACK
+#endif
+	REG_L tp, SSE_INTERRUPTED_TP(a1)
+
+	/*
+	 * If interrupting the kernel during exception handling
+	 * (see handle_exception), then, we might have tp either in SSCRATCH or
+	 * in tp, this part is non regular and requires some more work to
+	 * determine were is located the current task.
+	 */
+	la t1, handle_exception
+	la t2, _ret_from_exception_end
+	bltu t0, t1, _call_do_sse
+	bltu t0, t2, _sse_exception_slow_path
+
+_call_do_sse:
+
+	/* TODO: remove this sanity check once sure everything works ! */
+	li t1, ASM_PAGE_OFFSET
+	bgeu tp, t1, _tp_ok
+	la tp, init_task
+	la a0, sse_panic_string
+	la t0, panic
+	jalr t0
+_tp_ok:
+
+	csrw CSR_SCRATCH, x0
+	la ra, ret_from_sse
+	tail do_sse
+
+.global ret_from_sse
+ret_from_sse:
+	/* Restore saved CSRs */
+	csrw CSR_SSCRATCH, s4
+	csrw CSR_SCAUSE, s5
+	csrw CSR_STVAL, s6
+	li a2, 0
+	move a1, a0
+	move a0, s3
+	li a7, SBI_EXT_SSE
+	li a6, SBI_SSE_EVENT_COMPLETE
+	ecall
+
+/*
+ * t0 contains interrupted pc
+ * t1 contains handle_exception address
+ * When called, t0 must be in [handle_exception, _ret_from_exception_end[
+ */
+_sse_exception_slow_path:
+	la t3, __stop___task_loc
+	add t3, t3, -TASK_LOC_ENTRY_SIZE
+	la t4, __start___task_loc
+	/*
+	 * Reverse iterate the task location section to find where is located
+	 * the task struct
+	 */
+1:
+	REG_L	t2, 0(t3)
+	bgeu t0, t2, 2f
+	add t3, t3, -TASK_LOC_ENTRY_SIZE
+	bgeu t3, t4, 1b
+
+2:
+	lbu t2, RISCV_SZPTR(t3)
+
+	/* Get the value of SR_SPP */
+	csrr t1, CSR_SSTATUS
+	andi t1, t1, SR_SPP
+	snez t1, t1
+
+	srl t2, t2, t1
+	andi t2, t2, 1
+	beqz t2, _call_do_sse
+
+_restore_tp_from_sscratch:
+	csrr tp, CSR_SCRATCH
+	j _call_do_sse
+
+SYM_CODE_END(handle_sse)
+#endif
+
 /*
  * Integer register context switch
  * The callee-saved registers must be saved and restored.
@@ -351,3 +504,6 @@ SYM_CODE_START(__user_rt_sigreturn)
 	ecall
 SYM_CODE_END(__user_rt_sigreturn)
 #endif
+
+sse_panic_string:
+    .ascii "SSE TP is invalid, last state %px"
