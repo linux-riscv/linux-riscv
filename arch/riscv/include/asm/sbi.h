@@ -30,6 +30,7 @@ enum sbi_ext_id {
 	SBI_EXT_HSM = 0x48534D,
 	SBI_EXT_SRST = 0x53525354,
 	SBI_EXT_PMU = 0x504D55,
+	SBI_EXT_SSE = 0x535345,
 
 	/* Experimentals extensions must lie within this range */
 	SBI_EXT_EXPERIMENTAL_START = 0x08000000,
@@ -236,6 +237,40 @@ enum sbi_pmu_ctr_type {
 /* Flags defined for counter stop function */
 #define SBI_PMU_STOP_FLAG_RESET (1 << 0)
 
+enum sbi_ext_sse_fid {
+	SBI_SSE_EVENT_ATTR_GET = 0,
+	SBI_SSE_EVENT_ATTR_SET,
+	SBI_SSE_EVENT_REGISTER,
+	SBI_SSE_EVENT_UNREGISTER,
+	SBI_SSE_EVENT_ENABLE,
+	SBI_SSE_EVENT_DISABLE,
+	SBI_SSE_EVENT_COMPLETE,
+	SBI_SSE_EVENT_SIGNAL,
+};
+
+#define SBI_SSE_EVENT_LOCAL_RAS		0x00000000
+#define SBI_SSE_EVENT_GLOBAL_RAS	0x00008000
+#define SBI_SSE_EVENT_LOCAL_ASYNC_PF	0x00010000
+#define SBI_SSE_EVENT_LOCAL_PMU		0x00010001
+#define SBI_SSE_EVENT_LOCAL_DEBUG	0xffff3fff
+#define SBI_SSE_EVENT_GLOBAL_DEBUG	0xffffbfff
+
+#define SBI_SSE_EVENT_GLOBAL		(1 << 15)
+#define SBI_SSE_EVENT_PLATFORM		(1 << 14)
+
+enum sbi_sse_event_attr {
+	SBI_SSE_EVENT_ATTR_STATE = 0,
+	SBI_SSE_EVENT_ATTR_PRIORITY,
+	SBI_SSE_EVENT_ATTR_INJECTION,
+	SBI_SSE_EVENT_ATTR_HART_ID,
+	SBI_SSE_EVENT_ATTR_RAW_PENDING_STATUS,
+};
+
+enum sbi_sse_event_handler_sts {
+	SBI_SSE_HANDLER_SUCCESS	= 0,
+	SBI_SSE_HANDLER_FAILED,
+};
+
 #define SBI_SPEC_VERSION_DEFAULT	0x1
 #define SBI_SPEC_VERSION_MAJOR_SHIFT	24
 #define SBI_SPEC_VERSION_MAJOR_MASK	0x7f
@@ -251,6 +286,9 @@ enum sbi_pmu_ctr_type {
 #define SBI_ERR_ALREADY_AVAILABLE -6
 #define SBI_ERR_ALREADY_STARTED -7
 #define SBI_ERR_ALREADY_STOPPED -8
+#define SBI_ERR_INVALID_STATE	-10
+#define SBI_ERR_BAD_RANGE	-11
+#define SBI_ERR_BUSY		-12
 
 extern unsigned long sbi_spec_version;
 struct sbiret {
