@@ -91,7 +91,7 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 		broadcast = cpumask_any_but(cmask, cpuid) < nr_cpu_ids;
 
 		if (static_branch_unlikely(&use_asid_allocator))
-			asid = atomic_long_read(&mm->context.id) & asid_mask;
+			asid = cntx2asid(atomic_long_read(&mm->context.id));
 	} else {
 		cmask = cpu_online_mask;
 		broadcast = true;
@@ -123,7 +123,7 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 	unsigned long asid = FLUSH_TLB_NO_ASID;
 
 	if (mm && static_branch_unlikely(&use_asid_allocator))
-		asid = atomic_long_read(&mm->context.id) & asid_mask;
+		asid = cntx2asid(atomic_long_read(&mm->context.id));
 
 	local_flush_tlb_range_asid(start, size, stride, asid);
 }
