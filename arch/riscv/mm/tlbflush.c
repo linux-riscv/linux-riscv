@@ -66,6 +66,7 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
 		local_flush_tlb_range_threshold_asid(start, size, stride, asid);
 }
 
+#ifdef CONFIG_SMP
 static void __ipi_flush_tlb_all(void *info)
 {
 	local_flush_tlb_all();
@@ -138,6 +139,18 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 	if (mm)
 		put_cpu();
 }
+#else
+static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
+			      unsigned long size, unsigned long stride)
+{
+	unsigned long asid = FLUSH_TLB_NO_ASID;
+
+	if (mm && static_branch_unlikely(&use_asid_allocator))
+		asid = atomic_long_read(&mm->context.id) & asid_mask;
+
+	local_flush_tlb_range_asid(start, size, stride, asid);
+}
+#endif
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
