@@ -422,7 +422,7 @@ struct isbdm_handshake_packet {
 /* Offsets within the DVSEC */
 #define ISBDM_DVSEC_VENLENREV_OFFSET 0x4
 #define ISBDM_DVSEC_ID_OFFSET 0x8
-#define ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET 0x98
+#define ISBDM_DVSEC_LINK_CTRLSTS2_OFFSET 0xB8
 
 /* DVSEC Vendor ID, length, and revision fields. */
 #define ISBDM_DVSEC_LENGTH 0x1A4
