@@ -235,6 +235,9 @@ void isbdm_debugfs_init(struct isbdm *ii)
 
 	debugfs_create_file("ring_size", S_IRUSR, dir,
 			    ii, &isbdm_debug_ring_size_ops);
+
+	debugfs_create_u32("rot_update_failures", S_IRUSR, dir,
+			   &ii->rot_update_failures);
 }
 
 void isbdm_debugfs_cleanup(struct isbdm *ii)
