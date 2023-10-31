@@ -1645,7 +1645,7 @@ static void isbdm_check_link(struct isbdm *ii)
 }
 
 /* Let the Root of Trust know the link state has changed. */
-static void isbdm_update_rot_link_state(struct isbdm *ii) {
+static int isbdm_update_rot_link_state(struct isbdm *ii) {
 	struct rivos_doe_isbdm_status_request request;
 	struct rivos_doe_isbdm_status_response response;
 	int32_t error;
@@ -1653,7 +1653,7 @@ static void isbdm_update_rot_link_state(struct isbdm *ii) {
 	u32 state;
 
 	if (!ii->rot)
-		return;
+		return -ENODEV;
 
 	memset(&request, 0, sizeof(request));
 	rivos_rot_init_fidl_msg(&request.hdr, RIVOS_FIDL_ORD_ISBDM_STATUS);
@@ -1678,13 +1678,14 @@ static void isbdm_update_rot_link_state(struct isbdm *ii) {
 			    sizeof(response));
 	if (rc < 0) {
 		dev_warn(&ii->pdev->dev, "Failed to update RoT: %d\n", rc);
+		return rc;
 
 	} else if (rc != sizeof(response)) {
 		dev_warn(&ii->pdev->dev,
 			 "Failed to update RoT: Expected %d byte response, received %d bytes\n",
 			 sizeof(response), rc);
 
-		return;
+		return -EIO;
 	}
 
 	error = le32_to_cpu(response.error);
@@ -1693,16 +1694,24 @@ static void isbdm_update_rot_link_state(struct isbdm *ii) {
 		dev_dbg(&ii->pdev->dev,
 			"Ignoring not_implemented error updating RoT status\n");
 
+		return 0;
+
 	} else if (error != RIVOS_DOE_ROT_ERROR_SUCCESS) {
 		dev_warn(&ii->pdev->dev,
 			 "Failed to update RoT: RoT returned %d\n",
 			 error);
+
+		return -EIO;
 	}
+
+	return 0;
 }
 
 /* Called when the link goes down or after a handshake has completed. */
 void isbdm_complete_link_status_change(struct isbdm *ii) {
-	isbdm_update_rot_link_state(ii);
+	if (isbdm_update_rot_link_state(ii))
+		ii->rot_update_failures++;
+
 	isbdm_port_status_change(ii);
 }
 

@@ -699,6 +699,8 @@ struct isbdm {
 
 	/* A pointer to the Root of Trust device. */
 	struct rivos_rot_device *rot;
+	/* The number of failed attempts to update the RoT. */
+	u32 rot_update_failures;
 	/* A pointer to the RASD control BAR page. */
 	void *rasd_control;
 	/* The number of CPUs online when RASD probed. */
