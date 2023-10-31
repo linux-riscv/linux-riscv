@@ -493,12 +493,18 @@ static struct pci_doe_mb *pci_doe_create_mb(struct pci_dev *pdev,
 	}
 
 	/* Reset the mailbox by issuing an abort */
+/*
+ * TODO: 10/31/23 short term hack until RoT abort interrupts are working.
+ * Revert when https://rivosinc.atlassian.net/browse/SW-5251 is fixed.
+ */
+#if 0
 	rc = pci_doe_abort(doe_mb);
 	if (rc) {
 		pci_err(pdev, "[%x] failed to reset mailbox with abort command : %d\n",
 			doe_mb->cap_offset, rc);
 		goto err_destroy_wq;
 	}
+#endif
 
 	/*
 	 * The state machine and the mailbox should be in sync now;
