@@ -17,6 +17,7 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/acpi.h>
 #include <linux/kernel.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
@@ -34,8 +35,6 @@
 #include <drm/drm_file.h>
 #include <drm/drm_ioctl.h>
 #include <linux/pm_runtime.h>
-#include <linux/of_reserved_mem.h>
-#include <linux/of_address.h>
 
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
@@ -624,8 +623,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
 	struct dpa_device *dpa;
-	struct device_node *np;
-	int err, vec, nid;
+	acpi_handle handle;
+	int err, vec;
 	u16 vendor, device;
 
 	dev_warn(dev, "%s: DPA start\n", __func__);
@@ -663,20 +662,17 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (err)
 		goto disable_sva;
 
-	/*
-	 * HACK: Determine which NUMA node HBM is by looking for it in the DT,
-	 * then set ourselves to be local to that node. Eventually this will
-	 * be done via ACPI.
-	 */
-	np = of_find_compatible_node(NULL, NULL, "rivos,dpa-hbm");
-	if (np) {
-		nid = of_node_to_nid(np);
+	handle = ACPI_HANDLE(dev);
+	if (handle) {
+		int nid = acpi_get_node(handle);
 		if (nid != NUMA_NO_NODE) {
 			dev_info(dev, "HBM on node %d\n", nid);
 			set_dev_node(dev, nid);
+		} else {
+			dev_info(dev, "No HBM node\n");
 		}
 	} else {
-		dev_info(dev, "No HBM node\n");
+		dev_warn(dev, "No ACPI handle\n");
 	}
 
 	err = pci_alloc_irq_vectors(pdev, DPA_NUM_MSI, DPA_NUM_MSI,
