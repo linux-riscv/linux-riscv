@@ -77,11 +77,16 @@ struct dpa_device {
 	struct dpa_daffy daffy;
 };
 
-// keep track of all allocated aql queues
-struct dpa_aql_queue {
-	struct list_head list;
+/* State of a single queue. */
+struct dpa_queue {
+	/* Queue ID assigned by the DUC. */
 	u32 id;
-	u32 mmap_offset;
+
+	/* Pages used by the queue. */
+	unsigned int num_pages;
+	struct page **pages;
+
+	struct list_head list;
 };
 
 struct dpa_process {
@@ -102,8 +107,8 @@ struct dpa_process {
 	/* pasid allocated to this process */
 	u32 pasid;
 
-	// aql queues
 	struct list_head queue_list;
+	struct dpa_queue *notification_queue;
 
 	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int num_signal_pages;

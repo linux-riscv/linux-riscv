@@ -60,33 +60,72 @@ static struct dpa_process *dpa_get_process_by_pasid(struct dpa_device *dpa,
 	return dpa_app;
 }
 
+static int dpa_pin_queue_pages(struct dpa_queue *q, u64 base_address,
+			       u32 ring_size)
+{
+	unsigned int queue_size = ring_size * DUC_QUEUE_PACKET_SIZE +
+		sizeof(struct queue_metadata);
+	unsigned int num_pages = (queue_size + PAGE_SIZE - 1) / PAGE_SIZE;
+	long ret;
+
+	q->pages = kcalloc(num_pages, sizeof(*q->pages), GFP_KERNEL);
+	if (!q->pages)
+		return -ENOMEM;
+
+	ret = pin_user_pages_fast(base_address, num_pages,
+				  FOLL_LONGTERM | FOLL_WRITE, q->pages);
+	if (ret < 0) {
+		kfree(q->pages);
+		return ret;
+	}
+	if (ret > 0 && ret != num_pages) {
+		unpin_user_pages(q->pages, ret);
+		return -EINVAL;
+	}
+	q->num_pages = num_pages;
+
+	return 0;
+}
+
+static void dpa_unpin_queue_pages(struct dpa_queue *q)
+{
+	unpin_user_pages(q->pages, q->num_pages);
+	kfree(q->pages);
+	q->num_pages = 0;
+}
+
 static int dpa_drm_ioctl_create_queue(struct drm_device *drm, void *data,
 				      struct drm_file *file)
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_create_queue *args = data;
-	struct dpa_aql_queue *q;
+	struct dpa_queue *q;
 	int ret;
 
 	q = kzalloc(sizeof(*q), GFP_KERNEL);
 	if (!q)
 		return -ENOMEM;
-
-	ret = daffy_create_queue_cmd(p->dev, p, args);
-	if (ret) {
-		kfree(q);
-		return ret;
-	}
-
 	INIT_LIST_HEAD(&q->list);
+	ret = dpa_pin_queue_pages(q, args->ring_base_address,
+				  args->ring_size);
+	if (ret < 0)
+		goto out_free_queue;
+	ret = daffy_create_queue_cmd(p->dev, p, args);
+	if (ret < 0)
+		goto out_unpin_pages;
 	q->id = args->queue_id;
-	q->mmap_offset = args->doorbell_offset;
 
 	mutex_lock(&p->lock);
 	list_add_tail(&q->list, &p->queue_list);
 	mutex_unlock(&p->lock);
 
 	return 0;
+
+out_unpin_pages:
+	dpa_unpin_queue_pages(q);
+out_free_queue:
+	kfree(q);
+	return ret;
 }
 
 static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
@@ -94,7 +133,7 @@ static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_destroy_queue *args = data;
-	struct dpa_aql_queue *q;
+	struct dpa_queue *q;
 	int ret;
 
 	mutex_lock(&p->lock);
@@ -117,6 +156,7 @@ static int dpa_drm_ioctl_destroy_queue(struct drm_device *drm, void *data,
 
 		return ret;
 	}
+	dpa_unpin_queue_pages(q);
 	kfree(q);
 
 	return 0;
@@ -368,12 +408,39 @@ static int dpa_drm_ioctl_set_notification_queue(struct drm_device *dev,
 {
 	struct dpa_process *p = file->driver_priv;
 	struct drm_dpa_set_notification_queue *args = data;
+	struct dpa_queue *q;
+	int ret;
 
 	if ((args->base_address & (PAGE_SIZE - 1)) ||
 	    !is_power_of_2(args->ring_size))
 		return -EINVAL;
 
-	return daffy_set_notification_queue_cmd(p->dev, p, args);
+	q = kzalloc(sizeof(*q), GFP_KERNEL);
+	if (!q)
+		return -ENOMEM;
+	ret = dpa_pin_queue_pages(q, args->base_address, args->ring_size);
+	if (ret < 0)
+		goto out_free_queue;
+	ret = daffy_set_notification_queue_cmd(p->dev, p, args);
+	if (ret < 0)
+		goto out_unpin_pages;
+
+	mutex_lock(&p->lock);
+	/*
+	 * Firmware should be rejecting attempts to register multiple
+	 * notification queues in a process.
+	 */
+	WARN_ON(p->notification_queue);
+	p->notification_queue = q;
+	mutex_unlock(&p->lock);
+
+	return 0;
+
+out_unpin_pages:
+	dpa_unpin_queue_pages(q);
+out_free_queue:
+	kfree(q);
+	return ret;
 }
 
 static const struct drm_ioctl_desc dpadrm_ioctls[] = {
@@ -481,12 +548,16 @@ static void dpa_release_process(struct kref *ref)
 
 	/* UNREGISTER_PASID will release all the queues on the DUC side. */
 	while (!list_empty(&p->queue_list)) {
-		struct dpa_aql_queue *q;
+		struct dpa_queue *q;
 
-		q = list_first_entry(&p->queue_list, struct dpa_aql_queue,
-				     list);
+		q = list_first_entry(&p->queue_list, struct dpa_queue, list);
 		list_del(&q->list);
+		dpa_unpin_queue_pages(q);
 		kfree(q);
+	}
+	if (p->notification_queue) {
+		dpa_unpin_queue_pages(p->notification_queue);
+		kfree(p->notification_queue);
 	}
 
 	/*
