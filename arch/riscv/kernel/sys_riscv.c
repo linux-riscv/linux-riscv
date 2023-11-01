@@ -8,6 +8,7 @@
 #include <linux/syscalls.h>
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
+#include <asm/delay.h>
 #include <asm/hwprobe.h>
 #include <asm/sbi.h>
 #include <asm/vector.h>
@@ -213,6 +214,10 @@ static void hwprobe_one_pair(struct riscv_hwprobe *pair,
 
 	case RISCV_HWPROBE_KEY_CPUPERF_0:
 		pair->value = hwprobe_misaligned(cpus);
+		break;
+
+	case RISCV_HWPROBE_KEY_MTIME_FREQ:
+		pair->value = riscv_timebase;
 		break;
 
 	/*
