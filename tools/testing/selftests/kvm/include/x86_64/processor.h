@@ -1233,4 +1233,10 @@ void virt_map_level(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr,
 #define PFERR_GUEST_PAGE_MASK	BIT_ULL(PFERR_GUEST_PAGE_BIT)
 #define PFERR_IMPLICIT_ACCESS	BIT_ULL(PFERR_IMPLICIT_ACCESS_BIT)
 
+/*
+ * X86 kernel linear address defines
+ */
+#define KERNEL_LNA_OFFSET 0xffff800000000000
+#define KERNEL_ADDR(x) ((void *)(x) + KERNEL_LNA_OFFSET)
+
 #endif /* SELFTEST_KVM_PROCESSOR_H */

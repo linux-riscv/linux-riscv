@@ -337,9 +337,11 @@ static uint64_t vm_nr_pages_required(enum vm_guest_mode mode,
 	 * smallest page size is used. Considering each page contains x page
 	 * table descriptors, the total extra size for page tables (for extra
 	 * N pages) will be: N/x+N/x^2+N/x^3+... which is definitely smaller
-	 * than N/x*2.
+	 * than N/x*2. To support mapping one set of physical addresses both
+	 * to user-mode addresses and supervisor-mode addresses, it's proper
+	 * to extend the page size to N/x*4.
 	 */
-	nr_pages += (nr_pages + extra_mem_pages) / PTES_PER_MIN_PAGE * 2;
+	nr_pages += (nr_pages + extra_mem_pages) / PTES_PER_MIN_PAGE * 4;
 
 	/* Account for the number of pages needed by ucall. */
 	nr_pages += ucall_nr_pages_required(page_size);

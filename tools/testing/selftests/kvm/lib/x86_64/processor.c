@@ -227,6 +227,13 @@ void __virt_pg_map(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr, int level)
 void virt_arch_pg_map(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr)
 {
 	__virt_pg_map(vm, vaddr, paddr, PG_LEVEL_4K);
+
+	/*
+	 * Map same paddr to kernel linear address space. Make execution
+	 * environment supporting running both in user and kernel mode.
+	 */
+	if (!(vaddr & BIT_ULL(63)))
+		__virt_pg_map(vm, (uint64_t)KERNEL_ADDR(vaddr), paddr, PG_LEVEL_4K);
 }
 
 void virt_map_level(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr,
@@ -505,7 +512,7 @@ static void kvm_setup_gdt(struct kvm_vm *vm, struct kvm_dtable *dt)
 	if (!vm->gdt)
 		vm->gdt = __vm_vaddr_alloc_page(vm, MEM_REGION_DATA);
 
-	dt->base = vm->gdt;
+	dt->base = (unsigned long)KERNEL_ADDR(vm->gdt);
 	dt->limit = getpagesize();
 }
 
@@ -516,7 +523,7 @@ static void kvm_setup_tss_64bit(struct kvm_vm *vm, struct kvm_segment *segp,
 		vm->tss = __vm_vaddr_alloc_page(vm, MEM_REGION_DATA);
 
 	memset(segp, 0, sizeof(*segp));
-	segp->base = vm->tss;
+	segp->base = (unsigned long)KERNEL_ADDR(vm->tss);
 	segp->limit = 0x67;
 	segp->selector = selector;
 	segp->type = 0xb;
@@ -597,8 +604,8 @@ struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
 	/* Setup guest general purpose registers */
 	vcpu_regs_get(vcpu, &regs);
 	regs.rflags = regs.rflags | 0x2;
-	regs.rsp = stack_vaddr;
-	regs.rip = (unsigned long) guest_code;
+	regs.rsp = (unsigned long)KERNEL_ADDR(stack_vaddr);
+	regs.rip = (unsigned long)KERNEL_ADDR(guest_code);
 	vcpu_regs_set(vcpu, &regs);
 
 	/* Setup the MP state */
@@ -1103,8 +1110,9 @@ void vm_init_descriptor_tables(struct kvm_vm *vm)
 	vm->handlers = __vm_vaddr_alloc_page(vm, MEM_REGION_DATA);
 	/* Handlers have the same address in both address spaces.*/
 	for (i = 0; i < NUM_INTERRUPTS; i++)
-		set_idt_entry(vm, i, (unsigned long)(&idt_handlers)[i], 0,
-			DEFAULT_CODE_SELECTOR);
+		set_idt_entry(vm, i,
+			      (unsigned long)KERNEL_ADDR((unsigned long)(&idt_handlers)[i]),
+			      0, DEFAULT_CODE_SELECTOR);
 }
 
 void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu)
@@ -1113,13 +1121,13 @@ void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu)
 	struct kvm_sregs sregs;
 
 	vcpu_sregs_get(vcpu, &sregs);
-	sregs.idt.base = vm->idt;
+	sregs.idt.base = (unsigned long)KERNEL_ADDR(vm->idt);
 	sregs.idt.limit = NUM_INTERRUPTS * sizeof(struct idt_entry) - 1;
-	sregs.gdt.base = vm->gdt;
+	sregs.gdt.base = (unsigned long)KERNEL_ADDR(vm->gdt);
 	sregs.gdt.limit = getpagesize() - 1;
 	kvm_seg_set_kernel_data_64bit(NULL, DEFAULT_DATA_SELECTOR, &sregs.gs);
 	vcpu_sregs_set(vcpu, &sregs);
-	*(vm_vaddr_t *)addr_gva2hva(vm, (vm_vaddr_t)(&exception_handlers)) = vm->handlers;
+	*(vm_vaddr_t *)addr_gva2hva(vm, (vm_vaddr_t)(&exception_handlers)) = (vm_vaddr_t)KERNEL_ADDR(vm->handlers);
 }
 
 void vm_install_exception_handler(struct kvm_vm *vm, int vector,
@@ -1127,7 +1135,7 @@ void vm_install_exception_handler(struct kvm_vm *vm, int vector,
 {
 	vm_vaddr_t *handlers = (vm_vaddr_t *)addr_gva2hva(vm, vm->handlers);
 
-	handlers[vector] = (vm_vaddr_t)handler;
+	handlers[vector] = handler ? (vm_vaddr_t)KERNEL_ADDR(handler) : (vm_vaddr_t)NULL;
 }
 
 void assert_on_unhandled_exception(struct kvm_vcpu *vcpu)
