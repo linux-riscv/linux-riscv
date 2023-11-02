@@ -180,6 +180,11 @@ void virt_arch_dump(FILE *stream, struct kvm_vm *vm, uint8_t indent)
 	}
 }
 
+void *virt_arch_ucall_prealloc(uint64_t ucall_gva)
+{
+	return (void *)ucall_gva;
+}
+
 void riscv_vcpu_mmu_setup(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vm *vm = vcpu->vm;

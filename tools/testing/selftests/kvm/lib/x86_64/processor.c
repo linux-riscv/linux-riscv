@@ -388,6 +388,18 @@ void virt_arch_dump(FILE *stream, struct kvm_vm *vm, uint8_t indent)
 	}
 }
 
+void *virt_arch_ucall_prealloc(uint64_t ucall_gva)
+{
+	unsigned short desc_cs;
+
+	asm volatile ("mov %%cs,%0" :  "=r" (desc_cs));
+
+	if (desc_cs & 0x3)
+		return (void *)(ucall_gva & ~KERNEL_LNA_OFFSET);
+	else
+		return (void *)(ucall_gva | KERNEL_LNA_OFFSET);
+}
+
 /*
  * Set Unusable Segment
  *

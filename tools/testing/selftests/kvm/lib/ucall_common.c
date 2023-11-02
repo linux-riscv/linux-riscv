@@ -51,6 +51,8 @@ static struct ucall *ucall_alloc(void)
 	if (!ucall_pool)
 		goto ucall_failed;
 
+	ucall_pool = (struct ucall_header *)virt_ucall_prealloc((uint64_t)ucall_pool);
+
 	for (i = 0; i < KVM_MAX_VCPUS; ++i) {
 		if (!test_and_set_bit(i, ucall_pool->in_use)) {
 			uc = &ucall_pool->ucalls[i];

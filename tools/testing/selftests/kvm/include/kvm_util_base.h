@@ -917,6 +917,23 @@ static inline void virt_dump(FILE *stream, struct kvm_vm *vm, uint8_t indent)
 	virt_arch_dump(stream, vm, indent);
 }
 
+/*
+ * Virtual UCALL memory pre-processing
+ *
+ * Input Args:
+ *   ucall_gva - Guest virtual address point to memory of ucall pool
+ *
+ * Output Args: None
+ *
+ * Return:
+ *   Processed guest virtual address point to memory of ucall pool
+ */
+void *virt_arch_ucall_prealloc(uint64_t ucall_gva);
+
+static inline void *virt_ucall_prealloc(uint64_t ucall_gva)
+{
+	return virt_arch_ucall_prealloc(ucall_gva);
+}
 
 static inline int __vm_disable_nx_huge_pages(struct kvm_vm *vm)
 {
