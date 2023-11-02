@@ -31,6 +31,7 @@ bool filter_reg(__u64 reg)
 	case KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_ZICSR:
 	case KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_ZIFENCEI:
 	case KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_ZIHPM:
+	case KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_SVADU:
 		return true;
 	default:
 		break;
@@ -310,6 +311,7 @@ static const char *isa_ext_id_to_str(__u64 id)
 		"KVM_RISCV_ISA_EXT_ZICSR",
 		"KVM_RISCV_ISA_EXT_ZIFENCEI",
 		"KVM_RISCV_ISA_EXT_ZIHPM",
+		"KVM_RISCV_ISA_EXT_SVADU",
 	};
 
 	if (reg_off >= ARRAY_SIZE(kvm_isa_ext_reg_name)) {
@@ -674,6 +676,10 @@ static __u64 fp_d_regs[] = {
 	KVM_REG_RISCV | KVM_REG_SIZE_ULONG | KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_D,
 };
 
+static __u64 svadu_regs[] = {
+	KVM_REG_RISCV | KVM_REG_SIZE_ULONG | KVM_REG_RISCV_ISA_EXT | KVM_RISCV_ISA_EXT_SVADU,
+};
+
 #define BASE_SUBLIST \
 	{"base", .regs = base_regs, .regs_n = ARRAY_SIZE(base_regs), \
 	 .skips_set = base_skips_set, .skips_set_n = ARRAY_SIZE(base_skips_set),}
@@ -713,6 +719,9 @@ static __u64 fp_d_regs[] = {
 #define FP_D_REGS_SUBLIST \
 	{"fp_d", .feature = KVM_RISCV_ISA_EXT_D, .regs = fp_d_regs, \
 		.regs_n = ARRAY_SIZE(fp_d_regs),}
+#define SVADU_REGS_SUBLIST \
+	{"svadu", .feature = KVM_RISCV_ISA_EXT_SVADU, .regs = svadu_regs, \
+		.regs_n = ARRAY_SIZE(svadu_regs),}
 
 static struct vcpu_reg_list h_config = {
 	.sublists = {
@@ -850,6 +859,14 @@ static struct vcpu_reg_list fp_d_config = {
 	},
 };
 
+static struct vcpu_reg_list svadu_config = {
+	.sublists = {
+	BASE_SUBLIST,
+	SVADU_REGS_SUBLIST,
+	{0},
+	},
+};
+
 struct vcpu_reg_list *vcpu_configs[] = {
 	&h_config,
 	&zicbom_config,
@@ -868,5 +885,6 @@ struct vcpu_reg_list *vcpu_configs[] = {
 	&aia_config,
 	&fp_f_config,
 	&fp_d_config,
+	&svadu_config,
 };
 int vcpu_configs_n = ARRAY_SIZE(vcpu_configs);
