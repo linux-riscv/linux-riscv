@@ -1071,6 +1071,25 @@ void vcpu_load_state(struct kvm_vcpu *vcpu, struct kvm_x86_state *state)
 		vcpu_nested_state_set(vcpu, &state->nested);
 }
 
+void vcpu_setup_user_mode(struct kvm_vcpu *vcpu, void *guest_code)
+{
+	struct kvm_sregs sregs;
+	struct kvm_regs regs;
+	struct kvm_vm *vm = vcpu->vm;
+
+	vcpu_sregs_get(vcpu, &sregs);
+	kvm_seg_set_code_64bit(vm, USER_CODE_SELECTOR, &sregs.cs);
+	kvm_seg_set_data_64bit(vm, USER_DATA_SELECTOR, &sregs.ds);
+	kvm_seg_set_data_64bit(vm, USER_DATA_SELECTOR, &sregs.es);
+	kvm_seg_set_data_64bit(vm, USER_DATA_SELECTOR, &sregs.ss);
+	vcpu_sregs_set(vcpu, &sregs);
+
+	vcpu_regs_get(vcpu, &regs);
+	regs.rsp = vcpu->stack_vaddr - (DEFAULT_STACK_PGS >> 1) * getpagesize();
+	regs.rip = (unsigned long) guest_code;
+	vcpu_regs_set(vcpu, &regs);
+}
+
 void kvm_x86_state_cleanup(struct kvm_x86_state *state)
 {
 	free(state->xsave);
