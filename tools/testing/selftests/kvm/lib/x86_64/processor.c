@@ -293,6 +293,7 @@ uint64_t *__vm_get_page_table_entry(struct kvm_vm *vm, uint64_t vaddr,
 	if (vm_is_target_pte(pde, level, PG_LEVEL_2M))
 		return pde;
 
+	*level = PG_LEVEL_4K;
 	return virt_get_pte(vm, pde, vaddr, PG_LEVEL_4K);
 }
 
@@ -496,7 +497,7 @@ vm_paddr_t addr_arch_gva2gpa(struct kvm_vm *vm, vm_vaddr_t gva)
 	 * No need for a hugepage mask on the PTE, x86-64 requires the "unused"
 	 * address bits to be zero.
 	 */
-	return PTE_GET_PA(*pte) | (gva & ~HUGEPAGE_MASK(level));
+	return PTE_GET_PA(*pte) | (gva & (HUGEPAGE_SIZE(level) - 1));
 }
 
 static void kvm_setup_gdt(struct kvm_vm *vm, struct kvm_dtable *dt)
