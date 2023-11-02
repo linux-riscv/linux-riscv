@@ -71,6 +71,7 @@ struct kvm_vcpu {
 	struct kvm_dirty_gfn *dirty_gfns;
 	uint32_t fetch_index;
 	uint32_t dirty_gfns_count;
+	uint64_t stack_vaddr;
 };
 
 struct userspace_mem_regions {
@@ -167,7 +168,7 @@ static inline struct userspace_mem_region *vm_get_mem_region(struct kvm_vm *vm,
 #define KVM_GUEST_PAGE_TABLE_MIN_PADDR	0x180000
 
 #define DEFAULT_GUEST_STACK_VADDR_MIN	0xab6000
-#define DEFAULT_STACK_PGS		5
+#define DEFAULT_STACK_PGS		10
 
 enum vm_guest_mode {
 	VM_MODE_P52V48_4K,

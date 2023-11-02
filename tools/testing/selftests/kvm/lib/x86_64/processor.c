@@ -16,6 +16,9 @@
 
 #define DEFAULT_CODE_SELECTOR 0x8
 #define DEFAULT_DATA_SELECTOR 0x10
+#define DEFAULT_TSS_SELECTOR 0x18
+#define USER_CODE_SELECTOR 0x23
+#define USER_DATA_SELECTOR 0x2B
 
 #define MAX_NR_CPUID_ENTRIES 100
 
@@ -442,7 +445,7 @@ static void kvm_seg_fill_gdt_64bit(struct kvm_vm *vm, struct kvm_segment *segp)
 
 
 /*
- * Set Long Mode Flat Kernel Code Segment
+ * Set Long Mode Flat Code Segment
  *
  * Input Args:
  *   vm - VM whose GDT is being filled, or NULL to only write segp
@@ -454,14 +457,16 @@ static void kvm_seg_fill_gdt_64bit(struct kvm_vm *vm, struct kvm_segment *segp)
  * Return: None
  *
  * Sets up the KVM segment pointed to by @segp, to be a code segment
- * with the selector value given by @selector.
+ * with the selector value given by @selector. The @selector.dpl
+ * decides the descriptor privilege level, user or kernel.
  */
-static void kvm_seg_set_kernel_code_64bit(struct kvm_vm *vm, uint16_t selector,
+static void kvm_seg_set_code_64bit(struct kvm_vm *vm, uint16_t selector,
 	struct kvm_segment *segp)
 {
 	memset(segp, 0, sizeof(*segp));
 	segp->selector = selector;
 	segp->limit = 0xFFFFFFFFu;
+	segp->dpl = selector & 0x3;
 	segp->s = 0x1; /* kTypeCodeData */
 	segp->type = 0x08 | 0x01 | 0x02; /* kFlagCode | kFlagCodeAccessed
 					  * | kFlagCodeReadable
@@ -474,7 +479,7 @@ static void kvm_seg_set_kernel_code_64bit(struct kvm_vm *vm, uint16_t selector,
 }
 
 /*
- * Set Long Mode Flat Kernel Data Segment
+ * Set Long Mode Flat Data Segment
  *
  * Input Args:
  *   vm - VM whose GDT is being filled, or NULL to only write segp
@@ -486,14 +491,16 @@ static void kvm_seg_set_kernel_code_64bit(struct kvm_vm *vm, uint16_t selector,
  * Return: None
  *
  * Sets up the KVM segment pointed to by @segp, to be a data segment
- * with the selector value given by @selector.
+ * with the selector value given by @selector. The @selector.dpl
+ * decides the descriptor privilege level, user or kernel.
  */
-static void kvm_seg_set_kernel_data_64bit(struct kvm_vm *vm, uint16_t selector,
+static void kvm_seg_set_data_64bit(struct kvm_vm *vm, uint16_t selector,
 	struct kvm_segment *segp)
 {
 	memset(segp, 0, sizeof(*segp));
 	segp->selector = selector;
 	segp->limit = 0xFFFFFFFFu;
+	segp->dpl = selector & 0x3;
 	segp->s = 0x1; /* kTypeCodeData */
 	segp->type = 0x00 | 0x01 | 0x02; /* kFlagData | kFlagDataAccessed
 					  * | kFlagDataWritable
@@ -561,10 +568,10 @@ static void vcpu_setup(struct kvm_vm *vm, struct kvm_vcpu *vcpu)
 		sregs.efer |= (EFER_LME | EFER_LMA | EFER_NX);
 
 		kvm_seg_set_unusable(&sregs.ldt);
-		kvm_seg_set_kernel_code_64bit(vm, DEFAULT_CODE_SELECTOR, &sregs.cs);
-		kvm_seg_set_kernel_data_64bit(vm, DEFAULT_DATA_SELECTOR, &sregs.ds);
-		kvm_seg_set_kernel_data_64bit(vm, DEFAULT_DATA_SELECTOR, &sregs.es);
-		kvm_setup_tss_64bit(vm, &sregs.tr, 0x18);
+		kvm_seg_set_code_64bit(vm, DEFAULT_CODE_SELECTOR, &sregs.cs);
+		kvm_seg_set_data_64bit(vm, DEFAULT_DATA_SELECTOR, &sregs.ds);
+		kvm_seg_set_data_64bit(vm, DEFAULT_DATA_SELECTOR, &sregs.es);
+		kvm_setup_tss_64bit(vm, &sregs.tr, DEFAULT_TSS_SELECTOR);
 		break;
 
 	default:
@@ -589,6 +596,7 @@ struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
 	struct kvm_regs regs;
 	vm_vaddr_t stack_vaddr;
 	struct kvm_vcpu *vcpu;
+	struct tss64_t *tss_hva;
 
 	stack_vaddr = __vm_vaddr_alloc(vm, DEFAULT_STACK_PGS * getpagesize(),
 				       DEFAULT_GUEST_STACK_VADDR_MIN,
@@ -612,6 +620,13 @@ struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
 	vcpu = __vm_vcpu_add(vm, vcpu_id);
 	vcpu_init_cpuid(vcpu, kvm_get_supported_cpuid());
 	vcpu_setup(vm, vcpu);
+
+	/* Save address of stack pool used for vCPU */
+	vcpu->stack_vaddr = stack_vaddr;
+
+	/* Setup canonical linear address form of the RSP0 for task switch */
+	tss_hva = (struct tss64_t *)addr_gva2hva(vm, vm->tss);
+	tss_hva->rsp0 = (uint64_t)KERNEL_ADDR(stack_vaddr);
 
 	/* Setup guest general purpose registers */
 	vcpu_regs_get(vcpu, &regs);
@@ -1137,7 +1152,7 @@ void vcpu_init_descriptor_tables(struct kvm_vcpu *vcpu)
 	sregs.idt.limit = NUM_INTERRUPTS * sizeof(struct idt_entry) - 1;
 	sregs.gdt.base = (unsigned long)KERNEL_ADDR(vm->gdt);
 	sregs.gdt.limit = getpagesize() - 1;
-	kvm_seg_set_kernel_data_64bit(NULL, DEFAULT_DATA_SELECTOR, &sregs.gs);
+	kvm_seg_set_data_64bit(NULL, DEFAULT_DATA_SELECTOR, &sregs.gs);
 	vcpu_sregs_set(vcpu, &sregs);
 	*(vm_vaddr_t *)addr_gva2hva(vm, (vm_vaddr_t)(&exception_handlers)) = (vm_vaddr_t)KERNEL_ADDR(vm->handlers);
 }
