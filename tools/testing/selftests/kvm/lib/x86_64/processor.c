@@ -117,6 +117,14 @@ static void sregs_dump(FILE *stream, struct kvm_sregs *sregs, uint8_t indent)
 	}
 }
 
+static bool gva_is_kernel_addr(uint64_t gva)
+{
+	if (gva & BIT_ULL(63))
+		return true;
+
+	return false;
+}
+
 bool kvm_is_tdp_enabled(void)
 {
 	if (host_cpu_is_intel)
@@ -161,7 +169,8 @@ static uint64_t *virt_create_upper_pte(struct kvm_vm *vm,
 	uint64_t *pte = virt_get_pte(vm, parent_pte, vaddr, current_level);
 
 	if (!(*pte & PTE_PRESENT_MASK)) {
-		*pte = PTE_PRESENT_MASK | PTE_WRITABLE_MASK;
+		*pte = PTE_PRESENT_MASK | PTE_WRITABLE_MASK |
+		       (gva_is_kernel_addr(vaddr) ? 0 : PTE_USER_MASK);
 		if (current_level == target_level)
 			*pte |= PTE_LARGE_MASK | (paddr & PHYSICAL_PAGE_MASK);
 		else
@@ -224,7 +233,8 @@ void __virt_pg_map(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr, int level)
 	pte = virt_get_pte(vm, pde, vaddr, PG_LEVEL_4K);
 	TEST_ASSERT(!(*pte & PTE_PRESENT_MASK),
 		    "PTE already present for 4k page at vaddr: 0x%lx\n", vaddr);
-	*pte = PTE_PRESENT_MASK | PTE_WRITABLE_MASK | (paddr & PHYSICAL_PAGE_MASK);
+	*pte = PTE_PRESENT_MASK | PTE_WRITABLE_MASK | (paddr & PHYSICAL_PAGE_MASK) |
+	       (gva_is_kernel_addr(vaddr) ? 0 : PTE_USER_MASK);
 }
 
 void virt_arch_pg_map(struct kvm_vm *vm, uint64_t vaddr, uint64_t paddr)
@@ -630,7 +640,9 @@ struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
 
 	/* Setup guest general purpose registers */
 	vcpu_regs_get(vcpu, &regs);
-	regs.rflags = regs.rflags | 0x2;
+
+	/* Allow user privilege to access the I/O address space */
+	regs.rflags = regs.rflags | X86_EFLAGS_FIXED | X86_EFLAGS_IOPL;
 	regs.rsp = (unsigned long)KERNEL_ADDR(stack_vaddr);
 	regs.rip = (unsigned long)KERNEL_ADDR(guest_code);
 	vcpu_regs_set(vcpu, &regs);
