@@ -64,7 +64,7 @@ static void guest_code(void)
 	GUEST_DONE();
 }
 
-#define  CAST_TO_RIP(v)  ((unsigned long long)&(v))
+#define  CAST_TO_RIP(v)  ((unsigned long long)&(v) | KERNEL_LNA_OFFSET)
 
 static void vcpu_skip_insn(struct kvm_vcpu *vcpu, int insn_len)
 {

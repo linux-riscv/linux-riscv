@@ -31,6 +31,12 @@
 #define MEM_REGION_GPA		0xc0000000
 #define MEM_REGION_SLOT		10
 
+/*
+ * Offset to execute code at kernel address space
+ */
+#define KERNEL_LNA_OFFSET	0xffff800000000000
+#define CAST_TO_KERN(x)		(x | KERNEL_LNA_OFFSET)
+
 static const uint64_t MMIO_VAL = 0xbeefull;
 
 extern const uint64_t final_rip_start;
@@ -300,10 +306,11 @@ static void test_delete_memory_region(void)
 	 * so the instruction pointer would point to the reset vector.
 	 */
 	if (run->exit_reason == KVM_EXIT_INTERNAL_ERROR)
-		TEST_ASSERT(regs.rip >= final_rip_start &&
-			    regs.rip < final_rip_end,
+		TEST_ASSERT(regs.rip >= CAST_TO_KERN(final_rip_start) &&
+			    regs.rip < CAST_TO_KERN(final_rip_end),
 			    "Bad rip, expected 0x%lx - 0x%lx, got 0x%llx\n",
-			    final_rip_start, final_rip_end, regs.rip);
+			    CAST_TO_KERN(final_rip_start), CAST_TO_KERN(final_rip_end),
+			    regs.rip);
 
 	kvm_vm_free(vm);
 }

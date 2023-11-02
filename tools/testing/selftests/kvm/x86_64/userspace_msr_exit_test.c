@@ -18,6 +18,7 @@
 static int fep_available = 1;
 
 #define MSR_NON_EXISTENT 0x474f4f00
+#define CAST_TO_KERN(x)  (x | KERNEL_LNA_OFFSET)
 
 static u64 deny_bits = 0;
 struct kvm_msr_filter filter_allow = {
@@ -363,12 +364,12 @@ static void __guest_gp_handler(struct ex_regs *regs,
 			       char *r_start, char *r_end,
 			       char *w_start, char *w_end)
 {
-	if (regs->rip == (uintptr_t)r_start) {
-		regs->rip = (uintptr_t)r_end;
+	if (regs->rip == CAST_TO_KERN((uintptr_t)r_start)) {
+		regs->rip = CAST_TO_KERN((uintptr_t)r_end);
 		regs->rax = 0;
 		regs->rdx = 0;
-	} else if (regs->rip == (uintptr_t)w_start) {
-		regs->rip = (uintptr_t)w_end;
+	} else if (regs->rip == CAST_TO_KERN((uintptr_t)w_start)) {
+		regs->rip = CAST_TO_KERN((uintptr_t)w_end);
 	} else {
 		GUEST_ASSERT(!"RIP is at an unknown location!");
 	}
