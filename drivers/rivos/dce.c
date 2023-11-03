@@ -783,9 +783,10 @@ int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
 		goto hti_alloc_error;
 	}
 
-/* Head value is persistent between resets */
+	/* Head value is persistent between resets */
 	ring->hti->head = dce_reg_read(dce_priv, DCE_WQHEAD(wq_num));
 	ring->hti->tail = ring->hti->head;
+	ring->clean_up_index = ring->hti->head;
 
 	/* populate WQITE */
 	dce_priv->WQIT[wq_num].DSCBA = ring->desc_dma >> 12;
