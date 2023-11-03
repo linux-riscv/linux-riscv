@@ -2966,14 +2966,9 @@ int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
 }
 EXPORT_SYMBOL_GPL(iommu_fwspec_init);
 
-
-int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
+int iommu_fwspec_append_ids(struct iommu_fwspec *fwspec, u32 *ids, int num_ids)
 {
-	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 	int i, new_num;
-
-	if (!fwspec)
-		return -EINVAL;
 
 	new_num = fwspec->num_ids + num_ids;
 	if (new_num <= 1) {
@@ -2995,6 +2990,16 @@ int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
 
 	fwspec->num_ids = new_num;
 	return 0;
+}
+EXPORT_SYMBOL_GPL(iommu_fwspec_append_ids);
+
+int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
+{
+	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+
+	if (!fwspec)
+		return -EINVAL;
+	return iommu_fwspec_append_ids(fwspec, ids, num_ids);
 }
 EXPORT_SYMBOL_GPL(iommu_fwspec_add_ids);
 
