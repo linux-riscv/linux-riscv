@@ -699,12 +699,6 @@ static inline struct iommu_fwspec *dev_iommu_fwspec_get(struct device *dev)
 		return NULL;
 }
 
-static inline void dev_iommu_fwspec_set(struct device *dev,
-					struct iommu_fwspec *fwspec)
-{
-	dev->iommu->fwspec = fwspec;
-}
-
 static inline void *dev_iommu_priv_get(struct device *dev)
 {
 	if (dev->iommu)
