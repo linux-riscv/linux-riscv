@@ -676,6 +676,8 @@ void iommu_fwspec_dealloc(struct iommu_fwspec *fwspec);
 int iommu_fwspec_of_xlate(struct iommu_fwspec *fwspec, struct device *dev,
 			  struct fwnode_handle *iommu_fwnode,
 			  struct of_phandle_args *iommu_spec);
+int iommu_fwspec_assign_iommu(struct iommu_fwspec *fwspec, struct device *dev,
+			      struct fwnode_handle *iommu_fwnode);
 
 int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
 		      const struct iommu_ops *ops);

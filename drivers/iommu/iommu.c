@@ -2859,9 +2859,8 @@ const struct iommu_ops *iommu_ops_from_fwnode(struct fwnode_handle *fwnode)
 	return ops;
 }
 
-static int iommu_fwspec_assign_iommu(struct iommu_fwspec *fwspec,
-				     struct device *dev,
-				     struct fwnode_handle *iommu_fwnode)
+int iommu_fwspec_assign_iommu(struct iommu_fwspec *fwspec, struct device *dev,
+			      struct fwnode_handle *iommu_fwnode)
 {
 	const struct iommu_ops *ops;
 
