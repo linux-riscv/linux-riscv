@@ -53,6 +53,7 @@
 
 #define DCE_GCS_PAGE            127
 #define DCE_GCS_BASE            (DCE_GCS_PAGE * DCE_PAGE_SIZE)
+#define DCE_GCS_TIMESLICE       0x0
 #define DCE_GCS_KEYOWN_BASE     0x10
 #define DCE_GCS_KEYOWN_STRIDE   8
 #define DCE_GCS_KEYOWN(fn) \
@@ -246,6 +247,7 @@ struct KernelQueueReq {
 #define SETUP_USER_WQ     _IOW(0xAA, 3, struct UserArea *)
 #define REQUEST_KERNEL_WQ _IOW(0xAA, 4, struct KernelQueueReq *)
 #define SYNC_WQ            _IO(0xAA, 5)
+#define SET_TIMESLICE     _IOW(0xAA, 64, u64 *)
 
 #define MIN(a, b) \
 	({	__typeof__(a) _a = (a); \

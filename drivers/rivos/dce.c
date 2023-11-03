@@ -41,11 +41,15 @@
 
 #define MAX_DCE_DEVICES 16
 
+#define DCE_TEST_DRIVER
+
 static dev_t dev_num;
 static dev_t dev_vf_num;
 
 static DEFINE_IDA(dce_minor_ida);
 static DEFINE_IDA(dcevf_minor_ida);
+
+static struct pci_driver dce_driver;
 
 uint64_t dce_reg_read(struct dce_driver_priv *priv, int reg)
 {
@@ -931,6 +935,30 @@ static int dce_sync(struct dce_submitter_ctx *ctx)
 	return 0;
 }
 
+#ifdef DCE_TEST_DRIVER
+
+static int dce_set_timeslice(struct dce_submitter_ctx *ctx, u64 new_timeslice) {
+	struct dce_driver_priv *pf_drvdata = ctx->priv->pdev->is_physfn ?
+			ctx->priv :
+			pci_iov_get_pf_drvdata(ctx->priv->pdev, &dce_driver);
+
+	if (IS_ERR_OR_NULL(pf_drvdata)) {
+		dev_warn(&ctx->priv->dev, "Access to PF impossible, timelice upddate failure\n");
+		return PTR_ERR(pf_drvdata);
+	}
+
+	if (new_timeslice == 0) {
+		dev_warn(&ctx->priv->dev, "Ingoring 0 value for timesice update\n");
+		return -EINVAL;
+	}
+
+	dev_info(&ctx->priv->dev, "Updating timeslice to 0x%llx", new_timeslice);
+	dce_reg_write(pf_drvdata,
+		DCE_GCS_BASE + DCE_GCS_TIMESLICE, new_timeslice);
+	return 0;
+}
+#endif
+
 long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct DCEDescriptor descriptor;
@@ -1007,9 +1035,22 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 	case SYNC_WQ:
 		return dce_sync(ctx);
+
+#ifdef DCE_TEST_DRIVER
+	case SET_TIMESLICE: {
+			u64 new_timeslice;
+			if(copy_from_user(&new_timeslice, (u64 __user*)arg,
+					  sizeof(u64))) {
+				return -EFAULT;
+			}
+			return dce_set_timeslice(ctx, new_timeslice);
+		}
+
+#endif
 	default:
 		return -ENOIOCTLCMD;
 	}
+
 
 	return 0;
 }
@@ -1118,7 +1159,6 @@ wqit_cleanup:
 
 /* Probing, registering and device name management below */
 
-static struct pci_driver dce_driver;
 
 static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
