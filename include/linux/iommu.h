@@ -656,7 +656,8 @@ struct iommu_fwspec {
 	struct fwnode_handle	*iommu_fwnode;
 	u32			flags;
 	unsigned int		num_ids;
-	u32			ids[];
+	u32			single_id;
+	u32			*ids;
 };
 
 /* ATS is supported */
