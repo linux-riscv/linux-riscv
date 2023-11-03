@@ -2889,6 +2889,35 @@ static int iommu_fwspec_assign_iommu(struct iommu_fwspec *fwspec,
 	return 0;
 }
 
+int iommu_fwspec_of_xlate(struct iommu_fwspec *fwspec, struct device *dev,
+			  struct fwnode_handle *iommu_fwnode,
+			  struct of_phandle_args *iommu_spec)
+{
+	int ret;
+
+	ret = iommu_fwspec_assign_iommu(fwspec, dev, iommu_fwnode);
+	if (ret)
+		return ret;
+
+	if (!fwspec->ops->of_xlate)
+		return -ENODEV;
+
+	if (!dev_iommu_get(dev))
+		return -ENOMEM;
+
+	/*
+	 * ops->of_xlate() requires the fwspec to be passed through dev->iommu,
+	 * set it temporarily.
+	 */
+	if (dev->iommu->fwspec && dev->iommu->fwspec != fwspec)
+		iommu_fwspec_dealloc(dev->iommu->fwspec);
+	dev->iommu->fwspec = fwspec;
+	ret = fwspec->ops->of_xlate(dev, iommu_spec);
+	if (dev->iommu->fwspec == fwspec)
+		dev->iommu->fwspec = NULL;
+	return ret;
+}
+
 struct iommu_fwspec *iommu_fwspec_alloc(void)
 {
 	struct iommu_fwspec *fwspec;
