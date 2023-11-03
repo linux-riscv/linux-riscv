@@ -713,7 +713,11 @@ static inline void dev_iommu_priv_set(struct device *dev, void *priv)
 	dev->iommu->priv = priv;
 }
 
-int iommu_probe_device(struct device *dev);
+int iommu_probe_device_fwspec(struct device *dev, struct iommu_fwspec *fwspec);
+static inline int iommu_probe_device(struct device *dev)
+{
+	return iommu_probe_device_fwspec(dev, NULL);
+}
 
 int iommu_dev_enable_feature(struct device *dev, enum iommu_dev_features f);
 int iommu_dev_disable_feature(struct device *dev, enum iommu_dev_features f);
