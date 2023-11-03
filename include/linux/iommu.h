@@ -671,9 +671,18 @@ struct iommu_sva {
 	struct iommu_domain		*domain;
 };
 
+struct iommu_fwspec *iommu_fwspec_alloc(void);
+void iommu_fwspec_dealloc(struct iommu_fwspec *fwspec);
+
 int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
 		      const struct iommu_ops *ops);
-void iommu_fwspec_free(struct device *dev);
+static inline void iommu_fwspec_free(struct device *dev)
+{
+	if (!dev->iommu)
+		return;
+	iommu_fwspec_dealloc(dev->iommu->fwspec);
+	dev->iommu->fwspec = NULL;
+}
 int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids);
 const struct iommu_ops *iommu_ops_from_fwnode(struct fwnode_handle *fwnode);
 
