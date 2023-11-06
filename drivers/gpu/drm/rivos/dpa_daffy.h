@@ -78,5 +78,6 @@ int daffy_set_signal_pages_cmd(struct dpa_device *dpa, struct dpa_process *p,
 int daffy_set_notification_queue_cmd(struct dpa_device *dpa,
 				     struct dpa_process *p,
 				     struct drm_dpa_set_notification_queue *args);
+int daffy_set_force_complete_page_cmd(struct dpa_device *dpa, struct page *page);
 
 #endif /* _DPA_DRM_DAFFY_H_ */

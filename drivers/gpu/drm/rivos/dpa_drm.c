@@ -768,13 +768,29 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&dpa->dpa_processes);
 	mutex_init(&dpa->dpa_processes_lock);
 
+	/*
+	 * Allocate the force-complete page, which is used to sink transactions when
+	 * work is being drained or killed. DPA will make translated requests to this
+	 * page and expects to receive the physical address.
+	 */
+	dpa->fc_page = alloc_page(GFP_KERNEL);
+	if (!dpa->fc_page) {
+		err = -ENOMEM;
+		goto free_irqs;
+	}
+	err = daffy_set_force_complete_page_cmd(dpa, dpa->fc_page);
+	if (err < 0)
+		goto free_fc_page;
+
 	// init drm
 	err = drm_dev_register(&dpa->ddev, id->driver_data);
 	if (err)
-		goto free_irqs;
+		goto free_fc_page;
 
 	return 0;
 
+free_fc_page:
+	free_page(dpa->fc_page);
 free_irqs:
 	pci_free_irq_vectors(pdev);
 free_daffy:
@@ -792,6 +808,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 	drm_dev_unplug(&dpa->ddev);
 	pci_free_irq_vectors(pdev);
 	daffy_free(dpa);
+	free_page(dpa->fc_page);
 	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 }
 

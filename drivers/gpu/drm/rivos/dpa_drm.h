@@ -74,6 +74,9 @@ struct dpa_device {
 	struct list_head dpa_processes;
 	unsigned int dpa_process_count;
 
+	/* Sacrificial page for force-completed transactions. */
+	struct page *fc_page;
+
 	struct dpa_daffy daffy;
 };
 

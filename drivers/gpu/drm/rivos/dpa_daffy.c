@@ -451,3 +451,14 @@ int daffy_set_notification_queue_cmd(struct dpa_device *dpa,
 
 	return daffy_submit_sync(dpa, &pkt);
 }
+
+int daffy_set_force_complete_page_cmd(struct dpa_device *dpa, struct page *page)
+{
+	struct daffy_queue_pkt pkt;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.hdr.command = DAFFY_CMD_SET_FORCE_COMPLETE_PA;
+	pkt.u.set_force_complete_pa.page_address = page_to_phys(page);
+
+	return daffy_submit_sync(dpa, &pkt);
+}
