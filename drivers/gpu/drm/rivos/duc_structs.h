@@ -67,7 +67,10 @@ struct duc_kernel_dispatch_packet {
 	uint16_t quilt_size_z;
 	uint64_t kernel_code_entry;
 	uint64_t kernarg_address;
-	uint32_t private_segment_size_log2;  // This could be uint8.
+	uint8_t private_segment_size_log2;
+	uint8_t quilt_div_x_more;
+	uint8_t quilt_div_y_more;
+	uint8_t reserved;
 	uint32_t kernarg_size;
 	uint64_t private_mem_ptr;
 	uint8_t num_pg_barriers;
@@ -75,8 +78,8 @@ struct duc_kernel_dispatch_packet {
 	uint8_t scratch_mem_allocs;
 	// TODO: Add size, qlet/fifo mem and barriers and start offset when needed
 	uint8_t qlet;
-	uint8_t reserved[4];
-	struct duc_signal_handle completion_signal;
+	uint32_t quilt_div_y_magic;
+	uint64_t quilt_div_x_magic;
 } __attribute__((aligned(64)));
 
 struct duc_barrier_and_packet {
@@ -233,6 +236,7 @@ enum daffy_cmd_type {
 	DAFFY_CMD_DESTROY_QUEUE = 9,
 	DAFFY_CMD_SET_SIGNAL_PAGES = 10,
 	DAFFY_CMD_SET_NOTIFICATION_QUEUE = 11,
+	DAFFY_CMD_SET_FORCE_COMPLETE_PA = 12,
 	DAFFY_CMD_UPDATE_SIGNAL = 13,
 	DAFFY_CMD_FLUSH_LLCH = 14,
 	DAFFY_CMD_KILL_PASID = 15,
@@ -337,6 +341,12 @@ struct daffy_update_signal_cmd {
 	uint32_t reserved[9];
 };
 
+struct daffy_set_force_complete_pa_cmd {
+	uint64_t page_address;
+
+	uint64_t reserved[5];
+};
+
 struct daffy_queue_pkt {
 	struct daffy_pkt_header hdr;
 	union {
@@ -349,6 +359,7 @@ struct daffy_queue_pkt {
 		struct daffy_set_signal_pages_cmd set_signal_pages;
 		struct daffy_set_notification_queue_cmd set_notification_queue;
 		struct daffy_update_signal_cmd update_signal;
+		struct daffy_set_force_complete_pa_cmd set_force_complete_pa;
 	} u;
 } __attribute__((aligned(64)));
 
