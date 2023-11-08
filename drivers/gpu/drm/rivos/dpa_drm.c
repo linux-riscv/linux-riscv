@@ -508,6 +508,7 @@ int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause)
 	 */
 	dev_dbg(dpa->dev, "DUC completed kill for PASID %u\n", pasid);
 	complete(&p->kill_done);
+	kref_put(&p->ref, dpa_release_process);
 	return 0;
 }
 
