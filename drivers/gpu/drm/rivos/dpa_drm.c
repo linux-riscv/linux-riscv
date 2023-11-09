@@ -762,7 +762,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			daffy_handle_irq, IRQF_ONESHOT, "dpa-drm", dpa);
 		if (err < 0) {
 			dev_err(dev, "Failed setting up IRQ\n");
-			goto free_irqs;
+			goto free_daffy;
 		}
 	}
 
@@ -777,7 +777,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dpa->fc_page = alloc_page(GFP_KERNEL);
 	if (!dpa->fc_page) {
 		err = -ENOMEM;
-		goto free_irqs;
+		goto free_daffy;
 	}
 	err = daffy_set_force_complete_page_cmd(dpa, dpa->fc_page);
 	if (err < 0)
@@ -792,8 +792,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 free_fc_page:
 	free_page(dpa->fc_page);
-free_irqs:
-	pci_free_irq_vectors(pdev);
 free_daffy:
 	daffy_free(dpa);
 disable_sva:
@@ -807,7 +805,6 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 	struct dpa_device *dpa = pci_get_drvdata(pdev);
 
 	drm_dev_unplug(&dpa->ddev);
-	pci_free_irq_vectors(pdev);
 	daffy_free(dpa);
 	free_page(dpa->fc_page);
 	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
