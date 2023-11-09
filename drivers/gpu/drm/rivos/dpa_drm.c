@@ -791,7 +791,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 free_fc_page:
-	free_page(dpa->fc_page);
+	__free_page(dpa->fc_page);
 free_daffy:
 	daffy_free(dpa);
 disable_sva:
@@ -806,7 +806,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 
 	drm_dev_unplug(&dpa->ddev);
 	daffy_free(dpa);
-	free_page(dpa->fc_page);
+	__free_page(dpa->fc_page);
 	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
 }
 
