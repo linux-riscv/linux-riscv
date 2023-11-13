@@ -5,8 +5,10 @@
 
 /dts-v1/;
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/clock/sophgo-sg2042-clk.h>
 
 #include "sg2042-cpus.dtsi"
+#include "sg2042-clock.dtsi"
 
 / {
 	compatible = "sophgo,sg2042";
@@ -311,12 +313,20 @@
 			riscv,ndev = <224>;
 		};
 
+		sys_ctrl: syscon@7030010000 {
+			compatible = "sophgo,sg2042-syscon", "syscon";
+			reg = <0x70 0x30010000 0x0 0x8000>;
+		};
+
 		uart0: serial@7040000000 {
 			compatible = "snps,dw-apb-uart";
 			reg = <0x00000070 0x40000000 0x00000000 0x00001000>;
 			interrupt-parent = <&intc>;
 			interrupts = <112 IRQ_TYPE_LEVEL_HIGH>;
 			clock-frequency = <500000000>;
+			clocks = <&clkgen GATE_CLK_UART_500M>,
+				 <&clkgen GATE_CLK_APB_UART>;
+			clock-names = "baudclk", "apb_pclk";
 			reg-shift = <2>;
 			reg-io-width = <4>;
 			status = "disabled";

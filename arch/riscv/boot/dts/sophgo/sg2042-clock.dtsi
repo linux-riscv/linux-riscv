@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2023 Sophgo Technology Inc. All rights reserved.
+ */
+
+/ {
+	cgi: oscillator {
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+		clock-output-names = "cgi";
+		#clock-cells = <0>;
+	};
+
+	clkgen: clock-controller {
+		compatible = "sophgo,sg2042-clkgen";
+		#clock-cells = <1>;
+		system-ctrl = <&sys_ctrl>;
+		clocks = <&cgi>;
+		assigned-clocks = \
+			<&clkgen DIV_CLK_FPLL_RP_CPU_NORMAL_1>,
+			<&clkgen DIV_CLK_FPLL_50M_A53>,
+			<&clkgen DIV_CLK_FPLL_TOP_RP_CMN_DIV2>,
+			<&clkgen DIV_CLK_FPLL_UART_500M>,
+			<&clkgen DIV_CLK_FPLL_AHB_LPC>,
+			<&clkgen DIV_CLK_FPLL_EFUSE>,
+			<&clkgen DIV_CLK_FPLL_TX_ETH0>,
+			<&clkgen DIV_CLK_FPLL_PTP_REF_I_ETH0>,
+			<&clkgen DIV_CLK_FPLL_REF_ETH0>,
+			<&clkgen DIV_CLK_FPLL_EMMC>,
+			<&clkgen DIV_CLK_FPLL_SD>,
+			<&clkgen DIV_CLK_FPLL_TOP_AXI0>,
+			<&clkgen DIV_CLK_FPLL_TOP_AXI_HSPERI>,
+			<&clkgen DIV_CLK_FPLL_AXI_DDR_1>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER1>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER2>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER3>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER4>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER5>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER6>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER7>,
+			<&clkgen DIV_CLK_FPLL_DIV_TIMER8>,
+			<&clkgen DIV_CLK_FPLL_100K_EMMC>,
+			<&clkgen DIV_CLK_FPLL_100K_SD>,
+			<&clkgen DIV_CLK_FPLL_GPIO_DB>,
+			<&clkgen DIV_CLK_MPLL_RP_CPU_NORMAL_0>,
+			<&clkgen DIV_CLK_MPLL_AXI_DDR_0>;
+		assigned-clock-rates = \
+			<2000000000>,
+			<50000000>,
+			<1000000000>,
+			<500000000>,
+			<200000000>,
+			<25000000>,
+			<125000000>,
+			<50000000>,
+			<25000000>,
+			<100000000>,
+			<100000000>,
+			<100000000>,
+			<250000000>,
+			<1000000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<50000000>,
+			<100000>,
+			<100000>,
+			<100000>,
+			<2000000000>,
+			<1000000000>;
+	};
+};
