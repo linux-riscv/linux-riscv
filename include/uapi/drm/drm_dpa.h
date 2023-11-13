@@ -70,7 +70,7 @@ struct drm_dpa_set_signal_pages {
 
 /* Waits for any of the signals in signal_ids to be set. */
 struct drm_dpa_wait_signal {
-	__u8 signal_ids[DPA_DRM_MAX_WAIT_SIGNALS];
+	__u16 signal_ids[DPA_DRM_MAX_WAIT_SIGNALS];
 	__u32 num_signals;
 	struct __kernel_timespec timeout;
 };
@@ -83,8 +83,8 @@ struct drm_dpa_wait_signal {
 struct drm_dpa_set_notification_queue {
 	__u64 base_address;
 	__u32 ring_size;
-	__u8 signal_id;
-	__u8 reserved[3];
+	__u16 signal_id;
+	__u8 reserved[2];
 };
 
 #define DRM_IOCTL_DPA_GET_INFO \
@@ -102,7 +102,7 @@ struct drm_dpa_set_notification_queue {
 #define DRM_IOCTL_DPA_SET_NOTIFICATION_QUEUE \
 	DPA_IOCTL(IOWR, SET_NOTIFICATION_QUEUE, set_notification_queue)
 
-#define DPA_DRM_MAX_SIGNAL_PAGES (4)
+#define DPA_DRM_MAX_SIGNAL_PAGES (16)
 
 #define DPA_MAX_QUEUE_PRIORITY		15
 

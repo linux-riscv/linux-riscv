@@ -268,7 +268,7 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 
 #define SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct duc_signal))
 
-static bool check_signals(struct dpa_process *p, u8 *ids, u32 num)
+static bool check_signals(struct dpa_process *p, u16 *ids, u32 num)
 {
 	int i;
 
@@ -294,7 +294,7 @@ struct dpa_signal_waiters {
 	unsigned int num;
 };
 
-static void add_signal_waiters(struct dpa_process *p, u8 *ids, u32 num,
+static void add_signal_waiters(struct dpa_process *p, u16 *ids, u32 num,
 			       struct dpa_signal_waiters *waiters)
 {
 	u64 key_mask = 0;

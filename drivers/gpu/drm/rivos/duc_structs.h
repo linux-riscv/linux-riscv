@@ -43,8 +43,8 @@ enum duc_signal_flags {
 };
 
 struct duc_signal_handle {
-	uint8_t index;
-	uint8_t reserved[3];
+	uint16_t index;
+	uint8_t reserved[2];
 	uint32_t flags;
 };
 
@@ -329,9 +329,9 @@ struct daffy_set_notification_queue_cmd {
 	uint64_t base_address;
 	uint32_t ring_size;
 	uint32_t pasid;
-	uint8_t signal_id;
+	uint16_t signal_id;
 
-	uint8_t reserved[31];
+	uint8_t reserved[30];
 };
 
 struct daffy_update_signal_cmd {
