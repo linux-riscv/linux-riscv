@@ -54,6 +54,12 @@
 		dma-noncoherent;
 		ranges;
 
+		rst: reset-controller@3003000 {
+			compatible = "sophgo,cv1800b-reset";
+			reg = <0x03003000 0x1000>;
+			#reset-cells = <1>;
+		};
+
 		uart0: serial@4140000 {
 			compatible = "snps,dw-apb-uart";
 			reg = <0x04140000 0x100>;
