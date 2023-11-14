@@ -4947,6 +4947,19 @@ static int pci_quirk_brcm_acs(struct pci_dev *dev, u16 acs_flags)
 		PCI_ACS_SV | PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_UF);
 }
 
+static int pci_quirk_rivos_rciep_acs(struct pci_dev *dev, u16 acs_flags)
+{
+	/*
+	 * Rivos RCiEP's are required to allow p2p only on translated addresses.
+	 */
+	if (pci_pcie_type(dev) != PCI_EXP_TYPE_RC_END)
+		return -ENOTTY;
+
+	return pci_acs_ctrl_enabled(acs_flags,
+		PCI_ACS_SV | PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_UF);
+}
+
+
 /*
  * Wangxun 10G/1G NICs have no ACS capability, and on multi-function
  * devices, peer-to-peer transactions are not be used between the functions.
@@ -5114,6 +5127,8 @@ static const struct pci_dev_acs_enabled {
 	{ PCI_VENDOR_ID_ZHAOXIN, PCI_ANY_ID, pci_quirk_zhaoxin_pcie_ports_acs },
 	/* Wangxun nics */
 	{ PCI_VENDOR_ID_WANGXUN, PCI_ANY_ID, pci_quirk_wangxun_nic_acs },
+	/* Rivos Inc. */
+	{ PCI_VENDOR_ID_RIVOS, PCI_ANY_ID, pci_quirk_rivos_rciep_acs },
 	{ 0 }
 };
 
