@@ -386,16 +386,24 @@ static u32 dev_iommu_get_max_pasids(struct device *dev)
 
 /*
  * Init the dev->iommu and dev->iommu_group in the struct device and get the
- * driver probed
+ * driver probed. Take ownership of fwspec, it always freed on error
+ * or freed by iommu_deinit_device().
  */
-static int iommu_init_device(struct device *dev, const struct iommu_ops *ops)
+static int iommu_init_device(struct device *dev, struct iommu_fwspec *fwspec,
+			     const struct iommu_ops *ops)
 {
 	struct iommu_device *iommu_dev;
 	struct iommu_group *group;
 	int ret;
 
-	if (!dev_iommu_get(dev))
+	if (!dev_iommu_get(dev)) {
+		iommu_fwspec_dealloc(fwspec);
 		return -ENOMEM;
+	}
+
+	if (dev->iommu->fwspec && dev->iommu->fwspec != fwspec)
+		iommu_fwspec_dealloc(dev->iommu->fwspec);
+	dev->iommu->fwspec = fwspec;
 
 	if (!try_module_get(ops->owner)) {
 		ret = -EINVAL;
@@ -483,16 +491,17 @@ static void iommu_deinit_device(struct device *dev)
 	dev_iommu_free(dev);
 }
 
-static int __iommu_probe_device(struct device *dev, struct list_head *group_list)
+static int __iommu_probe_device(struct device *dev,
+				struct iommu_fwspec *caller_fwspec,
+				struct list_head *group_list)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	struct iommu_fwspec *fwspec = caller_fwspec;
+	const struct iommu_ops *ops;
 	struct iommu_group *group;
 	static DEFINE_MUTEX(iommu_probe_device_lock);
 	struct group_device *gdev;
 	int ret;
 
-	if (!ops)
-		return -ENODEV;
 	/*
 	 * Serialise to avoid races between IOMMU drivers registering in
 	 * parallel and/or the "replay" calls from ACPI/OF code via client
@@ -502,13 +511,25 @@ static int __iommu_probe_device(struct device *dev, struct list_head *group_list
 	 */
 	mutex_lock(&iommu_probe_device_lock);
 
-	/* Device is probed already if in a group */
-	if (dev->iommu_group) {
-		ret = 0;
+	if (!fwspec && dev->iommu)
+		fwspec = dev->iommu->fwspec;
+	if (fwspec)
+		ops = fwspec->ops;
+	else
+		ops = dev->bus->iommu_ops;
+	if (!ops) {
+		ret = -ENODEV;
 		goto out_unlock;
 	}
 
-	ret = iommu_init_device(dev, ops);
+	/* Device is probed already if in a group */
+	if (dev->iommu_group) {
+		ret = 0;
+		iommu_fwspec_dealloc(caller_fwspec);
+		goto out_unlock;
+	}
+
+	ret = iommu_init_device(dev, fwspec, ops);
 	if (ret)
 		goto out_unlock;
 
@@ -566,12 +587,16 @@ out_unlock:
 	return ret;
 }
 
-int iommu_probe_device(struct device *dev)
+/*
+ * Ownership of fwspec always transfers to iommu_probe_device_fwspec(), it will
+ * be free'd even on failure.
+ */
+int iommu_probe_device_fwspec(struct device *dev, struct iommu_fwspec *fwspec)
 {
 	const struct iommu_ops *ops;
 	int ret;
 
-	ret = __iommu_probe_device(dev, NULL);
+	ret = __iommu_probe_device(dev, fwspec, NULL);
 	if (ret)
 		return ret;
 
@@ -1820,7 +1845,7 @@ static int probe_iommu_group(struct device *dev, void *data)
 	struct list_head *group_list = data;
 	int ret;
 
-	ret = __iommu_probe_device(dev, group_list);
+	ret = __iommu_probe_device(dev, NULL, group_list);
 	if (ret == -ENODEV)
 		ret = 0;
 
