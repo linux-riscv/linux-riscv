@@ -361,10 +361,8 @@ static void dev_iommu_free(struct device *dev)
 	struct dev_iommu *param = dev->iommu;
 
 	dev->iommu = NULL;
-	if (param->fwspec) {
-		fwnode_handle_put(param->fwspec->iommu_fwnode);
-		kfree(param->fwspec);
-	}
+	if (param->fwspec)
+		iommu_fwspec_dealloc(param->fwspec);
 	kfree(param);
 }
 
@@ -2920,10 +2918,61 @@ const struct iommu_ops *iommu_ops_from_fwnode(struct fwnode_handle *fwnode)
 	return ops;
 }
 
+static int iommu_fwspec_assign_iommu(struct iommu_fwspec *fwspec,
+				     struct device *dev,
+				     struct fwnode_handle *iommu_fwnode)
+{
+	const struct iommu_ops *ops;
+
+	if (fwspec->iommu_fwnode) {
+		/*
+		 * fwspec->iommu_fwnode is the first iommu's fwnode. In the rare
+		 * case of multiple iommus for one device they must point to the
+		 * same driver, checked via same ops.
+		 */
+		ops = iommu_ops_from_fwnode(iommu_fwnode);
+		if (fwspec->ops != ops)
+			return -EINVAL;
+		return 0;
+	}
+
+	if (!fwspec->ops) {
+		ops = iommu_ops_from_fwnode(iommu_fwnode);
+		if (!ops)
+			return driver_deferred_probe_check_state(dev);
+		fwspec->ops = ops;
+	}
+
+	of_node_get(to_of_node(iommu_fwnode));
+	fwspec->iommu_fwnode = iommu_fwnode;
+	return 0;
+}
+
+struct iommu_fwspec *iommu_fwspec_alloc(void)
+{
+	struct iommu_fwspec *fwspec;
+
+	fwspec = kzalloc(sizeof(*fwspec), GFP_KERNEL);
+	if (!fwspec)
+		return ERR_PTR(-ENOMEM);
+	return fwspec;
+}
+
+void iommu_fwspec_dealloc(struct iommu_fwspec *fwspec)
+{
+	if (!fwspec)
+		return;
+
+	if (fwspec->iommu_fwnode)
+		fwnode_handle_put(fwspec->iommu_fwnode);
+	kfree(fwspec);
+}
+
 int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
 		      const struct iommu_ops *ops)
 {
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+	int ret;
 
 	if (fwspec)
 		return ops == fwspec->ops ? 0 : -EINVAL;
@@ -2931,29 +2980,22 @@ int iommu_fwspec_init(struct device *dev, struct fwnode_handle *iommu_fwnode,
 	if (!dev_iommu_get(dev))
 		return -ENOMEM;
 
-	fwspec = kzalloc(sizeof(*fwspec), GFP_KERNEL);
-	if (!fwspec)
-		return -ENOMEM;
+	fwspec = iommu_fwspec_alloc();
+	if (IS_ERR(fwspec))
+		return PTR_ERR(fwspec);
 
-	of_node_get(to_of_node(iommu_fwnode));
-	fwspec->iommu_fwnode = iommu_fwnode;
 	fwspec->ops = ops;
+	ret = iommu_fwspec_assign_iommu(fwspec, dev, iommu_fwnode);
+	if (ret) {
+		iommu_fwspec_dealloc(fwspec);
+		return ret;
+	}
+
 	dev_iommu_fwspec_set(dev, fwspec);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(iommu_fwspec_init);
 
-void iommu_fwspec_free(struct device *dev)
-{
-	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
-
-	if (fwspec) {
-		fwnode_handle_put(fwspec->iommu_fwnode);
-		kfree(fwspec);
-		dev_iommu_fwspec_set(dev, NULL);
-	}
-}
-EXPORT_SYMBOL_GPL(iommu_fwspec_free);
 
 int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
 {
