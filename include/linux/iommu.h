@@ -852,10 +852,7 @@ static inline void *dev_iommu_priv_get(struct device *dev)
 		return NULL;
 }
 
-static inline void dev_iommu_priv_set(struct device *dev, void *priv)
-{
-	dev->iommu->priv = priv;
-}
+void dev_iommu_priv_set(struct device *dev, void *priv);
 
 int iommu_probe_device_fwspec(struct device *dev, struct iommu_fwspec *fwspec);
 static inline int iommu_probe_device(struct device *dev)
