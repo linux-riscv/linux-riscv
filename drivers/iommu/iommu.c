@@ -2983,6 +2983,9 @@ int iommu_fwspec_of_xlate(struct iommu_fwspec *fwspec, struct device *dev,
 	if (ret)
 		return ret;
 
+	if (fwspec->ops->of_xlate_fwspec)
+		return fwspec->ops->of_xlate_fwspec(fwspec, dev, iommu_spec);
+
 	if (!fwspec->ops->of_xlate)
 		return -ENODEV;
 
