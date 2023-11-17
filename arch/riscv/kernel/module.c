@@ -45,9 +45,9 @@ void process_accumulated_relocations(struct module *me);
 int add_relocation_to_accumulate(struct module *me, int type, void *location,
 				 unsigned int hashtable_bits, Elf_Addr v);
 
-struct hlist_head *relocation_hashtable;
+static struct hlist_head *relocation_hashtable;
 
-struct list_head used_buckets_list;
+static struct list_head used_buckets_list;
 
 /*
  * The auipc+jalr instruction pair can reach any PC-relative offset
@@ -64,7 +64,7 @@ static bool riscv_insn_valid_32bit_offset(ptrdiff_t val)
 
 static int riscv_insn_rmw(void *location, u32 keep, u32 set)
 {
-	u16 *parcel = location;
+	__le16 *parcel = location;
 	u32 insn = (u32)le16_to_cpu(parcel[0]) | (u32)le16_to_cpu(parcel[1]) << 16;
 
 	insn &= keep;
@@ -77,7 +77,7 @@ static int riscv_insn_rmw(void *location, u32 keep, u32 set)
 
 static int riscv_insn_rvc_rmw(void *location, u16 keep, u16 set)
 {
-	u16 *parcel = location;
+	__le16 *parcel = location;
 	u16 insn = le16_to_cpu(*parcel);
 
 	insn &= keep;
