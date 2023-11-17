@@ -1682,7 +1682,7 @@ static int isbdm_update_rot_link_state(struct isbdm *ii) {
 
 	} else if (rc != sizeof(response)) {
 		dev_warn(&ii->pdev->dev,
-			 "Failed to update RoT: Expected %d byte response, received %d bytes\n",
+			 "Failed to update RoT: Expected %zd byte response, rc = %d\n",
 			 sizeof(response), rc);
 
 		return -EIO;

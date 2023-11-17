@@ -126,14 +126,6 @@ struct isbdm_ucontext {
 	struct isbdm_device *sdev;
 };
 
-// /*
-//  * The RDMA core does not define LOCAL_READ access, which is always
-//  * enabled implicitly.
-//  */
-// #define IWARP_ACCESS_MASK					\
-// 	(IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_WRITE	|	\
-// 	 IB_ACCESS_REMOTE_READ)
-
 /*
  * siw presentation of user memory registered as source
  * or target of RDMA operations.

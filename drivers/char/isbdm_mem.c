@@ -79,8 +79,6 @@ int isbdm_mr_add_mem(struct isbdm_mr *mr, struct ib_pd *pd, void *mem_obj,
 	mem->va = start;
 	mem->len = len;
 	mem->pd = pd;
-	/* TODO: Why does this IWARP_ACCESS_MASK exist? */
-	//mem->perms = rights & IWARP_ACCESS_MASK;
 	mem->perms = rights;
 	kref_init(&mem->ref);
 	mr->mem = mem;

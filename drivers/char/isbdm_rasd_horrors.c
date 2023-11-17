@@ -8,6 +8,7 @@
  * 2023-Aug-11 Evan Green <evan@rivosinc.com>
  */
 
+#include <linux/fwnode.h>
 #include <linux/irqchip/riscv-imsic.h>
 #include <linux/irqdomain.h>
 #include <linux/pci.h>
@@ -176,10 +177,9 @@ static void rasd_enable_guest_interrupts(struct isbdm *ii)
 {
 	int cpu = smp_processor_id();
 	unsigned long old_hstatus;
-	unsigned long mie, hgeie;
+	unsigned long hgeie;
 	int ifile;
 	int ifile_count = ii->ifiles_per_cpu;
-	int ret;
 
 	/* Weird discontiguous configurations are not expected. */
 	if (WARN_ON(cpu >= ii->cpu_count))
