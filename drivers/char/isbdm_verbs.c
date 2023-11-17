@@ -1099,8 +1099,6 @@ int isbdm_post_send(struct ib_qp *base_qp, const struct ib_send_wr *wr,
 		case IB_WR_REG_MR:
 			sqe->base_mr = (uintptr_t)reg_wr(wr)->mr;
 			sqe->rkey = reg_wr(wr)->key;
-			/* TODO: Why was IWARP_ACCESS_MASK a thing? */
-			//sqe->access = reg_wr(wr)->access & IWARP_ACCESS_MASK;
 			sqe->access = reg_wr(wr)->access;
 			sqe->opcode = ISBDM_OP_REG_MR;
 			break;
