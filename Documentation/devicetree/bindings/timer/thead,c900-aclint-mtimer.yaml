@@ -17,7 +17,20 @@ properties:
       - const: thead,c900-aclint-mtimer
 
   reg:
-    maxItems: 1
+    oneOf:
+      - items:
+          - description: MTIME Registers
+          - description: MTIMECMP Registers
+      - items:
+          - description: MTIMECMP Registers
+
+  reg-names:
+    oneOf:
+      - items:
+          - const: mtime
+          - const: mtimecmp
+      - items:
+          - const: mtimecmp
 
   interrupts-extended:
     minItems: 1
@@ -28,7 +41,33 @@ additionalProperties: false
 required:
   - compatible
   - reg
+  - reg-names
   - interrupts-extended
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: thead,c900-aclint-mtimer
+    then:
+      properties:
+        reg:
+          items:
+            - description: MTIMECMP Registers
+        reg-names:
+          items:
+            - const: mtimecmp
+    else:
+      properties:
+        reg:
+          items:
+            - description: MTIME Registers
+            - description: MTIMECMP Registers
+        reg-names:
+          items:
+            - const: mtime
+            - const: mtimecmp
 
 examples:
   - |
@@ -39,5 +78,6 @@ examples:
                             <&cpu3intc 7>,
                             <&cpu4intc 7>;
       reg = <0xac000000 0x00010000>;
+      reg-names = "mtimecmp";
     };
 ...
