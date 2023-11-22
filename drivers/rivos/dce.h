@@ -24,6 +24,7 @@
 #include "linux/spinlock.h"
 #include "linux/eventfd.h"
 #include <linux/workqueue.h>
+#include <linux/list.h>
 
 #define DCE_INTERRUPT_CONFIG_DESCRIPTOR_COMPLETION 48
 #define DCE_INTERRUPT_CONFIG_TIMEOUT               56
@@ -276,7 +277,10 @@ struct work_queue {
 	spinlock_t lock;
 	/* Wait queue to wait on space being available for job submission */
 	wait_queue_head_t cleanupd_wq;
-} work_queue;
+
+	/* list of file ctx associated with the wq */
+	struct list_head file_contexts;
+};
 
 struct dce_driver_priv {
 	struct work_struct clean_up_worker;

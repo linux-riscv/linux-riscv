@@ -21,6 +21,7 @@
 #include <asm-generic/int-ll64.h>
 #include <linux/bitfield.h>
 #include <linux/bitops.h>
+#include <linux/list.h>
 #include <linux/cdev.h>
 #include <linux/delay.h>
 #include <linux/iopoll.h>
@@ -164,7 +165,18 @@ struct dce_submitter_ctx {
 	unsigned int pasid;
 	/* the minimum value of clean for all jobs to be done*/
 	uint64_t clean_treshold;
+	/* a list entry to attach to wq*/
+	struct list_head node;
 };
+
+/* Not thread safe, should use wq->lock if concurrent accesses are possible */
+static void associate_ctx_to_wq(struct dce_submitter_ctx *ctx, int wq_num)
+{
+	if (wq_num >= NUM_WQ)
+		return;
+
+	list_add_tail(&ctx->node, &ctx->priv->wq[wq_num].file_contexts);
+}
 
 static void set_queue_enable(struct dce_driver_priv *dev_ctx, int wq_num, bool enable);
 int dce_ops_open(struct inode *inode, struct file *file)
@@ -183,6 +195,7 @@ int dce_ops_open(struct inode *inode, struct file *file)
 	ctx->pasid = 0;
 	ctx->wq_num = -1;
 	ctx->clean_treshold = 0;
+	INIT_LIST_HEAD(&ctx->node);
 
 	if (priv->sva_enabled) {
 		ctx->sva = iommu_sva_bind_device(&priv->pdev->dev, current->mm);
@@ -218,7 +231,7 @@ error:
 /*
  * Cancels a WQ and return when it is in a quiescent state
  * Purely a HW facing operation, no need for locking
- * @priv: the dce_defice/fnction driver data
+ * @priv: the dce device/function driver data
  * @wq_num: The index of the wq to be cancelled
  */
 static void dce_cancel_wq(struct dce_driver_priv *priv, int wq_num)
@@ -301,7 +314,7 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 {
 	/* Policy: wait for jobs to execute */
 	struct work_queue *wq = priv->wq+wq_num;
-	struct DescriptorRing *ring = &(wq->descriptor_ring);
+	struct DescriptorRing *ring = &wq->descriptor_ring;
 	uint64_t tail = ring->hti->tail;
 	int wait_res;
 	/* Make queue unsuitable for submission */
@@ -446,6 +459,7 @@ int dce_ops_release(struct inode *inode, struct file *file)
 opencleanup:
 	if (ctx->sva)
 		iommu_sva_unbind_device(ctx->sva);
+	list_del(&ctx->node);
 	kfree(ctx);
 	dev_info(&priv->dev, "Released fd for queue %d\n", wq_num);
 	return err;
@@ -600,23 +614,42 @@ void dce_reset_descriptor_ring(struct dce_driver_priv *drv_priv, int wq_num)
 	/*TODO: repurpose this function */
 }
 
-/* return an unused workqueue number or -1*/
+/* return index of an unused workqueue number or -1*/
 static int reserve_unused_wq(struct dce_driver_priv *priv)
 {
 	int ret = -1;
 
-	mutex_lock(&(priv->lock));
+	/* Would be faster to have a bitfield of unused WQs*/
 	for (int i = 0; i < NUM_WQ; ++i) {
 		struct work_queue *wq = priv->wq + i;
+		spin_lock(&wq->lock);
 
 		if (wq->type == DISABLED_WQ) {
 			ret = i;
 			wq->type = RESERVED_WQ;
+			spin_unlock(&wq->lock);
 			break;
 		}
+		spin_unlock(&wq->lock);
 	}
-	mutex_unlock(&(priv->lock));
 	return ret;
+}
+
+
+/* Return wq status to disabled for reuse */
+static void release_wq(struct dce_driver_priv *priv, int wq_num)
+{
+	struct work_queue *wq;
+
+	if (wq_num >= NUM_WQ)
+		return;
+	wq = priv->wq + wq_num;
+
+	spin_lock(&wq->lock);
+	if (!list_empty(&priv->wq[wq_num].file_contexts))
+		dev_err(&priv->dev, "Relasing WQ still used by file descriptors\n");
+	wq->type = DISABLED_WQ;
+	spin_unlock(&wq->lock);
 }
 
 /* set the enable bit for queue in dce HW */
@@ -724,6 +757,7 @@ static int setup_user_wq(struct dce_submitter_ctx *ctx,
 static int request_user_wq(struct dce_submitter_ctx *ctx, struct UserArea *ua)
 {
 	struct dce_driver_priv *priv = ctx->priv;
+	int res = 0;
 	/*TODO: Could make sense to do UserArea validation here */
 	int wqnum = reserve_unused_wq(priv);
 
@@ -731,11 +765,15 @@ static int request_user_wq(struct dce_submitter_ctx *ctx, struct UserArea *ua)
 		return -ENOBUFS;
 
 	ctx->wq_num = wqnum;
-	/*
-	 * TODO: Refactor, pass only &wq to setup_memory
-	 * return WQ as DISABLED on error
-	 */
-	return setup_user_wq(ctx, ctx->wq_num, ua);
+	res = setup_user_wq(ctx, ctx->wq_num, ua);
+	if (res) { /* setup failed */
+		release_wq(priv, wqnum);
+		return res;
+	}
+
+	associate_ctx_to_wq(ctx, wqnum);
+
+	return 0;
 }
 
 int setup_kernel_wq(struct dce_driver_priv *dce_priv, int wq_num,
@@ -844,6 +882,20 @@ int setup_default_kernel_queue(struct dce_driver_priv *dce_priv)
 	return 0;
 }
 
+static int associate_ctx_to_default_wq(struct dce_submitter_ctx *ctx)
+{
+	struct work_queue *wq = &ctx->priv->wq[0];
+	spin_lock(&wq->lock);
+	if (wq->type != SHARED_KERNEL_WQ) {
+		spin_unlock(&wq->lock);
+		return -EFAULT;
+	}
+	ctx->wq_num = 0;
+	associate_ctx_to_wq(ctx, 0);
+	spin_unlock(&wq->lock);
+	return 0;
+}
+
 static int request_kernel_wq(struct dce_submitter_ctx *ctx,
 			     struct KernelQueueReq *kqr)
 {
@@ -860,21 +912,26 @@ static int request_kernel_wq(struct dce_submitter_ctx *ctx,
 		int wqnum = reserve_unused_wq(ctx->priv);
 
 		if (wqnum < 0) { /* no more free queues */
-			ctx->wq_num = 0; /* Fallback to shared queue */
-			/* TODO: Would it make more sense to just fault here*/
-			dev_info(&ctx->priv->dev, "Out of wq, falling back to default!\n");
+			if (associate_ctx_to_default_wq(ctx)) {
+				dev_warn(&ctx->priv->dev,
+					"Out of wq, no default!\n");
+			} else {
+				dev_info(&ctx->priv->dev,
+					"Out of wq, using default!\n");
+			}
 		} else {
+			int res = 0;
+
 			ctx->wq_num = wqnum;
-			/*
-			 * TODO: Refactor, pass only &wq to setup_memory
-			 * requires a separate activation function for the queue
-			 */
-			if (setup_kernel_wq(ctx->priv, wqnum, kqr) < 0) {
+			res = setup_kernel_wq(ctx->priv, wqnum, kqr);
+			if (res) {
 				dev_err(&ctx->priv->dev,
 					"Failure to setup wq %d as kernel WQ\n",
 					wqnum);
+				release_wq(ctx->priv, wqnum);
 				return -EFAULT;
 			}
+			associate_ctx_to_wq(ctx, wqnum);
 		}
 	}
 	return 0;
@@ -886,6 +943,7 @@ static void init_wq(struct work_queue *wq)
 	wq->type = DISABLED_WQ;
 	spin_lock_init(&wq->lock);
 	init_waitqueue_head(&wq->cleanupd_wq);
+	INIT_LIST_HEAD(&wq->file_contexts);
 }
 
 void free_resources(struct device *dev, struct dce_driver_priv *priv)
@@ -1022,8 +1080,12 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		/* Default to WQ 0 (Shared kernel) if not assigned */
 		if (ctx->wq_num == -1) {
-			pr_info("Falling back to default queue\n");
-			ctx->wq_num = 0;
+			if (associate_ctx_to_default_wq(ctx)) {
+				pr_info("Falling back to default queue\n");
+				return -EBUSY;
+			} else {
+				pr_info("Falling back to default queue\n");
+			}
 		}
 
 		if (parse_descriptor_based_on_opcode(&descriptor,
