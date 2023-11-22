@@ -93,9 +93,11 @@ FEATURE_TESTS_EXTRA :=                  \
          libunwind-x86_64               \
          libunwind-arm                  \
          libunwind-aarch64              \
+         libunwind-riscv                \
          libunwind-debug-frame          \
          libunwind-debug-frame-arm      \
          libunwind-debug-frame-aarch64  \
+         libunwind-debug-frame-riscv    \
          cxx                            \
          llvm                           \
          llvm-version                   \
