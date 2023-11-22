@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
+
+export KBUILD_EXTRA_WARN_DTC=1
+
 subdir-y += allwinner
 subdir-y += canaan
 subdir-y += microchip
