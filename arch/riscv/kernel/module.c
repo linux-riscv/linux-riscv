@@ -45,9 +45,9 @@ void process_accumulated_relocations(struct module *me);
 int add_relocation_to_accumulate(struct module *me, int type, void *location,
 				 unsigned int hashtable_bits, Elf_Addr v);
 
-struct hlist_head *relocation_hashtable;
+static struct hlist_head *relocation_hashtable;
 
-struct list_head used_buckets_list;
+static struct list_head used_buckets_list;
 
 /*
  * The auipc+jalr instruction pair can reach any PC-relative offset
