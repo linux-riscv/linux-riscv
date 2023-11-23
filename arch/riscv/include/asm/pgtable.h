@@ -272,6 +272,18 @@ static inline int pmd_leaf(pmd_t pmd)
 	return pmd_present(pmd) && (pmd_val(pmd) & _PAGE_LEAF);
 }
 
+#define pmd_exec	pmd_exec
+static inline int pmd_exec(pmd_t pmd)
+{
+	return pmd_val(pmd) & _PAGE_EXEC;
+}
+
+#define __HAVE_ARCH_PMD_SAME
+static inline int pmd_same(pmd_t pmd_a, pmd_t pmd_b)
+{
+	return pmd_val(pmd_a) == pmd_val(pmd_b);
+}
+
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 	*pmdp = pmd;
@@ -506,7 +518,7 @@ static inline int pte_protnone(pte_t pte)
 
 static inline int pmd_protnone(pmd_t pmd)
 {
-	return pte_protnone(pmd_pte(pmd));
+	return (pmd_val(pmd) & (_PAGE_PRESENT | _PAGE_PROT_NONE)) == _PAGE_PROT_NONE;
 }
 #endif
 
@@ -740,73 +752,95 @@ static inline unsigned long pud_pfn(pud_t pud)
 
 static inline pmd_t pmd_modify(pmd_t pmd, pgprot_t newprot)
 {
-	return pte_pmd(pte_modify(pmd_pte(pmd), newprot));
+	unsigned long newprot_val = pgprot_val(newprot);
+
+	ALT_THEAD_PMA(newprot_val);
+
+	return __pmd((pmd_val(pmd) & _PAGE_CHG_MASK) | newprot_val);
 }
 
 #define pmd_write pmd_write
 static inline int pmd_write(pmd_t pmd)
 {
-	return pte_write(pmd_pte(pmd));
+	return pmd_val(pmd) & _PAGE_WRITE;
 }
 
 static inline int pmd_dirty(pmd_t pmd)
 {
-	return pte_dirty(pmd_pte(pmd));
+	return pmd_val(pmd) & _PAGE_DIRTY;
 }
 
 #define pmd_young pmd_young
 static inline int pmd_young(pmd_t pmd)
 {
-	return pte_young(pmd_pte(pmd));
+	return pmd_val(pmd) & _PAGE_ACCESSED;
 }
 
 static inline int pmd_user(pmd_t pmd)
 {
-	return pte_user(pmd_pte(pmd));
+	return pmd_val(pmd) & _PAGE_USER;
 }
 
 static inline pmd_t pmd_mkold(pmd_t pmd)
 {
-	return pte_pmd(pte_mkold(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) & ~(_PAGE_ACCESSED));
 }
 
 static inline pmd_t pmd_mkyoung(pmd_t pmd)
 {
-	return pte_pmd(pte_mkyoung(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) | _PAGE_ACCESSED);
 }
 
 static inline pmd_t pmd_mkwrite_novma(pmd_t pmd)
 {
-	return pte_pmd(pte_mkwrite_novma(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) | _PAGE_WRITE);
 }
 
 static inline pmd_t pmd_wrprotect(pmd_t pmd)
 {
-	return pte_pmd(pte_wrprotect(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) & (~_PAGE_WRITE));
 }
 
 static inline pmd_t pmd_mkclean(pmd_t pmd)
 {
-	return pte_pmd(pte_mkclean(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) & (~_PAGE_DIRTY));
 }
 
 static inline pmd_t pmd_mkdirty(pmd_t pmd)
 {
-	return pte_pmd(pte_mkdirty(pmd_pte(pmd)));
+	return __pmd(pmd_val(pmd) | _PAGE_DIRTY);
+}
+
+#define pmd_accessible(mm, pmd)		((void)(pmd), 1)
+
+static inline void __set_pmd_at(pmd_t *pmdp, pmd_t pmd)
+{
+	if (pmd_present(pmd) && pmd_exec(pmd))
+		flush_icache_pte(pmd_pte(pmd));
+
+	set_pmd(pmdp, pmd);
 }
 
 static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 				pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(mm, pmdp, pmd);
-	return __set_pte_at((pte_t *)pmdp, pmd_pte(pmd));
+	return __set_pmd_at(pmdp, pmd);
+}
+
+static inline void __set_pud_at(pud_t *pudp, pud_t pud)
+{
+	if (pud_present(pud) && pud_exec(pud))
+		flush_icache_pte(pud_pte(pud));
+
+	set_pud(pudp, pud);
 }
 
 static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
 				pud_t *pudp, pud_t pud)
 {
 	page_table_check_pud_set(mm, pudp, pud);
-	return __set_pte_at((pte_t *)pudp, pud_pte(pud));
+	return __set_pud_at(pudp, pud);
 }
 
 #ifdef CONFIG_PAGE_TABLE_CHECK
@@ -826,29 +860,22 @@ static inline bool pud_user_accessible_page(pud_t pud)
 }
 #endif
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-static inline int pmd_trans_huge(pmd_t pmd)
-{
-	return pmd_leaf(pmd);
-}
-
 #define __HAVE_ARCH_PMDP_SET_ACCESS_FLAGS
 static inline int pmdp_set_access_flags(struct vm_area_struct *vma,
 					unsigned long address, pmd_t *pmdp,
 					pmd_t entry, int dirty)
 {
-	return ptep_set_access_flags(vma, address, (pte_t *)pmdp, pmd_pte(entry), dirty);
+	if (!pmd_same(*pmdp, entry))
+		set_pmd_at(vma->vm_mm, address, pmdp, entry);
+	/*
+	 * update_mmu_cache will unconditionally execute, handling both
+	 * the case that the PMD changed and the spurious fault case.
+	 */
+	return true;
 }
 
-#define __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
-static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
-					unsigned long address, pmd_t *pmdp)
-{
-	return ptep_test_and_clear_young(vma, address, (pte_t *)pmdp);
-}
-
-#define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
-static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
+#define __HAVE_ARCH_PMDP_GET_AND_CLEAR
+static inline pmd_t pmdp_get_and_clear(struct mm_struct *mm,
 					unsigned long address, pmd_t *pmdp)
 {
 	pmd_t pmd = __pmd(atomic_long_xchg((atomic_long_t *)pmdp, 0));
@@ -862,7 +889,46 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 					unsigned long address, pmd_t *pmdp)
 {
-	ptep_set_wrprotect(mm, address, (pte_t *)pmdp);
+	atomic_long_and(~(unsigned long)_PAGE_WRITE, (atomic_long_t *)pmdp);
+}
+
+#define __HAVE_ARCH_PMDP_CLEAR_FLUSH
+static inline pmd_t pmdp_clear_flush(struct vm_area_struct *vma,
+					unsigned long address, pmd_t *pmdp)
+{
+	struct mm_struct *mm = (vma)->vm_mm;
+	pmd_t pmd = pmdp_get_and_clear(mm, address, pmdp);
+
+	if (pmd_accessible(mm, pmd))
+		flush_tlb_page(vma, address);
+
+	return pmd;
+}
+
+#define __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
+static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
+					unsigned long address, pmd_t *pmdp)
+{
+	if (!pmd_young(*pmdp))
+		return 0;
+	return test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pmd_val(*pmdp));
+}
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+static inline int pmd_trans_huge(pmd_t pmd)
+{
+	return pmd_leaf(pmd);
+}
+
+#define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
+static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
+					unsigned long address, pmd_t *pmdp)
+{
+	pmd_t pmd = __pmd(atomic_long_xchg((atomic_long_t *)pmdp, 0));
+
+	page_table_check_pmd_clear(mm, pmd);
+
+	return pmd;
 }
 
 #define pmdp_establish pmdp_establish

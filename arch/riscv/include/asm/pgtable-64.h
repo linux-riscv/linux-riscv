@@ -206,6 +206,12 @@ static inline int pud_leaf(pud_t pud)
 	return pud_present(pud) && (pud_val(pud) & _PAGE_LEAF);
 }
 
+#define pud_exec	pud_exec
+static inline int pud_exec(pud_t pud)
+{
+	return pud_val(pud) & _PAGE_EXEC;
+}
+
 static inline int pud_user(pud_t pud)
 {
 	return pud_val(pud) & _PAGE_USER;

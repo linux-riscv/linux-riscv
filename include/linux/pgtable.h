@@ -1630,8 +1630,14 @@ typedef unsigned int pgtbl_mod_mask;
 #ifndef pud_leaf
 #define pud_leaf(x)	0
 #endif
+#ifndef pud_exec
+#define pud_exec(x)	0
+#endif
 #ifndef pmd_leaf
 #define pmd_leaf(x)	0
+#endif
+#ifndef pmd_exec
+#define pmd_exec(x)	0
 #endif
 
 #ifndef pgd_leaf_size
