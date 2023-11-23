@@ -227,6 +227,7 @@ config RISCV_HW_PAGE_SHIFT
 
 config RISCV_PAGE_SHIFT
 	int
+	default 16 if RISCV_64K_PAGES
 	default 12
 
 config KASAN_SHADOW_OFFSET
@@ -691,6 +692,25 @@ config RISCV_BOOT_SPINWAIT
 	  hart to enter Linux.
 
 	  If unsure what to do here, say N.
+
+choice
+	prompt "Page size"
+	default RISCV_4K_PAGES
+	help
+	  Page size (translation granule) configuration.
+
+config RISCV_4K_PAGES
+	bool "4KB"
+	help
+	  This feature enables 4KB pages support.
+
+config RISCV_64K_PAGES
+	bool "64KB"
+	depends on ARCH_HAS_STRICT_KERNEL_RWX && 64BIT
+	help
+	  This feature enables 64KB pages support (4KB by default)
+
+endchoice
 
 config ARCH_SUPPORTS_KEXEC
 	def_bool MMU
