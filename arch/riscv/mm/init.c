@@ -805,7 +805,7 @@ retry:
 				(uintptr_t)early_p4d : (uintptr_t)early_pud,
 			   PGDIR_SIZE, PAGE_TABLE);
 
-	identity_satp = PFN_DOWN((uintptr_t)&early_pg_dir) | satp_mode;
+	identity_satp = make_satp(PFN_DOWN((uintptr_t)&early_pg_dir), 0, satp_mode);
 
 	local_flush_tlb_all();
 	csr_write(CSR_SATP, identity_satp);
@@ -1285,6 +1285,8 @@ static void __init create_linear_mapping_page_table(void)
 
 static void __init setup_vm_final(void)
 {
+	unsigned long satp;
+
 	/* Setup swapper PGD for fixmap */
 #if !defined(CONFIG_64BIT)
 	/*
@@ -1318,7 +1320,8 @@ static void __init setup_vm_final(void)
 	clear_fixmap(FIX_P4D);
 
 	/* Move to swapper page table */
-	csr_write(CSR_SATP, PFN_DOWN(__pa_symbol(swapper_pg_dir)) | satp_mode);
+	satp = make_satp(PFN_DOWN(__pa_symbol(swapper_pg_dir)), 0, satp_mode);
+	csr_write(CSR_SATP, satp);
 	local_flush_tlb_all();
 
 	pt_ops_set_late();

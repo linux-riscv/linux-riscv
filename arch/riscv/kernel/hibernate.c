@@ -395,7 +395,8 @@ int swsusp_arch_resume(void)
 	if (ret)
 		return ret;
 
-	hibernate_restore_image(resume_hdr.saved_satp, (PFN_DOWN(__pa(resume_pg_dir)) | satp_mode),
+	hibernate_restore_image(resume_hdr.saved_satp,
+				make_satp(PFN_DOWN(__pa(resume_pg_dir)), 0, satp_mode),
 				resume_hdr.restore_cpu_addr);
 
 	return 0;

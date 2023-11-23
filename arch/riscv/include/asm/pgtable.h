@@ -213,6 +213,13 @@ extern pgd_t swapper_pg_dir[];
 extern pgd_t trampoline_pg_dir[];
 extern pgd_t early_pg_dir[];
 
+static inline unsigned long make_satp(unsigned long pfn,
+		unsigned long asid, unsigned long satp_mode)
+{
+	return (pfn_to_hwpfn(pfn) |
+		((asid & SATP_ASID_MASK) << SATP_ASID_SHIFT) | satp_mode);
+}
+
 static __always_inline int __pte_present(unsigned long pteval)
 {
 	return (pteval & (_PAGE_PRESENT | _PAGE_PROT_NONE));
