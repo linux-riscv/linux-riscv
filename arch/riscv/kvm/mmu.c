@@ -36,20 +36,34 @@ static unsigned long gstage_pgd_levels __ro_after_init = 2;
 			 gstage_pgd_xbits)
 #define gstage_gpa_size	((gpa_t)(1ULL << gstage_gpa_bits))
 
-#define gstage_pte_leaf(__ptep)	\
-	(pte_val(*(__ptep)) & (_PAGE_READ | _PAGE_WRITE | _PAGE_EXEC))
+#define gstage_pmd_leaf(__pmdp) \
+	(pmd_val(pmdp_get(__pmdp)) & (_PAGE_READ | _PAGE_WRITE | _PAGE_EXEC))
 
-static inline unsigned long gstage_pte_index(gpa_t addr, u32 level)
+#define gstage_pte_leaf(__ptep)	\
+	(pte_val(ptep_get(__ptep)) & (_PAGE_READ | _PAGE_WRITE | _PAGE_EXEC))
+
+static inline unsigned long gstage_pmd_index(gpa_t addr, u32 level)
 {
 	unsigned long mask;
 	unsigned long shift = HGATP_PAGE_SHIFT + (gstage_index_bits * level);
 
+	BUG_ON(level == 0);
 	if (level == (gstage_pgd_levels - 1))
-		mask = (PTRS_PER_PTE * (1UL << gstage_pgd_xbits)) - 1;
+		mask = (PTRS_PER_PMD * (1UL << gstage_pgd_xbits)) - 1;
 	else
-		mask = PTRS_PER_PTE - 1;
+		mask = PTRS_PER_PMD - 1;
 
 	return (addr >> shift) & mask;
+}
+
+static inline unsigned long gstage_pte_index(gpa_t addr, u32 level)
+{
+	return (addr >> PAGE_SHIFT) & (PTRS_PER_PTE - 1);
+}
+
+static inline unsigned long gstage_pmd_page_vaddr(pmd_t pmd)
+{
+	return (unsigned long)pfn_to_virt(__page_val_to_pfn(pmd_val(pmd)));
 }
 
 static inline unsigned long gstage_pte_page_vaddr(pte_t pte)
@@ -60,9 +74,13 @@ static inline unsigned long gstage_pte_page_vaddr(pte_t pte)
 static int gstage_page_size_to_level(unsigned long page_size, u32 *out_level)
 {
 	u32 i;
-	unsigned long psz = 1UL << 12;
+	unsigned long psz = 1UL << HW_PAGE_SHIFT;
 
-	for (i = 0; i < gstage_pgd_levels; i++) {
+	if (page_size == PAGE_SIZE) {
+		*out_level = 0;
+		return 0;
+	}
+	for (i = 1; i < gstage_pgd_levels; i++) {
 		if (page_size == (psz << (i * gstage_index_bits))) {
 			*out_level = i;
 			return 0;
@@ -77,7 +95,11 @@ static int gstage_level_to_page_order(u32 level, unsigned long *out_pgorder)
 	if (gstage_pgd_levels < level)
 		return -EINVAL;
 
-	*out_pgorder = 12 + (level * gstage_index_bits);
+	if (level == 0)
+		*out_pgorder = PAGE_SHIFT;
+	else
+		*out_pgorder = HW_PAGE_SHIFT + (level * gstage_index_bits);
+
 	return 0;
 }
 
@@ -95,29 +117,39 @@ static int gstage_level_to_page_size(u32 level, unsigned long *out_pgsize)
 }
 
 static bool gstage_get_leaf_entry(struct kvm *kvm, gpa_t addr,
-				  pte_t **ptepp, u32 *ptep_level)
+				  void **ptepp, u32 *ptep_level)
 {
-	pte_t *ptep;
+	pmd_t *pmdp = NULL;
+	pte_t *ptep = NULL;
 	u32 current_level = gstage_pgd_levels - 1;
 
 	*ptep_level = current_level;
-	ptep = (pte_t *)kvm->arch.pgd;
-	ptep = &ptep[gstage_pte_index(addr, current_level)];
-	while (ptep && pte_val(*ptep)) {
-		if (gstage_pte_leaf(ptep)) {
+	pmdp = (pmd_t *)kvm->arch.pgd;
+	pmdp = &pmdp[gstage_pmd_index(addr, current_level)];
+	while (current_level && pmdp && pmd_val(pmdp_get(pmdp))) {
+		if (gstage_pmd_leaf(pmdp)) {
 			*ptep_level = current_level;
-			*ptepp = ptep;
+			*ptepp = (void *)pmdp;
 			return true;
 		}
 
+		current_level--;
+		*ptep_level = current_level;
+		pmdp = (pmd_t *)gstage_pmd_page_vaddr(pmdp_get(pmdp));
 		if (current_level) {
-			current_level--;
-			*ptep_level = current_level;
-			ptep = (pte_t *)gstage_pte_page_vaddr(*ptep);
-			ptep = &ptep[gstage_pte_index(addr, current_level)];
+			pmdp = &pmdp[gstage_pmd_index(addr, current_level)];
 		} else {
-			ptep = NULL;
+			ptep = (pte_t *)pmdp;
+			ptep = &ptep[gstage_pte_index(addr, current_level)];
 		}
+	}
+	if (ptep && pte_val(ptep_get(ptep))) {
+		if (gstage_pte_leaf(ptep)) {
+			*ptep_level = current_level;
+			*ptepp = (void *)ptep;
+			return true;
+		}
+		ptep = NULL;
 	}
 
 	return false;
@@ -136,40 +168,53 @@ static void gstage_remote_tlb_flush(struct kvm *kvm, u32 level, gpa_t addr)
 
 static int gstage_set_pte(struct kvm *kvm, u32 level,
 			   struct kvm_mmu_memory_cache *pcache,
-			   gpa_t addr, const pte_t *new_pte)
+			   gpa_t addr, const void *new_pte)
 {
 	u32 current_level = gstage_pgd_levels - 1;
-	pte_t *next_ptep = (pte_t *)kvm->arch.pgd;
-	pte_t *ptep = &next_ptep[gstage_pte_index(addr, current_level)];
+	pmd_t *next_pmdp = (pmd_t *)kvm->arch.pgd;
+	pmd_t *pmdp = &next_pmdp[gstage_pmd_index(addr, current_level)];
+	pte_t *next_ptep = NULL;
+	pte_t *ptep = NULL;
 
 	if (current_level < level)
 		return -EINVAL;
 
 	while (current_level != level) {
-		if (gstage_pte_leaf(ptep))
+		if (gstage_pmd_leaf(pmdp))
 			return -EEXIST;
 
-		if (!pte_val(*ptep)) {
+		if (!pmd_val(pmdp_get(pmdp))) {
 			if (!pcache)
 				return -ENOMEM;
-			next_ptep = kvm_mmu_memory_cache_alloc(pcache);
-			if (!next_ptep)
+			next_pmdp = kvm_mmu_memory_cache_alloc(pcache);
+			if (!next_pmdp)
 				return -ENOMEM;
-			*ptep = pfn_pte(PFN_DOWN(__pa(next_ptep)),
-					__pgprot(_PAGE_TABLE));
+			set_pmd(pmdp, pfn_pmd(PFN_DOWN(__pa(next_pmdp)),
+						__pgprot(_PAGE_TABLE)));
 		} else {
-			if (gstage_pte_leaf(ptep))
+			if (gstage_pmd_leaf(pmdp))
 				return -EEXIST;
-			next_ptep = (pte_t *)gstage_pte_page_vaddr(*ptep);
+			next_pmdp = (pmd_t *)gstage_pmd_page_vaddr(pmdp_get(pmdp));
 		}
 
 		current_level--;
-		ptep = &next_ptep[gstage_pte_index(addr, current_level)];
+		if (current_level) {
+			pmdp = &next_pmdp[gstage_pmd_index(addr, current_level)];
+		} else {
+			next_ptep = (pte_t *)next_pmdp;
+			ptep = &next_ptep[gstage_pte_index(addr, current_level)];
+		}
 	}
 
-	*ptep = *new_pte;
-	if (gstage_pte_leaf(ptep))
-		gstage_remote_tlb_flush(kvm, current_level, addr);
+	if (current_level) {
+		set_pmd(pmdp, pmdp_get((pmd_t *)new_pte));
+		if (gstage_pmd_leaf(pmdp))
+			gstage_remote_tlb_flush(kvm, current_level, addr);
+	} else {
+		set_pte(ptep, ptep_get((pte_t *)new_pte));
+		if (gstage_pte_leaf(ptep))
+			gstage_remote_tlb_flush(kvm, current_level, addr);
+	}
 
 	return 0;
 }
@@ -182,6 +227,7 @@ static int gstage_map_page(struct kvm *kvm,
 {
 	int ret;
 	u32 level = 0;
+	pmd_t new_pmd;
 	pte_t new_pte;
 	pgprot_t prot;
 
@@ -213,10 +259,15 @@ static int gstage_map_page(struct kvm *kvm,
 		else
 			prot = PAGE_WRITE;
 	}
-	new_pte = pfn_pte(PFN_DOWN(hpa), prot);
-	new_pte = pte_mkdirty(new_pte);
-
-	return gstage_set_pte(kvm, level, pcache, gpa, &new_pte);
+	if (level) {
+		new_pmd = pfn_pmd(PFN_DOWN(hpa), prot);
+		new_pmd = pmd_mkdirty(new_pmd);
+		return gstage_set_pte(kvm, level, pcache, gpa, &new_pmd);
+	} else {
+		new_pte = pfn_pte(PFN_DOWN(hpa), prot);
+		new_pte = pte_mkdirty(new_pte);
+		return gstage_set_pte(kvm, level, pcache, gpa, &new_pte);
+	}
 }
 
 enum gstage_op {
@@ -226,9 +277,12 @@ enum gstage_op {
 };
 
 static void gstage_op_pte(struct kvm *kvm, gpa_t addr,
-			  pte_t *ptep, u32 ptep_level, enum gstage_op op)
+			  void *__ptep, u32 ptep_level, enum gstage_op op)
 {
 	int i, ret;
+	pmd_t *pmdp = (pmd_t *)__ptep;
+	pte_t *ptep = (pte_t *)__ptep;
+	pmd_t *next_pmdp;
 	pte_t *next_ptep;
 	u32 next_ptep_level;
 	unsigned long next_page_size, page_size;
@@ -239,11 +293,13 @@ static void gstage_op_pte(struct kvm *kvm, gpa_t addr,
 
 	BUG_ON(addr & (page_size - 1));
 
-	if (!pte_val(*ptep))
+	if (ptep_level && !pmd_val(pmdp_get(pmdp)))
+		return;
+	if (!ptep_level && !pte_val(ptep_get(ptep)))
 		return;
 
-	if (ptep_level && !gstage_pte_leaf(ptep)) {
-		next_ptep = (pte_t *)gstage_pte_page_vaddr(*ptep);
+	if (ptep_level && !gstage_pmd_leaf(pmdp)) {
+		next_pmdp = (pmd_t *)gstage_pmd_page_vaddr(pmdp_get(pmdp));
 		next_ptep_level = ptep_level - 1;
 		ret = gstage_level_to_page_size(next_ptep_level,
 						&next_page_size);
@@ -251,17 +307,33 @@ static void gstage_op_pte(struct kvm *kvm, gpa_t addr,
 			return;
 
 		if (op == GSTAGE_OP_CLEAR)
-			set_pte(ptep, __pte(0));
-		for (i = 0; i < PTRS_PER_PTE; i++)
-			gstage_op_pte(kvm, addr + i * next_page_size,
-					&next_ptep[i], next_ptep_level, op);
+			set_pmd(pmdp, __pmd(0));
+		if (next_ptep_level) {
+			for (i = 0; i < PTRS_PER_PMD; i++)
+				gstage_op_pte(kvm, addr + i * next_page_size,
+						&next_pmdp[i], next_ptep_level, op);
+		} else {
+			next_ptep = (pte_t *)next_pmdp;
+			for (i = 0; i < PTRS_PER_PTE; i++)
+				gstage_op_pte(kvm, addr + i * next_page_size,
+						&next_ptep[i], next_ptep_level, op);
+		}
 		if (op == GSTAGE_OP_CLEAR)
-			put_page(virt_to_page(next_ptep));
+			put_page(virt_to_page(next_pmdp));
 	} else {
-		if (op == GSTAGE_OP_CLEAR)
-			set_pte(ptep, __pte(0));
-		else if (op == GSTAGE_OP_WP)
-			set_pte(ptep, __pte(pte_val(*ptep) & ~_PAGE_WRITE));
+		if (ptep_level) {
+			if (op == GSTAGE_OP_CLEAR)
+				set_pmd(pmdp, __pmd(0));
+			else if (op == GSTAGE_OP_WP)
+				set_pmd(pmdp,
+					__pmd(pmd_val(pmdp_get(pmdp)) & ~_PAGE_WRITE));
+		} else {
+			if (op == GSTAGE_OP_CLEAR)
+				set_pte(ptep, __pte(0));
+			else if (op == GSTAGE_OP_WP)
+				set_pte(ptep,
+					__pte(pte_val(ptep_get(ptep)) & ~_PAGE_WRITE));
+		}
 		gstage_remote_tlb_flush(kvm, ptep_level, addr);
 	}
 }
@@ -270,7 +342,7 @@ static void gstage_unmap_range(struct kvm *kvm, gpa_t start,
 			       gpa_t size, bool may_block)
 {
 	int ret;
-	pte_t *ptep;
+	void *ptep;
 	u32 ptep_level;
 	bool found_leaf;
 	unsigned long page_size;
@@ -305,7 +377,7 @@ next:
 static void gstage_wp_range(struct kvm *kvm, gpa_t start, gpa_t end)
 {
 	int ret;
-	pte_t *ptep;
+	void *ptep;
 	u32 ptep_level;
 	bool found_leaf;
 	gpa_t addr = start;
@@ -572,7 +644,7 @@ bool kvm_set_spte_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 
 bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
-	pte_t *ptep;
+	void *ptep;
 	u32 ptep_level = 0;
 	u64 size = (range->end - range->start) << PAGE_SHIFT;
 
@@ -585,12 +657,15 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 				   &ptep, &ptep_level))
 		return false;
 
-	return ptep_test_and_clear_young(NULL, 0, ptep);
+	if (ptep_level)
+		return pmdp_test_and_clear_young(NULL, 0, (pmd_t *)ptep);
+	else
+		return ptep_test_and_clear_young(NULL, 0, (pte_t *)ptep);
 }
 
 bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
-	pte_t *ptep;
+	void *ptep;
 	u32 ptep_level = 0;
 	u64 size = (range->end - range->start) << PAGE_SHIFT;
 
@@ -603,7 +678,10 @@ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 				   &ptep, &ptep_level))
 		return false;
 
-	return pte_young(*ptep);
+	if (ptep_level)
+		return pmd_young(pmdp_get((pmd_t *)ptep));
+	else
+		return pte_young(ptep_get((pte_t *)ptep));
 }
 
 int kvm_riscv_gstage_map(struct kvm_vcpu *vcpu,
@@ -746,11 +824,11 @@ void kvm_riscv_gstage_free_pgd(struct kvm *kvm)
 
 void kvm_riscv_gstage_update_hgatp(struct kvm_vcpu *vcpu)
 {
-	unsigned long hgatp = gstage_mode;
+	unsigned long hgatp;
 	struct kvm_arch *k = &vcpu->kvm->arch;
 
-	hgatp |= (READ_ONCE(k->vmid.vmid) << HGATP_VMID_SHIFT) & HGATP_VMID;
-	hgatp |= (k->pgd_phys >> PAGE_SHIFT) & HGATP_PPN;
+	hgatp = make_hgatp(PFN_DOWN(k->pgd_phys), READ_ONCE(k->vmid.vmid),
+			   gstage_mode);
 
 	csr_write(CSR_HGATP, hgatp);
 

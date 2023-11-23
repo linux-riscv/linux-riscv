@@ -220,6 +220,13 @@ static inline unsigned long make_satp(unsigned long pfn,
 		((asid & SATP_ASID_MASK) << SATP_ASID_SHIFT) | satp_mode);
 }
 
+static inline unsigned long make_hgatp(unsigned long pfn,
+		unsigned long vmid, unsigned long hgatp_mode)
+{
+	return ((pfn_to_hwpfn(pfn) & HGATP_PPN) |
+			((vmid << HGATP_VMID_SHIFT) & HGATP_VMID) | hgatp_mode);
+}
+
 static __always_inline int __pte_present(unsigned long pteval)
 {
 	return (pteval & (_PAGE_PRESENT | _PAGE_PROT_NONE));
