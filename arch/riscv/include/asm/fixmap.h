@@ -44,7 +44,8 @@ enum fixed_addresses {
 	 * before ioremap() is functional.
 	 */
 #define NR_FIX_BTMAPS		(SZ_256K / PAGE_SIZE)
-#define FIX_BTMAPS_SLOTS	7
+#define FIX_BTMAPS_SIZE		(FIXADDR_SIZE - ((FIX_BTMAP_END + 1) << PAGE_SHIFT))
+#define FIX_BTMAPS_SLOTS	(FIX_BTMAPS_SIZE / SZ_256K)
 #define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
 
 	FIX_BTMAP_END = __end_of_permanent_fixed_addresses,
