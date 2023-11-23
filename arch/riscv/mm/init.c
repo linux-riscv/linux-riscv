@@ -466,7 +466,7 @@ static void __init create_pmd_mapping(pmd_t *pmdp,
 		pte_phys = pt_ops.alloc_pte(va);
 		pmdp[pmd_idx] = pfn_pmd(PFN_DOWN(pte_phys), PAGE_TABLE);
 		ptep = pt_ops.get_pte_virt(pte_phys);
-		memset(ptep, 0, PAGE_SIZE);
+		memset(ptep, 0, PTRS_PER_PTE * sizeof(pte_t));
 	} else {
 		pte_phys = PFN_PHYS(_pmd_pfn(pmdp[pmd_idx]));
 		ptep = pt_ops.get_pte_virt(pte_phys);
@@ -569,7 +569,7 @@ static void __init create_pud_mapping(pud_t *pudp,
 		next_phys = pt_ops.alloc_pmd(va);
 		pudp[pud_index] = pfn_pud(PFN_DOWN(next_phys), PAGE_TABLE);
 		nextp = pt_ops.get_pmd_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, PTRS_PER_PMD * sizeof(pmd_t));
 	} else {
 		next_phys = PFN_PHYS(_pud_pfn(pudp[pud_index]));
 		nextp = pt_ops.get_pmd_virt(next_phys);
@@ -596,7 +596,7 @@ static void __init create_p4d_mapping(p4d_t *p4dp,
 		next_phys = pt_ops.alloc_pud(va);
 		p4dp[p4d_index] = pfn_p4d(PFN_DOWN(next_phys), PAGE_TABLE);
 		nextp = pt_ops.get_pud_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, PTRS_PER_PUD * sizeof(pud_t));
 	} else {
 		next_phys = PFN_PHYS(_p4d_pfn(p4dp[p4d_index]));
 		nextp = pt_ops.get_pud_virt(next_phys);
@@ -654,7 +654,7 @@ void __init create_pgd_mapping(pgd_t *pgdp,
 		next_phys = alloc_pgd_next(va);
 		pgdp[pgd_idx] = pfn_pgd(PFN_DOWN(next_phys), PAGE_TABLE);
 		nextp = get_pgd_next_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, PTRS_PER_P4D * sizeof(p4d_t));
 	} else {
 		next_phys = PFN_PHYS(_pgd_pfn(pgdp[pgd_idx]));
 		nextp = get_pgd_next_virt(next_phys);
@@ -815,16 +815,16 @@ retry:
 	if (hw_satp != identity_satp) {
 		if (pgtable_l5_enabled) {
 			disable_pgtable_l5();
-			memset(early_pg_dir, 0, PAGE_SIZE);
+			memset(early_pg_dir, 0, PTRS_PER_PGD * sizeof(pgd_t));
 			goto retry;
 		}
 		disable_pgtable_l4();
 	}
 
-	memset(early_pg_dir, 0, PAGE_SIZE);
-	memset(early_p4d, 0, PAGE_SIZE);
-	memset(early_pud, 0, PAGE_SIZE);
-	memset(early_pmd, 0, PAGE_SIZE);
+	memset(early_pg_dir, 0, PTRS_PER_PGD * sizeof(pgd_t));
+	memset(early_p4d, 0, PTRS_PER_P4D * sizeof(p4d_t));
+	memset(early_pud, 0, PTRS_PER_PUD * sizeof(pud_t));
+	memset(early_pmd, 0, PTRS_PER_PMD * sizeof(pmd_t));
 }
 #endif
 

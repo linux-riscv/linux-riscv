@@ -19,32 +19,36 @@ static inline void pmd_populate_kernel(struct mm_struct *mm,
 	pmd_t *pmd, pte_t *pte)
 {
 	unsigned long pfn = virt_to_pfn(pte);
+	unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmd, __pmd((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
 static inline void pmd_populate(struct mm_struct *mm,
 	pmd_t *pmd, pgtable_t pte)
 {
 	unsigned long pfn = virt_to_pfn(page_address(pte));
+	unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmd, __pmd((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
 	unsigned long pfn = virt_to_pfn(pmd);
+	unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
-	set_pud(pud, __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pud(pud, __pud((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 }
 
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
 {
 	if (pgtable_l4_enabled) {
 		unsigned long pfn = virt_to_pfn(pud);
+		unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
-		set_p4d(p4d, __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+		set_p4d(p4d, __p4d((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
@@ -53,9 +57,10 @@ static inline void p4d_populate_safe(struct mm_struct *mm, p4d_t *p4d,
 {
 	if (pgtable_l4_enabled) {
 		unsigned long pfn = virt_to_pfn(pud);
+		unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
 		set_p4d_safe(p4d,
-			     __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+			     __p4d((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
@@ -63,8 +68,9 @@ static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, p4d_t *p4d)
 {
 	if (pgtable_l5_enabled) {
 		unsigned long pfn = virt_to_pfn(p4d);
+		unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
-		set_pgd(pgd, __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+		set_pgd(pgd, __pgd((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 
@@ -73,9 +79,10 @@ static inline void pgd_populate_safe(struct mm_struct *mm, pgd_t *pgd,
 {
 	if (pgtable_l5_enabled) {
 		unsigned long pfn = virt_to_pfn(p4d);
+		unsigned long hwpfn = pfn_to_hwpfn(pfn);
 
 		set_pgd_safe(pgd,
-			     __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+			     __pgd((hwpfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
 	}
 }
 

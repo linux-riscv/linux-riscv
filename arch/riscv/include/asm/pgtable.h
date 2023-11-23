@@ -26,9 +26,9 @@
 #endif
 
 /* Number of entries in the page global directory */
-#define PTRS_PER_PGD    (PAGE_SIZE / sizeof(pgd_t))
+#define PTRS_PER_PGD    (HW_PAGE_SIZE / sizeof(pgd_t))
 /* Number of entries in the page table */
-#define PTRS_PER_PTE    (PAGE_SIZE / sizeof(pte_t))
+#define PTRS_PER_PTE    (HW_PAGE_SIZE / sizeof(pte_t))
 
 /*
  * Half of the kernel address space (1/4 of the entries of the page global
@@ -118,7 +118,8 @@
 #include <linux/mm_types.h>
 #include <asm/compat.h>
 
-#define __page_val_to_pfn(_val)  (((_val) & _PAGE_PFN_MASK) >> _PAGE_PFN_SHIFT)
+#define __page_val_to_hwpfn(_val) (((_val) & _PAGE_PFN_MASK) >> _PAGE_PFN_SHIFT)
+#define __page_val_to_pfn(_val) hwpfn_to_pfn(__page_val_to_hwpfn(_val))
 
 #ifdef CONFIG_64BIT
 #include <asm/pgtable-64.h>
@@ -287,7 +288,7 @@ static inline pgd_t pfn_pgd(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pgd((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pgd((pfn_to_hwpfn(pfn) << _PAGE_PFN_SHIFT) | prot_val);
 }
 
 static inline unsigned long _pgd_pfn(pgd_t pgd)
@@ -351,12 +352,12 @@ static inline unsigned long pte_napot(pte_t pte)
 /* Yields the page frame number (PFN) of a page table entry */
 static inline unsigned long pte_pfn(pte_t pte)
 {
-	unsigned long res  = __page_val_to_pfn(pte_val(pte));
+	unsigned long res  = __page_val_to_hwpfn(pte_val(pte));
 
 	if (has_svnapot() && pte_napot(pte))
 		res = res & (res - 1UL);
 
-	return res;
+	return hwpfn_to_pfn(res);
 }
 
 #define pte_page(x)     pfn_to_page(pte_pfn(x))
@@ -368,7 +369,7 @@ static inline pte_t pfn_pte(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pte((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pte((pfn_to_hwpfn(pfn) << _PAGE_PFN_SHIFT) | prot_val);
 }
 
 #define mk_pte(page, prot)       pfn_pte(page_to_pfn(page), prot)
@@ -723,14 +724,14 @@ static inline pmd_t pmd_mkinvalid(pmd_t pmd)
 	return __pmd(pmd_val(pmd) & ~(_PAGE_PRESENT|_PAGE_PROT_NONE));
 }
 
-#define __pmd_to_phys(pmd)  (__page_val_to_pfn(pmd_val(pmd)) << PAGE_SHIFT)
+#define __pmd_to_phys(pmd)  (__page_val_to_hwpfn(pmd_val(pmd)) << HW_PAGE_SHIFT)
 
 static inline unsigned long pmd_pfn(pmd_t pmd)
 {
 	return ((__pmd_to_phys(pmd) & PMD_MASK) >> PAGE_SHIFT);
 }
 
-#define __pud_to_phys(pud)  (__page_val_to_pfn(pud_val(pud)) << PAGE_SHIFT)
+#define __pud_to_phys(pud)  (__page_val_to_hwpfn(pud_val(pud)) << HW_PAGE_SHIFT)
 
 static inline unsigned long pud_pfn(pud_t pud)
 {

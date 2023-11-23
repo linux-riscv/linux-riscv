@@ -20,7 +20,7 @@
 /*
  * rv32 PTE format:
  * | XLEN-1  10 | 9             8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
- *       PFN      reserved for SW   D   A   G   U   X   W   R   V
+ *     HW_PFN     reserved for SW   D   A   G   U   X   W   R   V
  */
 #define _PAGE_PFN_MASK  GENMASK(31, 10)
 

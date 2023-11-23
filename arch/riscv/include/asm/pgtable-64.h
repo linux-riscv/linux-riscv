@@ -50,7 +50,7 @@ typedef struct {
 
 #define p4d_val(x)	((x).p4d)
 #define __p4d(x)	((p4d_t) { (x) })
-#define PTRS_PER_P4D	(PAGE_SIZE / sizeof(p4d_t))
+#define PTRS_PER_P4D	(HW_PAGE_SIZE / sizeof(p4d_t))
 
 /* Page Upper Directory entry */
 typedef struct {
@@ -59,7 +59,7 @@ typedef struct {
 
 #define pud_val(x)      ((x).pud)
 #define __pud(x)        ((pud_t) { (x) })
-#define PTRS_PER_PUD    (PAGE_SIZE / sizeof(pud_t))
+#define PTRS_PER_PUD    (HW_PAGE_SIZE / sizeof(pud_t))
 
 /* Page Middle Directory entry */
 typedef struct {
@@ -69,12 +69,12 @@ typedef struct {
 #define pmd_val(x)      ((x).pmd)
 #define __pmd(x)        ((pmd_t) { (x) })
 
-#define PTRS_PER_PMD    (PAGE_SIZE / sizeof(pmd_t))
+#define PTRS_PER_PMD    (HW_PAGE_SIZE / sizeof(pmd_t))
 
 /*
  * rv64 PTE format:
  * | 63 | 62 61 | 60 54 | 53  10 | 9             8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
- *   N      MT     RSV    PFN      reserved for SW   D   A   G   U   X   W   R   V
+ *   N      MT     RSV    HW_PFN   reserved for SW   D   A   G   U   X   W   R   V
  */
 #define _PAGE_PFN_MASK  GENMASK(53, 10)
 
@@ -94,13 +94,23 @@ enum napot_cont_order {
 	NAPOT_ORDER_MAX,
 };
 
-#define for_each_napot_order(order)						\
-	for (order = NAPOT_CONT_ORDER_BASE; order < NAPOT_ORDER_MAX; order++)
-#define for_each_napot_order_rev(order)						\
-	for (order = NAPOT_ORDER_MAX - 1;					\
-	     order >= NAPOT_CONT_ORDER_BASE; order--)
-#define napot_cont_order(val)							\
-	(__builtin_ctzl((pte_val(val) >> _PAGE_PFN_SHIFT) << 1))
+#define NAPOT_PAGE_ORDER_BASE						\
+	((NAPOT_CONT_ORDER_BASE >= (PAGE_SHIFT - HW_PAGE_SHIFT)) ?	\
+	 (NAPOT_CONT_ORDER_BASE - (PAGE_SHIFT - HW_PAGE_SHIFT)) : 1)
+#define NAPOT_PAGE_ORDER_MAX						\
+	((NAPOT_ORDER_MAX > (PAGE_SHIFT - HW_PAGE_SHIFT)) ?		\
+	 (NAPOT_ORDER_MAX - (PAGE_SHIFT - HW_PAGE_SHIFT)) :		\
+	 NAPOT_PAGE_ORDER_BASE)
+
+#define for_each_napot_order(order)					\
+	for (order = NAPOT_PAGE_ORDER_BASE;				\
+			order < NAPOT_PAGE_ORDER_MAX; order++)
+#define for_each_napot_order_rev(order)					\
+	for (order = NAPOT_PAGE_ORDER_MAX - 1;				\
+			order >= NAPOT_PAGE_ORDER_BASE; order--)
+#define napot_cont_order(val)						\
+	(__builtin_ctzl((pte_val(val) >> _PAGE_PFN_SHIFT) << 1)		\
+	 - (PAGE_SHIFT - HW_PAGE_SHIFT))
 
 #define napot_cont_shift(order)	((order) + PAGE_SHIFT)
 #define napot_cont_size(order)	BIT(napot_cont_shift(order))
@@ -108,7 +118,7 @@ enum napot_cont_order {
 #define napot_pte_num(order)	BIT(order)
 
 #ifdef CONFIG_RISCV_ISA_SVNAPOT
-#define HUGE_MAX_HSTATE		(2 + (NAPOT_ORDER_MAX - NAPOT_CONT_ORDER_BASE))
+#define HUGE_MAX_HSTATE		(2 + (NAPOT_ORDER_MAX - NAPOT_PAGE_ORDER_BASE))
 #else
 #define HUGE_MAX_HSTATE		2
 #endif
@@ -213,7 +223,7 @@ static inline void pud_clear(pud_t *pudp)
 
 static inline pud_t pfn_pud(unsigned long pfn, pgprot_t prot)
 {
-	return __pud((pfn << _PAGE_PFN_SHIFT) | pgprot_val(prot));
+	return __pud((pfn_to_hwpfn(pfn) << _PAGE_PFN_SHIFT) | pgprot_val(prot));
 }
 
 static inline unsigned long _pud_pfn(pud_t pud)
@@ -257,7 +267,7 @@ static inline pmd_t pfn_pmd(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pmd((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pmd((pfn_to_hwpfn(pfn) << _PAGE_PFN_SHIFT) | prot_val);
 }
 
 static inline unsigned long _pmd_pfn(pmd_t pmd)
@@ -316,7 +326,7 @@ static inline void p4d_clear(p4d_t *p4d)
 
 static inline p4d_t pfn_p4d(unsigned long pfn, pgprot_t prot)
 {
-	return __p4d((pfn << _PAGE_PFN_SHIFT) | pgprot_val(prot));
+	return __p4d((pfn_to_hwpfn(pfn) << _PAGE_PFN_SHIFT) | pgprot_val(prot));
 }
 
 static inline unsigned long _p4d_pfn(p4d_t p4d)
