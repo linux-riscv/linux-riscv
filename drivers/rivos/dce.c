@@ -70,7 +70,7 @@ void clean_up_work(struct work_struct *work)
 	struct dce_driver_priv *dce_priv =
 		container_of(work, struct dce_driver_priv, clean_up_worker);
 	/* getting per queue interrupt status */
-	uint64_t irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
+	u64 irq_sts = dce_reg_read(dce_priv, DCE_REG_WQIRQSTS);
 	/* clear irq status */
 	dce_reg_write(dce_priv, DCE_REG_WQIRQSTS, irq_sts);
 
@@ -110,7 +110,7 @@ void clean_up_work(struct work_struct *work)
 			continue;
 		} else {
 			struct DescriptorRing *ring = &wq->descriptor_ring;
-			uint64_t head, curr;
+			u64 head, curr;
 
 			if (!ring->hti) {
 				dev_err(&dce_priv->dev, "Invalid ring for wq %d",
@@ -121,25 +121,13 @@ void clean_up_work(struct work_struct *work)
 
 			head = ring->hti->head;
 			curr = ring->clean_up_index;
+			ring->clean_up_index = head;
 			spin_unlock(&wq->lock);
 
-			/* Do the actual cleaning up */
 			dev_dbg(&dce_priv->dev,
-				"Cleanup on %d, %llu->%llu", wq_num, curr, head);
-
-			while (curr < head) {
-				/* Position in queue int qi = (curr % ring->length); */
-				/* TODO: Do something on descriptors ? */
-				curr++;
-			}
-
-			dev_dbg(&dce_priv->dev,
-				"Cleanup done on %d updating clean index\n",
-				wq_num);
-			spin_lock(&wq->lock);
-			ring->clean_up_index = curr;
-			spin_unlock(&wq->lock);
-			dev_dbg(&dce_priv->dev, "Cleanup really done\n");
+				"Cleanup done on %d updating clean index "
+				"%llu->%llu\n",
+				wq_num, curr, head);
 			wake_up_interruptible_all(&wq->cleanupd_wq);
 		}
 	}
