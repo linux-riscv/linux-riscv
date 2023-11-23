@@ -230,6 +230,16 @@ static __always_inline unsigned long __pte_napot(unsigned long pteval)
 	return pteval & _PAGE_NAPOT;
 }
 
+static __always_inline unsigned long __pte_mknapot(unsigned long pteval,
+		unsigned int order)
+{
+	int pos = order - 1 + _PAGE_PFN_SHIFT;
+	unsigned long napot_bit = BIT(pos);
+	unsigned long napot_mask = ~GENMASK(pos, _PAGE_PFN_SHIFT);
+
+	return (pteval & napot_mask) | napot_bit | _PAGE_NAPOT;
+}
+
 static inline pte_t __pte(unsigned long pteval)
 {
 	pte_t pte;
@@ -348,13 +358,11 @@ static inline unsigned long pte_napot(pte_t pte)
 	return __pte_napot(pte_val(pte));
 }
 
-static inline pte_t pte_mknapot(pte_t pte, unsigned int order)
+static inline pte_t pte_mknapot(pte_t pte, unsigned int page_order)
 {
-	int pos = order - 1 + _PAGE_PFN_SHIFT;
-	unsigned long napot_bit = BIT(pos);
-	unsigned long napot_mask = ~GENMASK(pos, _PAGE_PFN_SHIFT);
+	unsigned int hw_page_order = page_order + (PAGE_SHIFT - HW_PAGE_SHIFT);
 
-	return __pte((pte_val(pte) & napot_mask) | napot_bit | _PAGE_NAPOT);
+	return __pte(__pte_mknapot(pte_val(pte), hw_page_order));
 }
 
 #else
@@ -364,6 +372,11 @@ static __always_inline bool has_svnapot(void) { return false; }
 static inline unsigned long pte_napot(pte_t pte)
 {
 	return 0;
+}
+
+static inline pte_t pte_mknapot(pte_t pte, unsigned int page_order)
+{
+	return pte;
 }
 
 #endif /* CONFIG_RISCV_ISA_SVNAPOT */
@@ -585,6 +598,17 @@ static inline int pte_same(pte_t pte_a, pte_t pte_b)
  */
 static inline void set_pte(pte_t *ptep, pte_t pteval)
 {
+	unsigned long order;
+
+	/*
+	 * has_svnapot() always return false before riscv_isa is initialized.
+	 */
+	if (has_svnapot() && pte_present(pteval) && !pte_napot(pteval)) {
+		for_each_napot_order(order) {
+			if (napot_cont_shift(order) == PAGE_SHIFT)
+				pteval = pte_mknapot(pteval, order);
+		}
+	}
 	*ptep = pteval;
 }
 
