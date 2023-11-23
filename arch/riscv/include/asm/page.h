@@ -68,9 +68,11 @@ typedef struct {
 	unsigned long pgd;
 } pgd_t;
 
+#define PTES_PER_PAGE	(1 << (PAGE_SHIFT - HW_PAGE_SHIFT))
+
 /* Page Table entry */
 typedef struct {
-	unsigned long pte;
+	unsigned long ptes[PTES_PER_PAGE];
 } pte_t;
 
 typedef struct {
@@ -79,11 +81,10 @@ typedef struct {
 
 typedef struct page *pgtable_t;
 
-#define pte_val(x)	((x).pte)
+#define pte_val(x)	((x).ptes[0])
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
 
-#define __pte(x)	((pte_t) { (x) })
 #define __pgd(x)	((pgd_t) { (x) })
 #define __pgprot(x)	((pgprot_t) { (x) })
 

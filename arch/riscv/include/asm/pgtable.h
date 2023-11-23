@@ -212,6 +212,31 @@ extern pgd_t swapper_pg_dir[];
 extern pgd_t trampoline_pg_dir[];
 extern pgd_t early_pg_dir[];
 
+static __always_inline int __pte_present(unsigned long pteval)
+{
+	return (pteval & (_PAGE_PRESENT | _PAGE_PROT_NONE));
+}
+
+static __always_inline unsigned long __pte_napot(unsigned long pteval)
+{
+	return pteval & _PAGE_NAPOT;
+}
+
+static inline pte_t __pte(unsigned long pteval)
+{
+	pte_t pte;
+	unsigned int i;
+
+	for (i = 0; i < PTES_PER_PAGE; i++) {
+		pte.ptes[i] = pteval;
+		if (__pte_present(pteval) && !__pte_napot(pteval))
+			pteval += 1 << _PAGE_PFN_SHIFT;
+	}
+
+	return pte;
+}
+#define __pte	__pte
+
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static inline int pmd_present(pmd_t pmd)
 {
@@ -300,7 +325,7 @@ static __always_inline bool has_svnapot(void)
 
 static inline unsigned long pte_napot(pte_t pte)
 {
-	return pte_val(pte) & _PAGE_NAPOT;
+	return __pte_napot(pte_val(pte));
 }
 
 static inline pte_t pte_mknapot(pte_t pte, unsigned int order)
@@ -350,7 +375,7 @@ static inline pte_t pfn_pte(unsigned long pfn, pgprot_t prot)
 
 static inline int pte_present(pte_t pte)
 {
-	return (pte_val(pte) & (_PAGE_PRESENT | _PAGE_PROT_NONE));
+	return __pte_present(pte_val(pte));
 }
 
 static inline int pte_none(pte_t pte)
@@ -439,6 +464,36 @@ static inline pte_t pte_mkhuge(pte_t pte)
 	return pte;
 }
 
+static inline pte_t ptep_get(pte_t *ptep)
+{
+	unsigned int i;
+	pte_t pte = *ptep;
+
+	for (i = 0; i < PTES_PER_PAGE; i++) {
+		if (pte.ptes[i] & _PAGE_DIRTY) {
+			pte = pte_mkdirty(pte);
+			break;
+		}
+	}
+	for (i = 0; i < PTES_PER_PAGE; i++) {
+		if (pte.ptes[i] & _PAGE_ACCESSED) {
+			pte = pte_mkyoung(pte);
+			break;
+		}
+	}
+
+	return pte;
+}
+#define ptep_get	ptep_get
+
+static inline pte_t ptep_get_lockless(pte_t *ptep)
+{
+	unsigned long pteval = READ_ONCE(ptep->ptes[0]);
+
+	return __pte(pteval);
+}
+#define ptep_get_lockless	ptep_get_lockless
+
 #ifdef CONFIG_NUMA_BALANCING
 /*
  * See the comment in include/asm-generic/pgtable.h
@@ -526,6 +581,8 @@ static inline void __set_pte_at(pte_t *ptep, pte_t pteval)
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pteval, unsigned int nr)
 {
+	unsigned int i;
+
 	page_table_check_ptes_set(mm, ptep, pteval, nr);
 
 	for (;;) {
@@ -533,7 +590,10 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		pte_val(pteval) += 1 << _PAGE_PFN_SHIFT;
+		if (pte_present(pteval) && !pte_napot(pteval)) {
+			for (i = 0; i < PTES_PER_PAGE; i++)
+				pteval.ptes[i] += PTES_PER_PAGE << _PAGE_PFN_SHIFT;
+		}
 	}
 }
 #define set_ptes set_ptes
@@ -562,7 +622,11 @@ static inline int ptep_set_access_flags(struct vm_area_struct *vma,
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
-	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
+	pte_t pte;
+	unsigned int i;
+
+	for (i = 0; i < PTES_PER_PAGE; i++)
+		pte.ptes[i] = atomic_long_xchg((atomic_long_t *)(&ptep->ptes[i]), 0);
 
 	page_table_check_pte_clear(mm, pte);
 
@@ -574,16 +638,27 @@ static inline int ptep_test_and_clear_young(struct vm_area_struct *vma,
 					    unsigned long address,
 					    pte_t *ptep)
 {
-	if (!pte_young(*ptep))
+	int ret = 0;
+	unsigned int i;
+
+	if (!pte_young(ptep_get(ptep)))
 		return 0;
-	return test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pte_val(*ptep));
+
+	for (i = 0; i < PTES_PER_PAGE; i++)
+		ret |= test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &ptep->ptes[i]);
+
+	return ret;
 }
 
 #define __HAVE_ARCH_PTEP_SET_WRPROTECT
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long address, pte_t *ptep)
 {
-	atomic_long_and(~(unsigned long)_PAGE_WRITE, (atomic_long_t *)ptep);
+	unsigned int i;
+
+	for (i = 0; i < PTES_PER_PAGE; i++)
+		atomic_long_and(~(unsigned long)_PAGE_WRITE,
+				(atomic_long_t *)(&ptep->ptes[i]));
 }
 
 #define __HAVE_ARCH_PTEP_CLEAR_YOUNG_FLUSH
@@ -829,7 +904,7 @@ extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
 	  ((offset) << __SWP_OFFSET_SHIFT) })
 
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
-#define __swp_entry_to_pte(x)	((pte_t) { (x).val })
+#define __swp_entry_to_pte(x)	__pte((x).val)
 
 static inline int pte_swp_exclusive(pte_t pte)
 {
