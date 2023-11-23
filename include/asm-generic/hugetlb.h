@@ -150,6 +150,13 @@ static inline pte_t huge_ptep_get(pte_t *ptep)
 }
 #endif
 
+#ifndef __HAVE_ARCH_HUGE_PTEP_GET_LOCKLESS
+static inline pte_t huge_ptep_get_lockless(pte_t *ptep)
+{
+	return huge_ptep_get(ptep);
+}
+#endif
+
 #ifndef __HAVE_ARCH_GIGANTIC_PAGE_RUNTIME_SUPPORTED
 static inline bool gigantic_page_runtime_supported(void)
 {

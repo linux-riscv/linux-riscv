@@ -7406,7 +7406,7 @@ pte_t *huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 
 	if (pte) {
-		pte_t pteval = ptep_get_lockless(pte);
+		pte_t pteval = huge_ptep_get_lockless(pte);
 
 		BUG_ON(pte_present(pteval) && !pte_huge(pteval));
 	}

@@ -555,7 +555,7 @@ static int prot_none_hugetlb_entry(pte_t *pte, unsigned long hmask,
 				   unsigned long addr, unsigned long next,
 				   struct mm_walk *walk)
 {
-	return pfn_modify_allowed(pte_pfn(ptep_get(pte)),
+	return pfn_modify_allowed(pte_pfn(huge_ptep_get(pte)),
 				  *(pgprot_t *)(walk->private)) ?
 		0 : -EACCES;
 }
