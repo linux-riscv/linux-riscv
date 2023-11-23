@@ -12,7 +12,11 @@
 #include <linux/pfn.h>
 #include <linux/const.h>
 
-#define PAGE_SHIFT	(12)
+#define HW_PAGE_SHIFT	CONFIG_RISCV_HW_PAGE_SHIFT
+#define HW_PAGE_SIZE	(_AC(1, UL) << HW_PAGE_SHIFT)
+#define HW_PAGE_MASK	(~(HW_PAGE_SIZE - 1))
+
+#define PAGE_SHIFT	CONFIG_RISCV_PAGE_SHIFT
 #define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE - 1))
 

@@ -221,6 +221,14 @@ config PAGE_OFFSET
 	default 0x80000000 if !MMU
 	default 0xff60000000000000 if 64BIT
 
+config RISCV_HW_PAGE_SHIFT
+	int
+	default 12
+
+config RISCV_PAGE_SHIFT
+	int
+	default 12
+
 config KASAN_SHADOW_OFFSET
 	hex
 	depends on KASAN_GENERIC
