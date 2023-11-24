@@ -172,6 +172,10 @@ void flush_thread(void)
 	kfree(current->thread.vstate.datap);
 	memset(&current->thread.vstate, 0, sizeof(struct __riscv_v_ext_state));
 #endif
+#ifdef CONFIG_RISCV_ISA_SSDTSO
+	/* Reset DTSO state */
+	current->thread.dtso_ena = false;
+#endif
 }
 
 void arch_release_task_struct(struct task_struct *tsk)

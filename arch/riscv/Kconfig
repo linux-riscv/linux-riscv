@@ -457,6 +457,16 @@ config RISCV_ISA_C
 
 	  If you don't know what to do here, say Y.
 
+config RISCV_ISA_SSDTSO
+	bool "Ssdtso extension support for dynamic TSO memory ordering"
+	default y
+	help
+	  Adds support to dynamically detect the presence of the Ssdtso
+	  ISA-extension and allows user-space processes to activate/deactivate
+	  the TSO memory ordering model at run-time.
+
+	  If you don't know what to do here, say Y.
+
 config RISCV_ISA_SVNAPOT
 	bool "Svnapot extension support for supervisor mode NAPOT pages"
 	depends on 64BIT && MMU

@@ -84,6 +84,7 @@ struct thread_struct {
 	unsigned long vstate_ctrl;
 	struct __riscv_v_ext_state vstate;
 	unsigned long align_ctl;
+	bool dtso_ena; /* Dynamic TSO enable */
 };
 
 /* Whitelist the fstate from the task_struct for hardened usercopy */

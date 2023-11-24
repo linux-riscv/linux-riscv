@@ -9,6 +9,7 @@
 #include <linux/jump_label.h>
 #include <linux/sched/task_stack.h>
 #include <asm/vector.h>
+#include <asm/dtso.h>
 #include <asm/cpufeature.h>
 #include <asm/processor.h>
 #include <asm/ptrace.h>
@@ -81,6 +82,8 @@ do {							\
 		__switch_to_fpu(__prev, __next);	\
 	if (has_vector())					\
 		__switch_to_vector(__prev, __next);	\
+	if (has_dtso())					\
+		__switch_to_dtso(__prev, __next);	\
 	((last) = __switch_to(__prev, __next));		\
 } while (0)
 
