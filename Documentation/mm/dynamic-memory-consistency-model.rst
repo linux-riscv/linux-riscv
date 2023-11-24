@@ -56,3 +56,21 @@ Two prctl calls are defined to get/set the active memory consistency model:
     to the given model. If the architecture does not support dynamic
     memory consistency models or does not support the provided model, then
     -1 is returned, and errno is set to EINVAL.
+
+Supported memory consistency models
+===================================
+
+This section defines the memory consistency models which are supported
+by the prctl interface.
+
+RISC-V
+------
+
+RISC-V uses RVWMO (RISC-V weak memory ordering) as default memory consistency
+model. TSO (total store ordering) is another specified model and provides
+additional ordering guarantees. Switching from RVWMO to TSO (and back) is
+possible when the Ssdtso extension is available.
+
+* :c:macro:`PR_MEMORY_CONSISTENCY_MODEL_RISCV_WMO`: RISC-V weak memory ordering (default).
+
+* :c:macro:`PR_MEMORY_CONSISTENCY_MODEL_RISCV_TSO`: RISC-V total store ordering.

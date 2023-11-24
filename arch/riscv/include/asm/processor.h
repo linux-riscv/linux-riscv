@@ -146,6 +146,13 @@ extern int set_unalign_ctl(struct task_struct *tsk, unsigned int val);
 #define GET_UNALIGN_CTL(tsk, addr)	get_unalign_ctl((tsk), (addr))
 #define SET_UNALIGN_CTL(tsk, val)	set_unalign_ctl((tsk), (val))
 
+#ifdef CONFIG_RISCV_ISA_SSDTSO
+#define SET_MEMORY_CONSISTENCY_MODEL(arg)	dtso_set_memory_ordering(arg)
+#define GET_MEMORY_CONSISTENCY_MODEL()		dtso_get_memory_ordering()
+extern int dtso_set_memory_consistency_model(unsigned long arg);
+extern int dtso_get_memory_consistency_model(void);
+#endif /* CONIG_RISCV_ISA_SSDTSO */
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_RISCV_PROCESSOR_H */
