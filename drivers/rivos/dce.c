@@ -96,6 +96,7 @@ void clean_up_work(struct work_struct *work)
 		case RESERVED_WQ:
 		case USER_OWNED_WQ:
 		case USER_FLUSHING_WQ:
+		case RETIRING_WQ:
 			skip_wq = true;
 			break;
 		default:
@@ -331,7 +332,11 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 	/* Disable queue in HW */
 	dce_cancel_wq(priv, wq_num);
 
-	/* Deal with context*/
+	spin_lock(&wq->lock);
+	wq->type = RETIRING_WQ;
+	spin_unlock(&wq->lock);
+
+	/* clear mem allocations before releasing the queue for reuse */
 	if (ring->desc_dma) {
 		dma_free_coherent(&priv->pdev->dev,
 			(ring->length * sizeof(struct DCEDescriptor)),
@@ -342,11 +347,11 @@ static int release_kernel_queue(struct dce_driver_priv *priv, int wq_num)
 			ring->hti, ring->hti_dma);
 	}
 
+	spin_lock(&wq->lock);
 	wq->type = DISABLED_WQ;
-	/* TODO: Describe barrier */
-	wmb();
-	memset(&(wq->descriptor_ring), 0, sizeof(struct DescriptorRing));
-	memset(&priv->WQIT[wq_num], 0, sizeof(struct WQITE));
+	memset(ring, 0, sizeof(struct DescriptorRing));
+	memset(wq->wqite, 0, sizeof(struct WQITE));
+	spin_unlock(&wq->lock);
 	return wait_res;
 }
 
