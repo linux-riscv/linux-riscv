@@ -146,6 +146,12 @@
 #ifndef RISCV_V_GET_CONTROL
 # define RISCV_V_GET_CONTROL()		(-EINVAL)
 #endif
+#ifndef SET_MEMORY_CONSISTENCY_MODEL
+# define SET_MEMORY_CONSISTENCY_MODEL	(-EINVAL)
+#endif
+#ifndef GET_MEMORY_CONSISTENCY_MODEL
+# define GET_MEMORY_CONSISTENCY_MODEL	(-EINVAL)
+#endif
 
 /*
  * this is where the system-wide overflow UID and GID are defined, for
@@ -2738,6 +2744,12 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_RISCV_V_GET_CONTROL:
 		error = RISCV_V_GET_CONTROL();
+		break;
+	case PR_SET_MEMORY_CONSISTENCY_MODEL:
+		error = SET_MEMORY_CONSISTENCY_MODEL(arg2);
+		break;
+	case PR_GET_MEMORY_CONSISTENCY_MODEL:
+		error = GET_MEMORY_CONSISTENCY_MODEL();
 		break;
 	default:
 		error = -EINVAL;
