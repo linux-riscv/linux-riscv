@@ -3,8 +3,8 @@
  * Copyright (C) 2018 Free Software Foundation, Inc.
  */
 
+#include <linux/export.h>
 #include <linux/linkage.h>
-#include <asm-generic/export.h>
 
 SYM_FUNC_START(__lshrti3)
 	beqz	a2, .L1
