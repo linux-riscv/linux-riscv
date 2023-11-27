@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/sophgo/sophgo,sg2042-syscon.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Sophgo SG2042 SoC system controller
+
+maintainers:
+  - Chen Wang <unicorn_wang@outlook.com>
+
+description:
+  The Sophgo SG2042 SoC system controller provides register information such
+  as offset, mask and shift to configure some modules, such as clocks, reset
+  signals and pinctrl.
+
+properties:
+  compatible:
+    items:
+      - enum:
+          - sophgo,sg2042-syscon
+      - const: syscon
+
+  reg:
+    maxItems: 1
+
+  clock-controller:
+    # Child node
+    type: object
+    $ref: ../../clock/sophgo/sophgo,sg2042-clkgen.yaml
+    description:
+      Clock controller for the SoC clocks. This child node definition
+      should follow the bindings specified in
+      Documentation/devicetree/bindings/clock/sophgo/sophgo,sg2042-clkgen.yaml
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    syscon@30010000 {
+        compatible = "sophgo,sg2042-syscon", "syscon";
+        reg = <0x30010000 0x1000>;
+    };
+
+    syscon@30020000 {
+        compatible = "sophgo,sg2042-syscon", "syscon";
+        reg = <0x30020000 0x1000>;
+
+        clock-controller {
+            compatible = "sophgo,sg2042-clkgen";
+            clocks = <&osc>;
+            #clock-cells = <1>;
+        };
+    };
