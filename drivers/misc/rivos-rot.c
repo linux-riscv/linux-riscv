@@ -4,7 +4,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME       "rivos-rot"
-#define DRV_VERSION    "0.0.2"
+#define DRV_VERSION    "0.0.3"
 
 #include <linux/device.h>
 #include <linux/io.h>
@@ -21,7 +21,7 @@
 struct rivos_rot_device {
 	struct device *dev;
 	struct mutex mbox_mutex; /* Protects device mailbox and firmware */
-	struct pci_doe_mb *fidl_mb;
+	struct pci_doe_mb *ridl_mb;
 };
 
 /* Store the singleton device. */
@@ -39,12 +39,12 @@ static struct rivos_rot_device *rivos_rot_device_create(struct pci_dev *pdev)
 
 	mutex_init(&rot->mbox_mutex);
 	rot->dev = dev;
-	rot->fidl_mb = pci_find_doe_mailbox(pdev,
+	rot->ridl_mb = pci_find_doe_mailbox(pdev,
 					    PCI_VENDOR_ID_RIVOS,
-					    RIVOS_DOE_ROT_FIDL_REPORTING);
+					    RIVOS_DOE_ROT_SERVICE_ID);
 
-	if (!rot->fidl_mb) {
-		dev_warn(&pdev->dev, "Failed to find ISBDM mailbox\n");
+	if (!rot->ridl_mb) {
+		dev_warn(&pdev->dev, "Failed to find RIDL mailbox\n");
 	}
 
 	return rot;
@@ -85,36 +85,83 @@ void put_rivos_rot(struct rivos_rot_device *rot)
 
 EXPORT_SYMBOL(put_rivos_rot);
 
-void rivos_rot_init_fidl_msg(struct rivos_fidl_header *hdr, u64 ordinal)
-{
-	hdr->txn_id = 0;
-	hdr->flags_magic = cpu_to_le32(RIVOS_FIDL_FLAGS_MAGIC);
-	hdr->ordinal = cpu_to_le64(ordinal);
-}
-
-EXPORT_SYMBOL(rivos_rot_init_fidl_msg);
-
-int rivos_fidl_doe(struct rivos_rot_device *rot, const void *request,
-		   size_t request_sz, void *response, size_t response_sz)
+static int rivos_ridl_doe(struct rivos_rot_device *rot, const void *request,
+			  size_t request_sz, void *response, size_t response_sz)
 {
 	int rc;
 
+	if (!response || !request ||
+	    (request_sz < sizeof(struct ridl_request_header)) ||
+	    (response_sz < sizeof(struct ridl_response_header)))
+		return -EINVAL;
+
 	mutex_lock(&rot->mbox_mutex);
-	if (!rot->fidl_mb) {
+	if (!rot->ridl_mb) {
 		rc = -ENODEV;
 		goto out;
 	}
 
-	rc = pci_doe(rot->fidl_mb, PCI_VENDOR_ID_RIVOS,
-		     RIVOS_DOE_ROT_FIDL_REPORTING, request, request_sz,
+	rc = pci_doe(rot->ridl_mb, PCI_VENDOR_ID_RIVOS,
+		     RIVOS_DOE_ROT_SERVICE_ID, request, request_sz,
 		     response, response_sz);
+
+	if (rc < 0) {
+		dev_warn(rot->dev, "DOE error: %d\n", rc);
+
+	} else if (rc >= 0 && rc < sizeof(struct ridl_response_header)) {
+		dev_warn(rot->dev,
+			 "Discarding undersized ridl DOE response, size %d\n",
+			 rc);
+
+		rc = -EINVAL;
+
+	} else {
+		struct ridl_response_header *rsp_hdr = response;
+
+		if ((rsp_hdr->status != RESPONSE_RESULT_SUCCESS) &&
+		    (rsp_hdr->status != RESPONSE_RESULT_UNIMPLEMENTED_METHOD))
+			dev_warn(rot->dev, "DOE method %x:%x returned: %u\n",
+				 rsp_hdr->category,
+				 rsp_hdr->method,
+				 rsp_hdr->status);
+	}
 
 out:
 	mutex_unlock(&rot->mbox_mutex);
 	return rc;
 }
 
-EXPORT_SYMBOL(rivos_fidl_doe);
+int rivos_rot_isbdm_update_status(struct rivos_rot_device *rot,
+				  uint32_t rid,
+				  enum isbdm_connection_state state)
+{
+
+	struct isbdm_status_request_wrapper request;
+	struct isbdm_status_response_wrapper response;
+	int rc;
+
+	memset(&request, 0, sizeof(request));
+	request.hdr.category = CATEGORY_REPORTING;
+	request.hdr.method = ISBDM_STATUS;
+	request.data.rid = rid;
+	request.data.state = state;
+	rc = rivos_ridl_doe(rot, &request, sizeof(request), &response,
+			    sizeof(response));
+
+	if (rc < 0)
+		return rc;
+
+	if (rc < sizeof(response.hdr))
+		return -EINVAL;
+
+	if ((response.hdr.status != RESPONSE_RESULT_SUCCESS) &&
+	    (response.hdr.status != RESPONSE_RESULT_UNIMPLEMENTED_METHOD))
+		return -ERANGE;
+
+	return 0;
+}
+
+EXPORT_SYMBOL(rivos_rot_isbdm_update_status);
 
 static int rivos_rot_pci_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *ent)
