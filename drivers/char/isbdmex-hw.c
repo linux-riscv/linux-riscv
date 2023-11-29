@@ -1646,65 +1646,34 @@ static void isbdm_check_link(struct isbdm *ii)
 
 /* Let the Root of Trust know the link state has changed. */
 static int isbdm_update_rot_link_state(struct isbdm *ii) {
-	struct rivos_doe_isbdm_status_request request;
-	struct rivos_doe_isbdm_status_response response;
-	int32_t error;
 	int rc;
-	u32 state;
+	u32 rid;
+	enum isbdm_connection_state state;
 
 	if (!ii->rot)
 		return -ENODEV;
 
-	memset(&request, 0, sizeof(request));
-	rivos_rot_init_fidl_msg(&request.hdr, RIVOS_FIDL_ORD_ISBDM_STATUS);
-	request.rid = cpu_to_le32(pci_dev_id(ii->pdev));
+	rid = pci_dev_id(ii->pdev);
 	switch (ii->link_status) {
 	case ISBDM_LINK_UPSTREAM:
-		state = RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_UPSTREAM;
+		state = ISBDM_CONNECTION_STATE_CONNECTED_AS_UPSTREAM;
 		break;
 
 	case ISBDM_LINK_DOWNSTREAM:
-		state = RIVOS_DOE_ISBDM_STATUS_CONNECTED_AS_DOWNSTREAM;
+		state = ISBDM_CONNECTION_STATE_CONNECTED_AS_DOWNSTREAM;
 		break;
 
 	default:
 	case ISBDM_LINK_DOWN:
-		state = RIVOS_DOE_ISBDM_STATUS_DISCONNECTED;
+		state = ISBDM_CONNECTION_STATE_DISCONNECTED;
 		break;
 	}
 
-	request.state = cpu_to_le32(state);
-	rc = rivos_fidl_doe(ii->rot, &request, sizeof(request), &response,
-			    sizeof(response));
-	if (rc < 0) {
+	rc = rivos_rot_isbdm_update_status(ii->rot, rid, state);
+	if (rc < 0)
 		dev_warn(&ii->pdev->dev, "Failed to update RoT: %d\n", rc);
-		return rc;
 
-	} else if (rc != sizeof(response)) {
-		dev_warn(&ii->pdev->dev,
-			 "Failed to update RoT: Expected %zd byte response, rc = %d\n",
-			 sizeof(response), rc);
-
-		return -EIO;
-	}
-
-	error = le32_to_cpu(response.error);
-
-	if (error == RIVOS_DOE_ROT_ERROR_NOT_IMPLEMENTED) {
-		dev_dbg(&ii->pdev->dev,
-			"Ignoring not_implemented error updating RoT status\n");
-
-		return 0;
-
-	} else if (error != RIVOS_DOE_ROT_ERROR_SUCCESS) {
-		dev_warn(&ii->pdev->dev,
-			 "Failed to update RoT: RoT returned %d\n",
-			 error);
-
-		return -EIO;
-	}
-
-	return 0;
+	return rc;
 }
 
 /* Called when the link goes down or after a handshake has completed. */
