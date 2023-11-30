@@ -16,6 +16,7 @@
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
+		timebase-frequency = <6250000>;
 
 		U74_0: cpu@0 {
 			compatible = "sifive,u74-mc", "riscv";
