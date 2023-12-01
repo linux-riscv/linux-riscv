@@ -46,6 +46,8 @@ properties:
               - sifive,u7
               - sifive,u74
               - sifive,u74-mc
+              - starfive,dubhe-80
+              - starfive,dubhe-90
               - thead,c906
               - thead,c910
               - thead,c920
