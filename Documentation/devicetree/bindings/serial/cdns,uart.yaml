@@ -12,6 +12,9 @@ maintainers:
 properties:
   compatible:
     oneOf:
+      - items:
+          - const: starfive,jh8100-uart
+          - const: cdns,uart-r1p8
       - description: UART controller for Zynq-7xxx SoC
         items:
           - const: xlnx,xuartps
