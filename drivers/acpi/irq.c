@@ -52,6 +52,7 @@ EXPORT_SYMBOL_GPL(acpi_gsi_to_irq);
  *
  * Returns: a valid linux IRQ number on success
  *          -EINVAL on failure
+ *          -EPROBE_DEFER if irqdomain not created yet
  */
 int acpi_register_gsi(struct device *dev, u32 gsi, int trigger,
 		      int polarity)
@@ -64,6 +65,9 @@ int acpi_register_gsi(struct device *dev, u32 gsi, int trigger,
 		pr_warn("GSI: No registered irqchip, giving up\n");
 		return -EINVAL;
 	}
+
+	if (!irq_find_matching_fwnode(fwspec.fwnode, DOMAIN_BUS_ANY))
+		return -EPROBE_DEFER;
 
 	fwspec.param[0] = gsi;
 	fwspec.param[1] = acpi_dev_get_irq_type(trigger, polarity);
