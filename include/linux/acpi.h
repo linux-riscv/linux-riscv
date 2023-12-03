@@ -1460,11 +1460,19 @@ static inline int acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 
 #if IS_ENABLED(CONFIG_ACPI_GENERIC_GSI)
 int acpi_irq_get(acpi_handle handle, unsigned int index, struct resource *res);
+int acpi_get_gsi_parent_fwnode(acpi_handle handle, unsigned int index,
+			       struct fwnode_handle **parent);
 #else
 static inline
 int acpi_irq_get(acpi_handle handle, unsigned int index, struct resource *res)
 {
 	return -EINVAL;
+}
+static inline
+int acpi_get_gsi_parent_fwnode(acpi_handle handle, unsigned int index,
+			       struct fwnode_handle **parent)
+{
+	return 0;
 }
 #endif
 
