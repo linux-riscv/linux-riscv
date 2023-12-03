@@ -5,6 +5,7 @@
  */
 
 #define pr_fmt(fmt) "riscv-imsic: " fmt
+#include <linux/acpi.h>
 #include <linux/bitmap.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
@@ -293,41 +294,45 @@ static int imsic_irq_domains_init(struct fwnode_handle *fwnode)
 	return 0;
 }
 
-static int imsic_platform_probe(struct platform_device *pdev)
+static int imsic_platform_probe_common(struct fwnode_handle *fwnode)
 {
-	struct device *dev = &pdev->dev;
 	struct imsic_global_config *global;
 	int rc;
 
 	if (!imsic) {
-		dev_err(dev, "early driver not probed\n");
+		pr_err("%pfwP: early driver not probed\n", fwnode);
 		return -ENODEV;
 	}
 
 	if (imsic->base_domain) {
-		dev_err(dev, "irq domain already created\n");
+		pr_err("%pfwP: irq domain already created\n", fwnode);
 		return -ENODEV;
 	}
 
 	global = &imsic->global;
 
 	/* Initialize IRQ and MSI domains */
-	rc = imsic_irq_domains_init(dev->fwnode);
+	rc = imsic_irq_domains_init(fwnode);
 	if (rc) {
-		dev_err(dev, "failed to initialize IRQ and MSI domains\n");
+		pr_err("%pfwP: failed to initialize IRQ and MSI domains\n", fwnode);
 		return rc;
 	}
 
-	dev_info(dev, "  hart-index-bits: %d,  guest-index-bits: %d\n",
-		 global->hart_index_bits, global->guest_index_bits);
-	dev_info(dev, " group-index-bits: %d, group-index-shift: %d\n",
-		 global->group_index_bits, global->group_index_shift);
-	dev_info(dev, " per-CPU IDs %d at base PPN %pa\n",
-		 global->nr_ids, &global->base_addr);
-	dev_info(dev, " total %d interrupts available\n",
-		 imsic->nr_hwirqs);
+	pr_info("%pfwP: hart-index-bits: %d,  guest-index-bits: %d\n", fwnode,
+		global->hart_index_bits, global->guest_index_bits);
+	pr_info("%pfwP: group-index-bits: %d, group-index-shift: %d\n", fwnode,
+		global->group_index_bits, global->group_index_shift);
+	pr_info("%pfwP: per-CPU IDs %d at base PPN %pa\n", fwnode,
+		global->nr_ids, &global->base_addr);
+	pr_info("%pfwP: total %d interrupts available\n", fwnode,
+		imsic->nr_hwirqs);
 
 	return 0;
+}
+
+static int imsic_platform_dt_probe(struct platform_device *pdev)
+{
+	return imsic_platform_probe_common(pdev->dev.fwnode);
 }
 
 static const struct of_device_id imsic_platform_match[] = {
@@ -340,6 +345,22 @@ static struct platform_driver imsic_platform_driver = {
 		.name		= "riscv-imsic",
 		.of_match_table	= imsic_platform_match,
 	},
-	.probe = imsic_platform_probe,
+	.probe = imsic_platform_dt_probe,
 };
 builtin_platform_driver(imsic_platform_driver);
+
+#ifdef CONFIG_ACPI
+
+/*
+ *  On ACPI based systems, PCI enumeration happens early during boot in
+ *  acpi_scan_init(). PCI enumeration expects MSI domain setup before
+ *  it calls pci_set_msi_domain(). Hence, unlike in DT where
+ *  imsic-platform drive probe happens late during boot, ACPI based
+ *  systems need to setup the MSI domain early.
+ */
+int imsic_platform_acpi_probe(struct fwnode_handle *fwnode)
+{
+	return imsic_platform_probe_common(fwnode);
+}
+
+#endif
