@@ -354,3 +354,21 @@ struct irq_domain *acpi_irq_create_hierarchy(unsigned int flags,
 					   host_data);
 }
 EXPORT_SYMBOL_GPL(acpi_irq_create_hierarchy);
+
+int acpi_get_gsi_parent_fwnode(acpi_handle handle,
+			       unsigned int index,
+			       struct fwnode_handle **parent)
+{
+	struct irq_fwspec fwspec;
+	unsigned long flags;
+	int rc;
+
+	fwspec.fwnode = NULL;
+	rc = acpi_irq_parse_one(handle, index, &fwspec, &flags);
+	if (rc || !fwspec.fwnode)
+		return 0;
+
+	*parent = fwspec.fwnode;
+	return 1;
+}
+EXPORT_SYMBOL_GPL(acpi_get_gsi_parent_fwnode);
