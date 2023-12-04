@@ -112,6 +112,8 @@ ${GIT_MERGE} "${SRC}dev/evan/isbdm"
 ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
 # Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
+# Maintainer: @cleger
+${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_hwmon"
 
 # After successful merge and test create rivos release tag:
 echo "Apply tag and push to RIVOS repository when tested:"
