@@ -9,6 +9,7 @@
 /*
  * Assembly functions that may be used (directly or indirectly) by modules
  */
+EXPORT_SYMBOL(memchr);
 EXPORT_SYMBOL(memset);
 EXPORT_SYMBOL(memcpy);
 EXPORT_SYMBOL(memmove);
