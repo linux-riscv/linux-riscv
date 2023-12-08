@@ -20269,6 +20269,13 @@ S:	Maintained
 F:	arch/riscv/boot/dts/sophgo/
 F:	Documentation/devicetree/bindings/riscv/sophgo.yaml
 
+SOPHGO CLOCK DRIVER
+M:	Chen Wang <unicorn_wang@outlook.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/clock/sophgo/
+F:	drivers/clk/sophgo/
+F:	include/dt-bindings/clock/sophgo,sg2042-clkgen.h
+
 SOUND
 M:	Jaroslav Kysela <perex@perex.cz>
 M:	Takashi Iwai <tiwai@suse.com>
