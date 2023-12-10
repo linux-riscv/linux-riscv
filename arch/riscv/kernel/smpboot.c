@@ -10,19 +10,19 @@
 
 #include <linux/acpi.h>
 #include <linux/arch_topology.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/mm.h>
-#include <linux/sched.h>
-#include <linux/kernel_stat.h>
-#include <linux/notifier.h>
 #include <linux/cpu.h>
-#include <linux/percpu.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/init.h>
 #include <linux/irq.h>
+#include <linux/kernel.h>
+#include <linux/kernel_stat.h>
+#include <linux/mm.h>
+#include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/percpu.h>
+#include <linux/sched.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
 
@@ -31,11 +31,11 @@
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
 #include <asm/numa.h>
-#include <asm/tlbflush.h>
 #include <asm/sections.h>
 #include <asm/smp.h>
-#include <uapi/asm/hwcap.h>
+#include <asm/tlbflush.h>
 #include <asm/vector.h>
+#include <uapi/asm/hwcap.h>
 
 #include "head.h"
 
