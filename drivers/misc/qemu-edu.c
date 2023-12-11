@@ -85,7 +85,12 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	struct qemu_edu_device *dev = ctx->dev;
 
 	u64 src = (u64)buf;	// from user buffer to device
-	u64 dst = (u64)*ppos;
+	/* There's nothing in the internal address space except a 4K
+	 * buffer at 0x40000, so create an offset to that.
+	 *
+	 * Handily also works around a uClibc bug truncating the offset of pread/pwrite.
+	 */
+	u64 dst = ((u64)*ppos & 0xfff) | 0x40000;
 	u64 cmd = 0x01;
 	u64 cnt = count;
 
@@ -94,7 +99,7 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 		return -EINVAL;
 
 	if (!ctx->sva) {
-		ret = pin_user_pages_fast((unsigned long)buf, 1, FOLL_WRITE, pages);
+		ret = pin_user_pages_fast((unsigned long)buf, 1, 0, pages);
 		if (ret != 1) {
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
@@ -109,6 +114,8 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	} else {
 		cmd |= 0x08 | (ctx->pasid << 8);
 	}
+	pr_debug("qemu_edu_write(0x%px, phys 0x%llx) to buffer idx 0x%llx, count %ld\n",
+		 buf, src, *ppos, count);
 
 	mutex_lock(&dev->lock);
 	writeq(src, dev->reg + 0x80);
@@ -135,7 +142,7 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	struct qemu_edu_ctx *ctx = fp->private_data;
 	struct qemu_edu_device *dev = ctx->dev;
 
-	u64 src = (u64)*ppos;
+	u64 src = ((u64)*ppos & 0xfff) | 0x40000; /* see above */
 	u64 dst = (u64)buf;	// from device to user buffer
 	u64 cmd = 0x03;
 	u64 cnt = count;
@@ -145,7 +152,7 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 		return -EINVAL;
 
 	if (!ctx->sva) {
-		ret = pin_user_pages_fast((unsigned long)buf, 1, 0, pages);
+		ret = pin_user_pages_fast((unsigned long)buf, 1, FOLL_WRITE, pages);
 		if (ret != 1) {
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
@@ -160,6 +167,8 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	} else {
 		cmd |= 0x08 | (ctx->pasid << 8);
 	}
+	pr_debug("qemu_edu_read(0x%px, phys 0x%llx) from buffer idx 0x%llx, count %ld\n",
+		 buf, dst, *ppos, count);
 
 	mutex_lock(&dev->lock);
 	writeq(src, dev->reg + 0x80);
@@ -195,6 +204,11 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = pci_enable_device(pdev);
 	if (ret < 0) {
 		dev_err(dev, "Can not enable device: %d.\n", ret);
+		return ret;
+	}
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	if (ret < 0) {
 		return ret;
 	}
 
