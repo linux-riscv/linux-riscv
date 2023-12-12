@@ -22,6 +22,7 @@ struct test_args {
 	int nr_iter;
 	int timer_period_ms;
 	int migration_freq_ms;
+	int timer_err_margin_us;
 	/* Members of struct kvm_arm_counter_offset */
 	uint64_t counter_offset;
 	uint64_t reserved;

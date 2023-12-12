@@ -131,10 +131,14 @@ static void guest_run_stage(struct test_vcpu_shared_data *shared_data,
 
 		/* Setup a timeout for the interrupt to arrive */
 		udelay(msecs_to_usecs(test_args.timer_period_ms) +
-			TIMER_TEST_ERR_MARGIN_US);
+			test_args.timer_err_margin_us);
 
 		irq_iter = READ_ONCE(shared_data->nr_iter);
-		GUEST_ASSERT_EQ(config_iter + 1, irq_iter);
+		__GUEST_ASSERT(config_iter + 1 == irq_iter,
+			"config_iter + 1 = 0x%lx, irq_iter = 0x%lx.\n"
+			"  Guest timer interrupt was not trigged within the specified\n"
+			"  interval, try to increase the error margin by [-e] option.\n",
+			config_iter + 1, irq_iter);
 	}
 }
 

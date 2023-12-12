@@ -5,16 +5,17 @@
  * The guest's main thread configures the timer interrupt and waits
  * for it to fire, with a timeout equal to the timer period.
  * It asserts that the timeout doesn't exceed the timer period plus
- * an error margin of 100us.
+ * an user configurable error margin(default to 100us).
  *
  * On the other hand, upon receipt of an interrupt, the guest's interrupt
  * handler validates the interrupt by checking if the architectural state
  * is in compliance with the specifications.
  *
  * The test provides command-line options to configure the timer's
- * period (-p), number of vCPUs (-n), and iterations per stage (-i).
- * To stress-test the timer stack even more, an option to migrate the
- * vCPUs across pCPUs (-m), at a particular rate, is also provided.
+ * period (-p), number of vCPUs (-n), iterations per stage (-i), and timer
+ * interrupt arrival error margin (-e). To stress-test the timer stack even
+ * more, an option to migrate the vCPUs across pCPUs (-m), at a particular
+ * rate, is also provided.
  *
  * Copyright (c) 2021, Google LLC.
  */
@@ -34,6 +35,7 @@ struct test_args test_args = {
 	.nr_iter = NR_TEST_ITERS_DEF,
 	.timer_period_ms = TIMER_TEST_PERIOD_MS_DEF,
 	.migration_freq_ms = TIMER_TEST_MIGRATION_FREQ_MS,
+	.timer_err_margin_us = TIMER_TEST_ERR_MARGIN_US,
 	.reserved = 1,
 };
 
@@ -179,8 +181,9 @@ static void test_run(struct kvm_vm *vm)
 
 static void test_print_help(char *name)
 {
-	pr_info("Usage: %s [-h] [-n nr_vcpus] [-i iterations] [-p timer_period_ms]\n",
-		name);
+	pr_info("Usage: %s [-h] [-n nr_vcpus] [-i iterations] [-p timer_period_ms]\n"
+	        "\t\t    [-m migration_freq_ms] [-o counter_offset]\n"
+	        "\t\t    [-e timer_err_margin_us]\n", name);
 	pr_info("\t-n: Number of vCPUs to configure (default: %u; max: %u)\n",
 		NR_VCPUS_DEF, KVM_MAX_VCPUS);
 	pr_info("\t-i: Number of iterations per stage (default: %u)\n",
@@ -190,6 +193,8 @@ static void test_print_help(char *name)
 	pr_info("\t-m: Frequency (in ms) of vCPUs to migrate to different pCPU. 0 to turn off (default: %u)\n",
 		TIMER_TEST_MIGRATION_FREQ_MS);
 	pr_info("\t-o: Counter offset (in counter cycles, default: 0) [aarch64-only]\n");
+	pr_info("\t-e: Interrupt arrival error margin(in us) of the guest timer (default: %u)\n",
+		TIMER_TEST_ERR_MARGIN_US);
 	pr_info("\t-h: print this help screen\n");
 }
 
@@ -197,7 +202,7 @@ static bool parse_args(int argc, char *argv[])
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "hn:i:p:m:o:")) != -1) {
+	while ((opt = getopt(argc, argv, "hn:i:p:m:o:e:")) != -1) {
 		switch (opt) {
 		case 'n':
 			test_args.nr_vcpus = atoi_positive("Number of vCPUs", optarg);
@@ -215,6 +220,9 @@ static bool parse_args(int argc, char *argv[])
 			break;
 		case 'm':
 			test_args.migration_freq_ms = atoi_non_negative("Frequency", optarg);
+			break;
+		case 'e':
+			test_args.timer_err_margin_us = atoi_non_negative("Error Margin", optarg);
 			break;
 		case 'o':
 			test_args.counter_offset = strtol(optarg, NULL, 0);
