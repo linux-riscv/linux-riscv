@@ -37,6 +37,8 @@ struct imsic {
 	u32 nr_eix;
 	u32 nr_hw_eix;
 
+	spinlock_t extirq_update_lock;
+
 	/*
 	 * At any point in time, the register state is in
 	 * one of the following places:
@@ -613,12 +615,17 @@ static void imsic_swfile_extirq_update(struct kvm_vcpu *vcpu)
 {
 	struct imsic *imsic = vcpu->arch.aia_context.imsic_state;
 	struct imsic_mrif *mrif = imsic->swfile;
+	unsigned long flags;
+
+	spin_lock_irqsave(&imsic->extirq_update_lock, flags);
 
 	if (imsic_mrif_atomic_read(mrif, &mrif->eidelivery) &&
 	    imsic_mrif_topei(mrif, imsic->nr_eix, imsic->nr_msis))
 		kvm_riscv_vcpu_set_interrupt(vcpu, IRQ_VS_EXT);
 	else
 		kvm_riscv_vcpu_unset_interrupt(vcpu, IRQ_VS_EXT);
+
+	spin_unlock_irqrestore(&imsic->extirq_update_lock, flags);
 }
 
 static void imsic_swfile_read(struct kvm_vcpu *vcpu, bool clear,
@@ -1029,6 +1036,7 @@ int kvm_riscv_vcpu_aia_imsic_init(struct kvm_vcpu *vcpu)
 	imsic->nr_eix = BITS_TO_U64(imsic->nr_msis);
 	imsic->nr_hw_eix = BITS_TO_U64(kvm_riscv_aia_max_ids);
 	imsic->vsfile_hgei = imsic->vsfile_cpu = -1;
+	spin_lock_init(&imsic->extirq_update_lock);
 
 	/* Setup IMSIC SW-file */
 	swfile_page = alloc_pages(GFP_KERNEL | __GFP_ZERO,
