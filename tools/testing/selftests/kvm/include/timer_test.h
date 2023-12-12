@@ -22,8 +22,9 @@ struct test_args {
 	int nr_iter;
 	int timer_period_ms;
 	int migration_freq_ms;
-	/* TODO: Change arm specific type to a common one */
-	struct kvm_arm_counter_offset offset;
+	/* Members of struct kvm_arm_counter_offset */
+	uint64_t counter_offset;
+	uint64_t reserved;
 };
 
 /* Shared variables between host and guest */
