@@ -5,29 +5,67 @@
 #include <asm/alternative-macros.h>
 #include <asm/hwcap.h>
 
-/* int strlen(const char *s) */
-SYM_FUNC_START(strlen)
+#define REP_80 __REG_SEL(0x8080808080808080, 0x80808080)
+#define REP_01 __REG_SEL(0x0101010101010101, 0x01010101)
 
+/* size_t strlen(const char *s) */
+SYM_FUNC_START(strlen)
 	ALTERNATIVE("nop", "j strlen_zbb", 0, RISCV_ISA_EXT_ZBB, CONFIG_RISCV_ISA_ZBB)
 
 	/*
-	 * Returns
-	 *   a0 - string length
-	 *
-	 * Parameters
-	 *   a0 - String to measure
-	 *
-	 * Clobbers:
-	 *   t0, t1
-	 */
-	mv	t1, a0
+         * Returns
+         *   a0 - string length
+         *
+         * Parameters
+         *   a0 - String to measure
+         *
+         * Clobbers:
+         *   t0, t1, t2, t3, t4
+         */
+
+
+	mv t4, a0
+
+	/* Check the address memory alignment */
+	andi t2, a0, SZREG-1
+	beqz t2, 2f
+
+	/* Get SZREG - (address remainder) */
+	xori t2, t2, SZREG-1
+	addi t2, t2, 1
+
+	/* align the address */
+	add t2, a0, t2
 1:
-	lbu	t0, 0(t1)
-	beqz	t0, 2f
-	addi	t1, t1, 1
-	j	1b
+	beq a0, t2, 2f
+	lbu t1, 0(a0)
+	beqz t1, 5f
+	addi a0, a0, 1
+	j 1b
 2:
-	sub	a0, t1, a0
+	li t2, REP_80
+	li t3, REP_01
+3:
+	/* v contains 0 byte if (v - 0x0101..01) & ~v & 0x8080..80 != 0 */
+	REG_L t0, 0(a0)
+	sub t1, t0, t3
+	not t0, t0
+	and t1, t1, t0
+	and t1, t1, t2
+	bnez t1, 4f
+	addi a0, a0, SZREG
+	j 3b
+4:
+	/*
+	 * We found the word with 0, iterate it byte-wise to find the actual
+	 * string length.
+	 */
+	lbu t0, 0(a0)
+	beqz t0, 5f
+	addi a0, a0, 1
+	j 4b
+5:
+	sub a0, a0, t4
 	ret
 
 /*
