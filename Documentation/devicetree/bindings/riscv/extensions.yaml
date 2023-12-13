@@ -171,6 +171,11 @@ properties:
             memory types as ratified in the 20191213 version of the privileged
             ISA specification.
 
+        - const: zam
+          description: |
+            The standard Zam extension for misaligned atomics is supported as
+            ratified in version 20191213 of the riscv-isa-manual.
+
         - const: zba
           description: |
             The standard Zba bit-manipulation extension for address generation
