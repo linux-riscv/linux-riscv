@@ -633,15 +633,31 @@ process_accumulated_relocations(struct module *me,
 					  bucket_iter->bucket, node) {
 			buffer = 0;
 			location = rel_head_iter->location;
-			list_for_each_entry_safe(rel_entry_iter,
-						 rel_entry_iter_tmp,
-						 rel_head_iter->rel_entry,
-						 head) {
+			rel_entry_iter =
+				list_first_entry(rel_head_iter->rel_entry,
+						 typeof(*rel_entry_iter), head);
+			rel_entry_iter_tmp =
+				list_next_entry(rel_entry_iter, head);
+
+			/*
+			 * Iterate through all relocation entries that share
+			 * this location. This uses a do-while loop instead of
+			 * list_for_each_entry_safe since it is known that there
+			 * is at least one entry and curr_type needs to be the
+			 * value of the last entry when the loop exits.
+			 */
+			do {
 				curr_type = rel_entry_iter->type;
 				reloc_handlers[curr_type].reloc_handler(
 					me, &buffer, rel_entry_iter->value);
 				kfree(rel_entry_iter);
-			}
+
+				rel_entry_iter = rel_entry_iter_tmp;
+				rel_entry_iter_tmp = list_next_entry(rel_entry_iter_tmp, head);
+			} while (!list_entry_is_head(rel_entry_iter,
+						     rel_head_iter->rel_entry,
+						     head));
+
 			reloc_handlers[curr_type].accumulate_handler(
 				me, location, buffer);
 			kfree(rel_head_iter);
@@ -723,8 +739,8 @@ static int add_relocation_to_accumulate(struct module *me, int type,
 
 			if (!bucket) {
 				kfree(entry);
-				kfree(rel_head);
 				kfree(rel_head->rel_entry);
+				kfree(rel_head);
 				return -ENOMEM;
 			}
 
@@ -741,12 +757,15 @@ static int add_relocation_to_accumulate(struct module *me, int type,
 	return 0;
 }
 
-static unsigned int
-initialize_relocation_hashtable(unsigned int num_relocations,
-				struct hlist_head **relocation_hashtable)
+static u32 initialize_relocation_hashtable(unsigned int num_relocations,
+					   struct hlist_head **relocation_hashtable)
 {
 	/* Can safely assume that bits is not greater than sizeof(long) */
 	unsigned long hashtable_size = roundup_pow_of_two(num_relocations);
+	/*
+	 * When hashtable_size == 1, hashtable_bits == 0.
+	 * This is valid because the hashing algorithm returns 0 in this case.
+	 */
 	unsigned int hashtable_bits = ilog2(hashtable_size);
 
 	/*
@@ -760,10 +779,10 @@ initialize_relocation_hashtable(unsigned int num_relocations,
 	hashtable_size <<= should_double_size;
 
 	*relocation_hashtable = kmalloc_array(hashtable_size,
-					      sizeof(*relocation_hashtable),
+					      sizeof(**relocation_hashtable),
 					      GFP_KERNEL);
 	if (!*relocation_hashtable)
-		return -ENOMEM;
+		return 0;
 
 	__hash_init(*relocation_hashtable, hashtable_size);
 
@@ -789,8 +808,8 @@ int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
 	hashtable_bits = initialize_relocation_hashtable(num_relocations,
 							 &relocation_hashtable);
 
-	if (hashtable_bits < 0)
-		return hashtable_bits;
+	if (!relocation_hashtable)
+		return -ENOMEM;
 
 	INIT_LIST_HEAD(&used_buckets_list);
 
