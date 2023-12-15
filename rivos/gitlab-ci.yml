@@ -42,6 +42,7 @@ prepare-version:
       fi
     - sudo apt update && sudo apt install -y kmod debhelper
     - export SCCACHE_MEMCACHED="tcp://${MEMCACHED_SWPROTO10}"
+    - export SCCACHE_C_CUSTOM_CACHE_BUSTER=`git describe --tags --abbrev=0`
     - test ! -x /usr/bin/sccache || sccache --show-stats
     - date
     - bash rivos/build.sh ${BUILD_SH_ARGS} | tee -i make_logs_${KERNEL_CONFIG}.txt
