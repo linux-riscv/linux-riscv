@@ -10,7 +10,7 @@
 # - git remote add avpatel  https://github.com/avpatel/linux.git
 # - git remote add vlsunil  https://github.com/vlsunil/linux.git
 #
-# Use upstream tag and optional dot-release, eg. target rivos/next/v6.3-rc1.1:
+# Use upstream tag and optional dot-release, eg. target rivos/next/v6.6-rc2.1:
 # $ rivos/create-next -u v6.6-rc2 -d 1
 #
 # After successful merge, test locally and push release candidate branch:
