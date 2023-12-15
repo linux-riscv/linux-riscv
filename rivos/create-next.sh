@@ -28,8 +28,10 @@ set -e
 VER=v6.6-rc1
 DOT=
 ORG="rivos"
+INTERNAL=true
+TAG_PREFIX=
 
-while getopts 'u:d:o:klh' opt; do
+while getopts 'u:d:o:eklh' opt; do
   case "$opt" in
   u)
     echo "Upstream tag: $OPTARG"
@@ -38,6 +40,11 @@ while getopts 'u:d:o:klh' opt; do
   d)
     echo "Dot release: $OPTARG"
     DOT="$OPTARG"
+    ;;
+  e)
+    echo "Merge for external consumption"
+    INTERNAL=false
+    TAG_PREFIX="external-"
     ;;
   o)
     echo "Origin repo: $OPTARG"
@@ -60,8 +67,8 @@ while getopts 'u:d:o:klh' opt; do
   esac
 done
 
-DST="dev/rivos/next/${VER}${DOT:+.$DOT}"
-TAG="rivos/${VER}${DOT:+.$DOT}"
+DST="dev/rivos/next/${TAG_PREFIX}${VER}${DOT:+.$DOT}"
+TAG="rivos/${TAG_PREFIX}${VER}${DOT:+.$DOT}"
 SRC="${local_src-${ORG:+$ORG/}}"
 
 GIT_MERGE="git merge --no-ff --log=100 --stat --no-edit --signoff"
@@ -87,7 +94,9 @@ fi
 test -z "${no_reset}" && git reset --hard ${VER}
 
 # Rivos: Internal CI rules and unsorted private patches.
-${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_main"
+if [[ "${INTERNAL}" == "true" ]]; then
+  ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_main"
+fi
 
 # Ventana public patch series
 # 1. based on avpatel/riscv_aia_v*
@@ -100,16 +109,18 @@ ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_sbi_dbcn"
 # Rivos patch series
 # Maintainer: @tjeznach
 ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_iommu"
-# Maintainer: @tjeznach
-${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
-# Maintainer: @bend
-${GIT_MERGE} "${SRC}dev/bend/feature/dce"
-# Maintainer: @sonny
-${GIT_MERGE} "${SRC}dev/sonny/feature/dpa"
-# Maintainer: @evan
-${GIT_MERGE} "${SRC}dev/evan/isbdm"
-# Maintainer: @tjeznach
-${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
+if [[ "${INTERNAL}" == "true" ]]; then
+  # Maintainer: @tjeznach
+  ${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
+  # Maintainer: @bend
+  ${GIT_MERGE} "${SRC}dev/bend/feature/dce"
+  # Maintainer: @sonny
+  ${GIT_MERGE} "${SRC}dev/sonny/feature/dpa"
+  # Maintainer: @evan
+  ${GIT_MERGE} "${SRC}dev/evan/isbdm"
+  # Maintainer: @tjeznach
+  ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
+fi
 # Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
 # Maintainer: @cleger
