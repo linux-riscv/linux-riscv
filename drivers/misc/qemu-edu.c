@@ -94,7 +94,17 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	u64 cmd = 0x01;
 	u64 cnt = count;
 
+	/* There's nothing in the internal address space except a 4K
+	 * buffer at 0x40000; in some broken cases (e.g. a buggy
+	 * uClibc pread/pwrite) the offset is passed as zero.  To work
+	 * around these, also accept offsets to the first page
+	 * (redirect to 0x40000).
+	 */
+	if (!(dst & ~0xfff))
+	    dst |= 0x40000;
+
 	/* page crossing not supported */
+
 	if ((offset_in_page(buf) + cnt) > 4096)
 		return -EINVAL;
 
@@ -146,6 +156,9 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	u64 dst = (u64)buf;	// from device to user buffer
 	u64 cmd = 0x03;
 	u64 cnt = count;
+
+	if (!(src & ~0xfff))	/* See qemu_edu_write */
+	    src |= 0x40000;
 
 	/* page crossing not supported */
 	if ((offset_in_page(buf) + cnt) > 4096)
