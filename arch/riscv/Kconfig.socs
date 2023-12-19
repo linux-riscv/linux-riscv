@@ -35,6 +35,7 @@ config SOC_STARFIVE
 	select PINCTRL
 	select RESET_CONTROLLER
 	select ARM_AMBA
+	select STARFIVE_JH7110_TIMER
 	help
 	  This enables support for StarFive SoC platform hardware.
 
