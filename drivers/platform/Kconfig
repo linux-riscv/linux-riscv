@@ -11,6 +11,8 @@ source "drivers/platform/mellanox/Kconfig"
 
 source "drivers/platform/olpc/Kconfig"
 
+source "drivers/platform/rivos/Kconfig"
+
 source "drivers/platform/surface/Kconfig"
 
 source "drivers/platform/x86/Kconfig"
