@@ -122,6 +122,8 @@ if [[ "${INTERNAL}" == "true" ]]; then
   ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
   # Maintainer: @cleger
   ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_hwmon"
+  # Maintainer: @charlie
+  ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_emulation"
 fi
 # Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
