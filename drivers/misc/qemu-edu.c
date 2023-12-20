@@ -257,8 +257,8 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ret = misc_register(&edu_dev->miscdev);
 	if (ret < 0) {
-		if (edu_dev->sva_enabled)
-			iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
+		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
+		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_IOPF);
 		iounmap(edu_dev->reg);
 		kfree(edu_dev);
 		return ret;
