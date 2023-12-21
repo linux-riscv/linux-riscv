@@ -190,7 +190,8 @@ static inline void __switch_to_vector(struct task_struct *prev,
 	struct pt_regs *regs;
 
 	regs = task_pt_regs(prev);
-	riscv_v_vstate_save(prev, regs);
+	if (unlikely(regs->status & SR_SD))
+		riscv_v_vstate_save(prev, regs);
 	riscv_v_vstate_restore(next, task_pt_regs(next));
 }
 
