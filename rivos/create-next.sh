@@ -120,11 +120,11 @@ if [[ "${INTERNAL}" == "true" ]]; then
   ${GIT_MERGE} "${SRC}dev/evan/isbdm"
   # Maintainer: @tjeznach
   ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_pci"
+  # Maintainer: @cleger
+  ${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_hwmon"
 fi
 # Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
-# Maintainer: @cleger
-${GIT_MERGE} "${SRC}dev/rivos/topic/rivos_hwmon"
 
 # After successful merge and test create rivos release tag:
 echo "Apply tag and push to RIVOS repository when tested:"
