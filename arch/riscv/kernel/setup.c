@@ -304,6 +304,10 @@ static void __init riscv_spinlock_init(void)
 #ifdef CONFIG_QUEUED_SPINLOCKS
 	virt_spin_lock_init();
 #endif
+
+#ifdef CONFIG_PARAVIRT_SPINLOCKS
+	pv_qspinlock_init();
+#endif
 }
 #endif
 
