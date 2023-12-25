@@ -3997,6 +3997,10 @@
 	no_uaccess_flush
 	                [PPC] Don't flush the L1-D cache after accessing user data.
 
+	no_virt_spin	[RISC-V] Disable virt_spin_lock in VM guest to use
+			native_queued_spinlock when the nopvspin option is enabled.
+			This would help vcpu=pcpu scenarios.
+
 	novmcoredd	[KNL,KDUMP]
 			Disable device dump. Device dump allows drivers to
 			append dump data to vmcore so you can collect driver

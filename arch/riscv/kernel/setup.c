@@ -27,6 +27,7 @@
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
 #include <asm/cpu_ops.h>
+#include <asm/cpufeature.h>
 #include <asm/early_ioremap.h>
 #include <asm/pgtable.h>
 #include <asm/setup.h>
@@ -266,6 +267,27 @@ early_param("qspinlock", queued_spinlock_setup);
 DEFINE_STATIC_KEY_TRUE(combo_qspinlock_key);
 EXPORT_SYMBOL(combo_qspinlock_key);
 
+#ifdef CONFIG_QUEUED_SPINLOCKS
+static bool no_virt_spin __ro_after_init;
+static int __init no_virt_spin_setup(char *p)
+{
+	no_virt_spin = true;
+
+	return 0;
+}
+early_param("no_virt_spin", no_virt_spin_setup);
+
+DEFINE_STATIC_KEY_TRUE(virt_spin_lock_key);
+
+static void __init virt_spin_lock_init(void)
+{
+	if (no_virt_spin)
+		static_branch_disable(&virt_spin_lock_key);
+	else
+		pr_info("Enable virt_spin_lock\n");
+}
+#endif
+
 static void __init riscv_spinlock_init(void)
 {
 	if (!enable_qspinlock) {
@@ -274,6 +296,10 @@ static void __init riscv_spinlock_init(void)
 	} else {
 		pr_info("Queued spinlock: enabled\n");
 	}
+
+#ifdef CONFIG_QUEUED_SPINLOCKS
+	virt_spin_lock_init();
+#endif
 }
 #endif
 
