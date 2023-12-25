@@ -246,6 +246,37 @@ static void __init parse_dtb(void)
 #endif
 }
 
+#ifdef CONFIG_RISCV_COMBO_SPINLOCKS
+static bool enable_qspinlock __ro_after_init;
+static int __init queued_spinlock_setup(char *p)
+{
+	enable_qspinlock = true;
+
+	return 0;
+}
+early_param("qspinlock", queued_spinlock_setup);
+
+/*
+ * Ticket-lock would dirty the lock value, so force qspinlock at
+ * first and switch to ticket-lock later.
+ *  - key is true : qspinlock -> qspinlock (no change)
+ *  - key is false: qspinlock -> ticket-lock
+ *    (No ticket-lock -> qspinlock)
+ */
+DEFINE_STATIC_KEY_TRUE(combo_qspinlock_key);
+EXPORT_SYMBOL(combo_qspinlock_key);
+
+static void __init riscv_spinlock_init(void)
+{
+	if (!enable_qspinlock) {
+		static_branch_disable(&combo_qspinlock_key);
+		pr_info("Ticket spinlock: enabled\n");
+	} else {
+		pr_info("Queued spinlock: enabled\n");
+	}
+}
+#endif
+
 extern void __init init_rt_signal_env(void);
 
 void __init setup_arch(char **cmdline_p)
@@ -297,6 +328,9 @@ void __init setup_arch(char **cmdline_p)
 	riscv_set_dma_cache_alignment();
 
 	riscv_user_isa_enable();
+#ifdef CONFIG_RISCV_COMBO_SPINLOCKS
+	riscv_spinlock_init();
+#endif
 }
 
 static int __init topology_init(void)

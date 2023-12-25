@@ -4753,6 +4753,8 @@
 			[KNL] Number of legacy pty's. Overwrites compiled-in
 			default number.
 
+	qspinlock	[RISCV] Use native qspinlock.
+
 	quiet		[KNL] Disable most log messages
 
 	r128=		[HW,DRM]
