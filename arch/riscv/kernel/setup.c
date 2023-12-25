@@ -281,6 +281,9 @@ DEFINE_STATIC_KEY_TRUE(virt_spin_lock_key);
 
 static void __init virt_spin_lock_init(void)
 {
+	if (sbi_get_firmware_id() != SBI_EXT_BASE_IMPL_ID_KVM)
+		no_virt_spin = true;
+
 	if (no_virt_spin)
 		static_branch_disable(&virt_spin_lock_key);
 	else
@@ -290,7 +293,8 @@ static void __init virt_spin_lock_init(void)
 
 static void __init riscv_spinlock_init(void)
 {
-	if (!enable_qspinlock) {
+	if ((!enable_qspinlock) &&
+	    (sbi_get_firmware_id() != SBI_EXT_BASE_IMPL_ID_KVM)) {
 		static_branch_disable(&combo_qspinlock_key);
 		pr_info("Ticket spinlock: enabled\n");
 	} else {
