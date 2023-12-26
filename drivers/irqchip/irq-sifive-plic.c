@@ -437,7 +437,7 @@ static int __init __plic_init(struct device_node *node,
 
 	priv->prio_save = bitmap_alloc(nr_irqs, GFP_KERNEL);
 	if (!priv->prio_save)
-		goto out_free_priority_reg;
+		goto out_iounmap;
 
 	nr_contexts = of_irq_count(node);
 	if (WARN_ON(!nr_contexts))
