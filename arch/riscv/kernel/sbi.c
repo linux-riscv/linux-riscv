@@ -673,7 +673,7 @@ void __init sbi_init(void)
 			sbi_srst_reboot_nb.priority = 192;
 			register_restart_handler(&sbi_srst_reboot_nb);
 		}
-		if ((sbi_spec_version >= sbi_mk_version(2, 0)) &&
+		if ((sbi_spec_version >= sbi_mk_version(1, 0)) &&
 		    (sbi_probe_extension(SBI_EXT_DBCN) > 0)) {
 			pr_info("SBI DBCN extension detected\n");
 			sbi_debug_console_available = true;
