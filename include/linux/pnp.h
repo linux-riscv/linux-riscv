@@ -33,8 +33,6 @@ static inline struct resource *pnp_get_resource(struct pnp_dev *dev,
 {
 	return NULL;
 }
-static inline
-void arch_pnp_reconfigure_irq(struct pnp_dev *dev, unsigned int index, struct resource *res) { }
 #endif
 
 #ifdef CONFIG_ARCH_ACPI_DEFERRED_GSI
