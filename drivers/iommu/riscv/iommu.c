@@ -32,11 +32,15 @@ MODULE_AUTHOR("Nick Kossifidis <mick@ics.forth.gr>");
 MODULE_ALIAS("riscv-iommu");
 MODULE_LICENSE("GPL v2");
 
+/* Override to use custom default timeout in usec */
+static unsigned timeout = 0;
+module_param(timeout, uint, 0644);
+
 /* Timeouts in [us] */
-#define RISCV_IOMMU_DDTP_TIMEOUT	50000
-#define RISCV_IOMMU_QCSR_TIMEOUT	50000
-#define RISCV_IOMMU_QUEUE_TIMEOUT	10000
-#define RISCV_IOMMU_IOFENCE_TIMEOUT	1500000
+#define RISCV_IOMMU_DDTP_TIMEOUT	(timeout ? timeout : 50000)
+#define RISCV_IOMMU_QCSR_TIMEOUT	(timeout ? timeout : 50000)
+#define RISCV_IOMMU_QUEUE_TIMEOUT	(timeout ? timeout : 10000)
+#define RISCV_IOMMU_IOFENCE_TIMEOUT	(timeout ? timeout : 1500000)
 
 /* Number of entries per CMD/FLT queue, should be <= INT_MAX */
 #define RISCV_IOMMU_DEF_CQ_COUNT	8192
