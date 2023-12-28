@@ -2026,6 +2026,9 @@ static struct iommu_device *riscv_iommu_probe_device(struct device *dev)
 	if (!ep)
 		return ERR_PTR(-ENOMEM);
 
+	if (iommu->quirk_no_segment)
+		devid &= 0x0ffff;
+
 	ep->devid = devid;
 	ep->dev = dev;
 	RB_CLEAR_NODE(&ep->eps_node);
@@ -2137,6 +2140,10 @@ static int riscv_iommu_init_check(struct riscv_iommu_device *iommu)
 
 	dma_set_mask_and_coherent(iommu->dev,
 				  DMA_BIT_MASK(FIELD_GET(RISCV_IOMMU_CAP_PAS, iommu->caps)));
+
+	/* Check hardware quirks */
+	if ((iommu->caps & 0xff) == 0)
+		iommu->quirk_no_segment = true;
 
 	return 0;
 }
