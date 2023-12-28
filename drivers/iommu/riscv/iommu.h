@@ -76,6 +76,9 @@ struct riscv_iommu_device {
 
 	/* device level debug directory dentry */
 	struct dentry *debugfs;
+
+	/* quirks */
+	u8 quirk_no_segment:1;
 };
 
 /* This struct contains device (endpoint) specific IOMMU driver data. */
