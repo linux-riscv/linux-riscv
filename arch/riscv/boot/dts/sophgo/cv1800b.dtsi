@@ -114,6 +114,78 @@
 			riscv,ndev = <101>;
 		};
 
+		timer0: timer@030a0000 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0000 0x14>;
+			interrupts = <79 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER0>;
+			status = "disabled";
+		};
+
+		timer1: timer@030a0014 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0014 0x14>;
+			interrupts = <80 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER1>;
+			status = "disabled";
+		};
+
+		timer2: timer@030a0028 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0028 0x14>;
+			interrupts = <81 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER2>;
+			status = "disabled";
+		};
+
+		timer3: timer@030a003c {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a003c 0x14>;
+			interrupts = <82 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER3>;
+			status = "disabled";
+		};
+
+		timer4: timer@030a0050 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0050 0x14>;
+			interrupts = <83 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER4>;
+			status = "disabled";
+		};
+
+		timer5: timer@30a0064 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0064 0x14>;
+			interrupts = <84 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER5>;
+			status = "disabled";
+		};
+
+		timer6: timer@030a0078 {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a0078 0x14>;
+			interrupts = <85 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER6>;
+			status = "disabled";
+		};
+
+		timer7: timer@030a008c {
+			compatible = "snps,dw-apb-timer";
+			reg = <0x030a008c 0x14>;
+			interrupts = <86 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+			resets = <&rst RST_TIMER7>;
+			status = "disabled";
+		};
+
 		clint: timer@74000000 {
 			compatible = "sophgo,cv1800b-clint", "thead,c900-clint";
 			reg = <0x74000000 0x10000>;
