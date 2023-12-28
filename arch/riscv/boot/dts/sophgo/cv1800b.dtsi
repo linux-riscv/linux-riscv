@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
 /*
  * Copyright (C) 2023 Jisheng Zhang <jszhang@kernel.org>
+ * Copyright (C) 2023 Annan Liu <annan.liu.xdu@outlook.com>
  */
 
 #include <dt-bindings/interrupt-controller/irq.h>
@@ -102,6 +103,20 @@
 			reg-shift = <2>;
 			reg-io-width = <4>;
 			status = "disabled";
+		};
+
+		watchdog0: watchdog@3010000{
+			compatible = "snps,dw-wdt";
+			reg = <0x3010000 0x100>;
+			interrupts = <58 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&pclk>;
+			resets = <&rst RST_WDT>;
+		};
+
+		pclk: pclk {
+			#clock-cells = <0>;
+			compatible = "fixed-clock";
+			clock-frequency = <25000000>;
 		};
 
 		plic: interrupt-controller@70000000 {
