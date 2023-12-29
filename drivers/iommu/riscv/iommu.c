@@ -1129,6 +1129,7 @@ struct riscv_iommu_domain {
 	int pasid;
 	int numa_node;
 	int amo_enabled:1;
+	int quirk_disable_cmpxchg:1;
 	unsigned int pgd_mode;
 	/* paging domain */
 	unsigned long pgd_root;
@@ -1565,7 +1566,9 @@ static size_t riscv_iommu_unmap_pages(struct iommu_domain *iommu_domain,
 			return unmapped;
 
 		old = READ_ONCE(*ptr);
-		if (cmpxchg_relaxed(ptr, old, 0) != old)
+		if (domain->quirk_disable_cmpxchg)
+			WRITE_ONCE(*ptr, 0UL);
+		else if (cmpxchg_relaxed(ptr, old, 0) != old)
 			continue;
 
 		iommu_iotlb_gather_add_page(&domain->domain, gather, iova,
@@ -1641,6 +1644,7 @@ static int riscv_iommu_attach_paging_domain(struct iommu_domain *iommu_domain,
 	if (list_empty(&domain->bonds)) {
 		domain->numa_node = dev_to_node(iommu->dev);
 		domain->amo_enabled = !!(iommu->caps & RISCV_IOMMU_CAP_AMO);
+		domain->quirk_disable_cmpxchg = !(iommu->caps & RISCV_IOMMU_CAP_VERSION_REV_MASK);
 	}
 
 	if (!domain->pgd_root) {
