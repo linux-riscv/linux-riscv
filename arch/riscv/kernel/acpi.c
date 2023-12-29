@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/memblock.h>
 #include <linux/pci.h>
+#include <linux/serial_core.h>
 
 int acpi_noirq = 1;		/* skip ACPI IRQ initialization */
 int acpi_disabled = 1;
@@ -151,6 +152,9 @@ void __init acpi_boot_table_init(void)
 		if (!param_acpi_force)
 			disable_acpi();
 	}
+
+	if (!acpi_disabled)
+		acpi_parse_spcr(earlycon_acpi_spcr_enable, true);
 }
 
 static int acpi_parse_madt_rintc(union acpi_subtable_headers *header, const unsigned long end)
