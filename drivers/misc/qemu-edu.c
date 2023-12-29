@@ -243,9 +243,10 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENODEV;
 	}
 
-	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF)) {
+		dev_warn(dev, "Unable to turn on user IOPFfeature.\n");
+	} else if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		dev_warn(dev, "Unable to turn on user SVA feature.\n");
-		edu_dev->sva_enabled = false;
 	} else {
 		dev_info(dev, "SVA feature enabled.\n");
 		edu_dev->sva_enabled = true;
