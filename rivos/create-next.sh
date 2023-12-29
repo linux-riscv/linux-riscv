@@ -25,7 +25,7 @@
 
 set -e
 
-VER=v6.6-rc1
+VER=v6.7-rc5
 DOT=
 ORG="rivos"
 INTERNAL=true
@@ -99,16 +99,14 @@ if [[ "${INTERNAL}" == "true" ]]; then
 fi
 
 # Ventana public patch series
-# 1. based on avpatel/riscv_aia_v*
-${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_aia"
-# 2. based on vlsunil/riscv_acpi_*
-${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi"
-# 3. based on avpatel/riscv_sbi_dbcn_*
-${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_sbi_dbcn"
+# 1. based on avpatel/riscv_aia_v* (KVM, SBI-DBCN, AIA)
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_aia_v12"
+# 2. based on vlsunil/riscv_acpi_* (ACPI)
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi_aia_v12"
 
 # Rivos patch series
 # Maintainer: @tjeznach
-${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_iommu"
+${GIT_MERGE} "${SRC}dev/tjeznach/feature/riscv-iommu-v2"
 if [[ "${INTERNAL}" == "true" ]]; then
   # Maintainer: @tjeznach
   ${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
