@@ -721,6 +721,11 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return err;
 
 	// Enable PASID support
+	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF);
+	if (err) {
+		dev_warn(dev, "%s: Unable to turn on IOPF feature\n", __func__);
+		return err;
+	}
 	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
 	if (err) {
 		dev_warn(dev, "%s: Unable to turn on SVA feature\n", __func__);
