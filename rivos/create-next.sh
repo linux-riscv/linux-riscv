@@ -106,7 +106,7 @@ ${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_acpi_aia_v12"
 
 # Rivos patch series
 # Maintainer: @tjeznach
-${GIT_MERGE} "${SRC}dev/tjeznach/feature/riscv-iommu-v2"
+${GIT_MERGE} "${SRC}dev/rivos/topic/riscv_iommu_v2"
 if [[ "${INTERNAL}" == "true" ]]; then
   # Maintainer: @tjeznach
   ${GIT_MERGE} "${SRC}dev/tjeznach/feature/qemu-edu"
