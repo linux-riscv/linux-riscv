@@ -1256,7 +1256,8 @@ static int dce_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	drv_priv->pdev = pdev;
 	drv_priv->mmio_start_phys = pci_resource_start(pdev, 0);
 
-	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
+	if (iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF) ||
+	    iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA)) {
 		drv_priv->sva_enabled = false;
 		dev_err(dev, "DCE:Unable to turn on user SVA feature. Device disabled\n");
 		goto disable_device_and_fail;
