@@ -520,8 +520,15 @@ static int isbdmex_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	pci_set_master(pdev);
+	ret = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF);
+	if (ret) {
+		dev_err_probe(dev, ret, "IOPF enablement failed\n");
+		goto deinit_rasd;
+	}
+
 	ret = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
+		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_IOPF);
 		dev_err_probe(dev, ret, "SVA enablement failed\n");
 		goto deinit_rasd;
 	}
