@@ -116,6 +116,13 @@ config HVC_RISCV_SBI
 
 	  If you don't know what do to here, say Y.
 
+config HVC_OT
+	bool "OpenTitan UART console support"
+	select HVC_DRIVER
+	help
+	  This enables support for console output on an OT UART.
+	  (First one found ;-) )
+
 config HVCS
 	tristate "IBM Hypervisor Virtual Console Server support"
 	depends on PPC_PSERIES && HVC_CONSOLE
