@@ -85,7 +85,7 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 			return;
 
 		if (static_branch_unlikely(&use_asid_allocator))
-			asid = atomic_long_read(&mm->context.id) & asid_mask;
+			asid = cntx2asid(atomic_long_read(&mm->context.id));
 	} else {
 		cmask = cpu_online_mask;
 	}
