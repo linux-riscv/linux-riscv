@@ -350,6 +350,10 @@ static int do_riscv_hwprobe(struct riscv_hwprobe __user *pairs,
 			    unsigned long __user *cpus_user,
 			    unsigned int flags)
 {
+	/* The rest of the flags are still reserved. */
+	if (flags & ~RISCV_HWPROBE_WICHH_CPUS)
+		return -EINVAL;
+
 	if (flags & RISCV_HWPROBE_WHICH_CPUS)
 		return hwprobe_get_cpus(pairs, pair_count, cpusetsize,
 					cpus_user, flags);
