@@ -1430,8 +1430,12 @@ static void riscv_iommu_pte_free(struct riscv_iommu_domain *domain,
 	/* Recursively free all sub page table pages */
 	for (i = 0; i < PTRS_PER_PTE; i++) {
 		pte = READ_ONCE(ptr[i]);
-		if (!_io_pte_none(pte) && cmpxchg_relaxed(ptr + i, pte, 0) == pte)
+		if (!_io_pte_none(pte) && domain->quirk_disable_cmpxchg) {
+			WRITE_ONCE(ptr[i], 0);
 			riscv_iommu_pte_free(domain, pte, freelist);
+		} else if (!_io_pte_none(pte) && cmpxchg_relaxed(ptr + i, pte, 0) == pte) {
+			riscv_iommu_pte_free(domain, pte, freelist);
+		}
 	}
 
 	if (freelist)
@@ -1476,7 +1480,9 @@ pte_retry:
 				return NULL;
 			old = pte;
 			pte = _io_pte_entry(page_to_pfn(page), _PAGE_TABLE);
-			if (cmpxchg_relaxed(ptr, old, pte) != old) {
+			if (domain->quirk_disable_cmpxchg)
+				WRITE_ONCE(*ptr, pte);
+			else if (cmpxchg_relaxed(ptr, old, pte) != old) {
 				__free_pages(page, 0);
 				goto pte_retry;
 			}
@@ -1538,7 +1544,9 @@ static int riscv_iommu_map_pages(struct iommu_domain *iommu_domain,
 
 		old = READ_ONCE(*ptr);
 		pte = _io_pte_entry(phys_to_pfn(phys), pte_prot);
-		if (cmpxchg_relaxed(ptr, old, pte) != old)
+		if (domain->quirk_disable_cmpxchg)
+			WRITE_ONCE(*ptr, pte);
+		else if (cmpxchg_relaxed(ptr, old, pte) != old)
 			continue;
 
 		/* TODO: deal with __old being a valid non-leaf entry */
