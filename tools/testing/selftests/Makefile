@@ -38,6 +38,7 @@ TARGETS += ipc
 TARGETS += ir
 TARGETS += kcmp
 TARGETS += kexec
+TARGETS += dpa
 TARGETS += kvm
 TARGETS += landlock
 TARGETS += lib
