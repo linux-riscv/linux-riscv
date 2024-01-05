@@ -14,12 +14,13 @@
 static int sva_disabled = false;
 module_param(sva_disabled, int, 0644);
 
+static int edu_index = 0;
+
 struct qemu_edu_device {
 	struct miscdevice miscdev;
 	void __iomem *reg;
 	bool sva_enabled;
 	struct mutex lock;
-	refcount_t ref;
 };
 
 struct qemu_edu_ctx {
@@ -213,6 +214,7 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int ret;
 	struct device *dev = &pdev->dev;
 	struct qemu_edu_device *edu_dev;
+	char *name;
 
 	ret = pci_enable_device(pdev);
 	if (ret < 0) {
@@ -229,16 +231,26 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!edu_dev)
 		return -ENOMEM;
 
+
+	if (edu_index) {
+		name = kasprintf(GFP_KERNEL, "qemu-edu%d", edu_index);
+		edu_index++;
+	} else {
+		name = kasprintf(GFP_KERNEL, "qemu-edu");
+		edu_index++;
+	}
+
+
 	edu_dev->miscdev.fops = &qemu_edu_fops;
 	edu_dev->miscdev.parent = dev;
 	edu_dev->miscdev.minor = MISC_DYNAMIC_MINOR;
-	edu_dev->miscdev.name = "qemu-edu";
-	refcount_set(&edu_dev->ref, 1);
+	edu_dev->miscdev.name = name;
 	mutex_init(&edu_dev->lock);
 
 	edu_dev->reg = pci_ioremap_bar(pdev, 0);
 	if (!edu_dev->reg) {
 		dev_err(dev, "Unable to map BAR0.\n");
+		kfree(edu_dev->miscdev.name);
 		kfree(edu_dev);
 		return -ENODEV;
 	}
@@ -260,6 +272,7 @@ static int qemu_edu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
 		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_IOPF);
 		iounmap(edu_dev->reg);
+		kfree(edu_dev->miscdev.name);
 		kfree(edu_dev);
 		return ret;
 	}
@@ -271,9 +284,11 @@ static void qemu_edu_remove(struct pci_dev *pdev)
 {
 	struct qemu_edu_device *edu_dev = pci_get_drvdata(pdev);
 
+	iommu_dev_disable_feature(edu_dev->miscdev.parent, IOMMU_DEV_FEAT_IOPF);
 	iommu_dev_disable_feature(edu_dev->miscdev.parent, IOMMU_DEV_FEAT_SVA);
 	misc_deregister(&edu_dev->miscdev);
 	iounmap(edu_dev->reg);
+	kfree(edu_dev->miscdev.name);
 	kfree(edu_dev);
 	pci_set_drvdata(pdev, NULL);
 }
