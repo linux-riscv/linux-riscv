@@ -1,0 +1,185 @@
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/cpuinfo_max_freq
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	Maximum possible operating frequency the DPA can run at (in kHz).
+		This attribute is read-only.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/cpuinfo_min_freq
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	Minimum possible operating frequency the DPA can run at (in kHz).
+		This attribute is read-only.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/scaling_max_freq
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	Minimum frequency the CPUs belonging to this policy are allowed
+		to be running at (in kHz).
+
+		This attribute is read-write and writing a string representing
+		an integer to it will cause a new limit to be set (it must not
+		be lower than the value of the ``scaling_min_freq`` attribute).
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/scaling_min_freq
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	Minimum frequency the CPUs belonging to this policy are allowed
+		to be running at (in kHz).
+
+		This attribute is read-write and writing a string representing a
+		non-negative integer to it will cause a new limit to be set (it
+		must not be higher than the value of the ``scaling_max_freq``
+		attribute).
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/scaling_setspeed
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This attribute returns the last frequency requested by the
+		limits (in kHz) or can be written to in order to set a new
+		fixed frequency. If different from 0, then the PWC will try to
+		operate the DPA at this specific frequency. If written to 0, the
+		PWC will operate the DPA between ``scaling_max_freq`` and
+		``scaling_min_freq`` according to the
+		``energy_performance_preference`` configuration.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/energy_performance_available_preferences
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This attribute is read-only and returns a list of space
+		separated strings representing energy performance preferences
+		that can be set written to the ``energy_performance_preference``
+		attribute. Based on this parameters and ``scaling_max_freq``/
+		``scaling_min_freq`` content, the PWC will operate the DPA
+		between	these limits.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/energy_performance_preference
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute allows to set the energy performance
+		preferenceconfiguration that is applied by the pwc to operate
+		the DPA.
+Users:		Rivos Inc.
+
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/cppc_bounds_status
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to CPPC bounds limits. Write 0 to clear this status and read
+		an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/desired_performance_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that there was a desired
+		performance excursion due to external reasons. Write 0 to clear
+		this status and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/external_platform_hot_assertion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that there was a frequency
+		reduction due to external platform hot assertion. Write 0 to
+		clear this status and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/icc_limit_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to Icc limit excursion. Write 0 to clear this status and
+		read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/long_power_limit_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to long power limit excursion. Write 0 to clear this status
+		and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/minimum_performance_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		below requested minimum performance due to extenral reasons.
+		Write 0 to clear this status and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/power_qos_limit
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to power QoS limits. Write 0 to clear this status and read
+		an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/short_power_limit_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to short power limit excursion. Write 0 to clear this status
+		and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/thermal_throttle_limit
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to thermal throttle reasons. Write 0 to clear this status
+		and read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/vr_current_excursion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to VR current excursion. Write 0 to clear this status and
+		read an updated one.
+Users:		Rivos Inc.
+
+What:		/sys/bus/auxiliary/drivers/rivos_pwc_dpa_perf/rivos_pwc.dpa_perf.*/vr_hot_assertion
+Date:		July 2023
+KernelVersion:	6.4
+Contact:	"Clément Léger" <cleger@rivosinc.com>
+Description:	This read-write attribute indicates that frequency was reduced
+		due to VR hot excursion. Write 0 to clear this status and
+		read an updated one.
+Users:		Rivos Inc.
+
+
+
+
+
+
+
+
+
+
+

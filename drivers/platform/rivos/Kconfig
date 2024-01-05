@@ -1,0 +1,28 @@
+#
+# Rivos Platform Specific Drivers
+#
+
+menuconfig RIVOS_PLATFORM_DEVICES
+	bool "Rivos Platform Specific Device Drivers"
+	help
+	  Say Y here to get to see options for device drivers of various
+	  Rivos platforms, including vendor-specific processor extension
+	  and hardware monitor drivers. This option itself does not add
+	  any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and disabled.
+
+if RIVOS_PLATFORM_DEVICES
+
+config RIVOS_PWC
+	tristate "Rivos PWC hwmon driver support"
+	depends on HWMON
+	depends on PCI
+	select AUXILIARY_BUS
+	default y
+	help
+	  Rivos PWC driver that exposes hwmon sensors for thermal and power
+	  monitoring. Enabling this will build the PWC PCI driver and all sub
+	  drivers that can handle DVSEC functions exposed by the PWC PCI device.
+
+endif # RIVOS_PLATFORM_DEVICES
