@@ -84,6 +84,7 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	struct page *pages[1];
 	struct qemu_edu_ctx *ctx = fp->private_data;
 	struct qemu_edu_device *dev = ctx->dev;
+	size_t dma_len;
 
 	u64 src = (u64)buf;	// from user buffer to device
 	/* There's nothing in the internal address space except a 4K
@@ -115,8 +116,9 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
 		}
+		dma_len = thp_size(pages[0]);
 		src = dma_map_page(dev->miscdev.parent, pages[0],
-				offset_in_page(buf), cnt, DMA_TO_DEVICE);
+				offset_in_page(buf), dma_len, DMA_TO_DEVICE);
 		ret = dma_mapping_error(dev->miscdev.parent, src);
 		if (ret) {
 			pr_err("Failure mapping pages.\n");
@@ -139,7 +141,7 @@ static ssize_t qemu_edu_write(struct file *fp, const char __user *buf, size_t co
 	mutex_unlock(&dev->lock);
 
 	if (!ctx->sva) {
-		dma_unmap_page(dev->miscdev.parent, src, cnt, DMA_TO_DEVICE);
+		dma_unmap_page(dev->miscdev.parent, src, dma_len, DMA_TO_DEVICE);
 		unpin_user_pages_dirty_lock(pages, 1, false);
 	}
 
@@ -152,6 +154,7 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	struct page *pages[1];
 	struct qemu_edu_ctx *ctx = fp->private_data;
 	struct qemu_edu_device *dev = ctx->dev;
+	size_t dma_len;
 
 	u64 src = ((u64)*ppos & 0xfff) | 0x40000; /* see above */
 	u64 dst = (u64)buf;	// from device to user buffer
@@ -171,8 +174,9 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 			pr_err("Failure locking pages.\n");
 			return -ENOMEM;
 		}
+		dma_len = thp_size(pages[0]);
 		dst = dma_map_page(dev->miscdev.parent, pages[0],
-				offset_in_page(buf), cnt, DMA_FROM_DEVICE);
+				offset_in_page(buf), dma_len, DMA_FROM_DEVICE);
 		ret = dma_mapping_error(dev->miscdev.parent, dst);
 		if (ret) {
 			pr_err("Failure mapping pages.\n");
@@ -194,7 +198,7 @@ static ssize_t qemu_edu_read(struct file *fp, char __user *buf, size_t count, lo
 	mutex_unlock(&dev->lock);
 
 	if (!ctx->sva) {
-		dma_unmap_page(dev->miscdev.parent, dst, cnt, DMA_FROM_DEVICE);
+		dma_unmap_page(dev->miscdev.parent, dst, dma_len, DMA_FROM_DEVICE);
 		unpin_user_pages_dirty_lock(pages, 1, true);
 	}
 
