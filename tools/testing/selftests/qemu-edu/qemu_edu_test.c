@@ -36,39 +36,45 @@ int main(int argn, char *argv[])
 	 */
 	const int use_mlock = 0;
 
+	/*
+	 * Use MAP_HUGETLB for buffer mappings.
+	 * Enable and allocate huge pages with, eg. 'echo 8 > /proc/sys/vm/nr_hugepages'
+	 */
+	const int use_hugetlb = 1;
+
 	const size_t len = 256;
 	const size_t pgs = getpagesize();
 	const size_t mfd_cnt = 64;
+
+	size_t dst_len, src_len;
 	int mfd, rot;
 	int fd, ret;
 	char ref[len];
-	char *dev, *src, *dst;
+	char *src, *dst;
 	int count = 1;
 
 	/* QEMU EDU bounce buffer location */
 	const size_t tmp = 0x40000;
 
 	if (argn < 2) {
-		dev = "/dev/qemu-edu";
-	} else {
-		dev = argv[1];
+		printf("usage %s /dev/qemu-edu\n", argv[0]);
+		return -1;
 	}
 
-	if (argn > 2) {
+	if (argn > 2)
 		count = atoi(argv[2]);
-	}
 
-	srand((unsigned)time(NULL));
+	srand((unsigned int)time(NULL));
 
 	/* qemu-edu device node */
-	fd = open(dev, O_RDWR);
+	fd = open(argv[1], O_RDWR);
 	if (fd < 0) {
 		printf("Can not open %s, err: %d\n", argv[1], fd);
 		return -1;
 	}
 
 	/* pool of physical pages for mapping pseudo-randomization */
-	mfd = memfd_create("buffer", MFD_CLOEXEC | 0x10U /* MFD_EXEC */ );
+	mfd = memfd_create("buffer", MFD_CLOEXEC | 0x10U /* MFD_EXEC */);
 	if (mfd < 0) {
 		printf("Can not create memfd, err: %d\n", mfd);
 		return -1;
@@ -79,16 +85,25 @@ int main(int argn, char *argv[])
 	src = NULL;
 	dst = NULL;
 
- retry:
+retry:
 	/* reuse src and dst virtual addresses if already assigned in prev iteration. */
-	src =
-	    mmap(src, pgs, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_SHARED, mfd,
-		 rot * pgs);
+	src_len = pgs;
+	src = mmap(src, src_len, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_SHARED, mfd, rot * pgs);
 	rot = (rot + 1) % mfd_cnt;
 
-	dst =
-	    mmap(dst, pgs, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_SHARED, mfd,
-		 rot * pgs);
+	dst_len = 2 << 20; // assume 2M page.
+	if (use_hugetlb)
+		dst = mmap(dst, dst_len, PROT_EXEC | PROT_READ | PROT_WRITE,
+			   MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
+	else
+		dst = MAP_FAILED;
+
+	if (dst == MAP_FAILED) {
+		dst_len = pgs;
+		dst = mmap(dst, dst_len, PROT_EXEC | PROT_READ | PROT_WRITE,
+			   MAP_SHARED, mfd, rot * pgs);
+	}
+
 	rot = (rot + 1) % mfd_cnt;
 
 	memset(ref, 0xa5, len);
@@ -102,9 +117,8 @@ int main(int argn, char *argv[])
 	if (use_mlock)
 		munlock(src, len);
 
-	if (ret < 0) {
+	if (ret < 0)
 		printf("Can not write, error %d\n", ret);
-	}
 
 	if (use_mlock)
 		mlock(dst, len);
@@ -112,35 +126,30 @@ int main(int argn, char *argv[])
 	if (use_mlock)
 		munlock(dst, len);
 
-	if (ret < 0) {
+	if (ret < 0)
 		printf("Can not read, error %d\n", ret);
-	}
 
 	if (memcmp(src, ref, len)) {
-		printf("ERROR\nsrc: %p  - %s\nref: %p  - %s\n", src, (char *)src, ref,
-		       (char *)ref);
+		printf("ERROR\nsrc: %p  - %s\nref: %p  - %s\n", src, (char *)src, ref, (char *)ref);
 		return -1;
 	}
 
 	if (memcmp(dst, ref, len)) {
-		printf("ERROR\ndst: %p  - %s\nref: %p  - %s\n", dst, (char *)dst, ref,
-		       (char *)ref);
+		printf("ERROR\ndst: %p  - %s\nref: %p  - %s\n", dst, (char *)dst, ref, (char *)ref);
 		return -1;
 	}
 
 	if (use_print)
-		printf("src: %p  - %s\ndst: %p  - %s\n", src, (char *)src, dst,
-		       (char *)dst);
+		printf("src: %p  - %s\ndst: %p  - %s\n", src, (char *)src, dst, (char *)dst);
 
-	madvise(src, pgs, MADV_DONTNEED);
-	munmap(src, pgs);
+	madvise(src, src_len, MADV_DONTNEED);
+	munmap(src, src_len);
 
-	madvise(dst, pgs, MADV_DONTNEED);
-	munmap(dst, pgs);
+	madvise(dst, dst_len, MADV_DONTNEED);
+	munmap(dst, dst_len);
 
-	if (--count > 0) {
+	if (--count > 0)
 		goto retry;
-	}
 
 	close(fd);
 
