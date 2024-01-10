@@ -36,6 +36,7 @@ static const unsigned long kvm_isa_ext_arr[] = {
 	/* Multi letter extensions (alphabetically sorted) */
 	KVM_ISA_EXT_ARR(SMSTATEEN),
 	KVM_ISA_EXT_ARR(SSAIA),
+	KVM_ISA_EXT_ARR(SSCOFPMF),
 	KVM_ISA_EXT_ARR(SSTC),
 	KVM_ISA_EXT_ARR(SVINVAL),
 	KVM_ISA_EXT_ARR(SVNAPOT),
@@ -88,6 +89,7 @@ static bool kvm_riscv_vcpu_isa_disable_allowed(unsigned long ext)
 	case KVM_RISCV_ISA_EXT_I:
 	case KVM_RISCV_ISA_EXT_M:
 	case KVM_RISCV_ISA_EXT_SSTC:
+	case KVM_RISCV_ISA_EXT_SSCOFPMF:
 	case KVM_RISCV_ISA_EXT_SVINVAL:
 	case KVM_RISCV_ISA_EXT_SVNAPOT:
 	case KVM_RISCV_ISA_EXT_ZBA:
@@ -117,8 +119,13 @@ void kvm_riscv_vcpu_setup_isa(struct kvm_vcpu *vcpu)
 	for (i = 0; i < ARRAY_SIZE(kvm_isa_ext_arr); i++) {
 		host_isa = kvm_isa_ext_arr[i];
 		if (__riscv_isa_extension_available(NULL, host_isa) &&
-		    kvm_riscv_vcpu_isa_enable_allowed(i))
+		    kvm_riscv_vcpu_isa_enable_allowed(i)) {
+			/* Sscofpmf depends on interrupt filtering defined in ssaia */
+			if (host_isa == RISCV_ISA_EXT_SSCOFPMF &&
+			    !__riscv_isa_extension_available(NULL, RISCV_ISA_EXT_SSAIA))
+				continue;
 			set_bit(host_isa, vcpu->arch.isa);
+		}
 	}
 }
 
