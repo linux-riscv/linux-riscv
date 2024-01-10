@@ -40,7 +40,8 @@ module_param(timeout, uint, 0644);
 #define RISCV_IOMMU_DDTP_TIMEOUT	(timeout ? timeout : 50000)
 #define RISCV_IOMMU_QCSR_TIMEOUT	(timeout ? timeout : 50000)
 #define RISCV_IOMMU_QUEUE_TIMEOUT	(timeout ? timeout : 10000)
-#define RISCV_IOMMU_IOFENCE_TIMEOUT	(timeout ? timeout : 1500000)
+/* Timeout for IOT.INVAL and ATS.INVAL (up to 90 seconds per PCIe spec.) */
+#define RISCV_IOMMU_INVAL_TIMEOUT	(timeout ? timeout : 90000000)
 
 /* Number of entries per CMD/FLT queue, should be <= INT_MAX */
 #define RISCV_IOMMU_DEF_CQ_COUNT	8192
@@ -441,7 +442,7 @@ static int riscv_iommu_queue_send(struct riscv_iommu_queue *queue,
 		return -EBUSY;
 
 	if (timeout_us)
-		return riscv_iommu_queue_wait(queue, idx, timeout_us);
+		return WARN_ON(riscv_iommu_queue_wait(queue, idx, timeout_us));
 
 	return 0;
 }
@@ -1072,7 +1073,7 @@ static int riscv_iommu_set_ddtp_mode(struct riscv_iommu_device *iommu,
 
 	/* IOFENCE.C */
 	riscv_iommu_cmd_iofence(&cmd);
-	return riscv_iommu_queue_send(&iommu->cmdq, &cmd, RISCV_IOMMU_QUEUE_TIMEOUT);
+	return riscv_iommu_queue_send(&iommu->cmdq, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
 }
 
 static int riscv_iommu_ddt_alloc(struct riscv_iommu_device *iommu)
@@ -1191,7 +1192,7 @@ static void riscv_iommu_iotlb_inval(struct riscv_iommu_domain *domain,
 		cmdq = &(dev_to_iommu(bond->endpoint->dev))->cmdq;
 
 		riscv_iommu_cmd_iofence(&cmd);
-		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_QUEUE_TIMEOUT);
+		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
 	}
 }
 
@@ -1368,7 +1369,7 @@ static int riscv_iommu_attach_domain(struct device *dev,
 
 		/* IOFENCE.C */
 		riscv_iommu_cmd_iofence(&cmd);
-		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_QUEUE_TIMEOUT);
+		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
 	}
 
 	return 0;
