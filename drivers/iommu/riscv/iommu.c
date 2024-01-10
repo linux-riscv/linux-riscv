@@ -1718,18 +1718,18 @@ static void riscv_iommu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm
 	 */
 }
 
-static int riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
-				     const struct mmu_notifier_range *range)
+static void riscv_iommu_mm_invalidate(struct mmu_notifier *mn,
+				      struct mm_struct *mm,
+				      unsigned long start,
+				      unsigned long end)
 {
 	riscv_iommu_iotlb_inval(container_of((mn), struct riscv_iommu_domain, notifier),
-				range->start, range->end);
-
-	return 0;
+				start, end);
 }
 
 static const struct mmu_notifier_ops riscv_iommu_mm_uops = {
 	.release = riscv_iommu_mm_release,
-	.invalidate_range_start = riscv_iommu_mm_invalidate,
+	.arch_invalidate_secondary_tlbs = riscv_iommu_mm_invalidate,
 };
 
 static int riscv_iommu_set_dev_pasid(struct iommu_domain *iommu_domain,
