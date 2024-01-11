@@ -17,15 +17,23 @@ select:
       contains:
         enum:
           - starfive,jh7110-dwmac
+          - starfive,jh8100-dwmac
   required:
     - compatible
 
 properties:
   compatible:
-    items:
-      - enum:
-          - starfive,jh7110-dwmac
-      - const: snps,dwmac-5.20
+    oneOf:
+      - items:
+          - enum:
+              - starfive,jh7110-dwmac
+          - const: snps,dwmac-5.20
+
+      - items:
+          - enum:
+              - starfive,jh8100-dwmac
+          - const: starfive,jh7110-dwmac
+          - const: snps,dwmac-5.20
 
   reg:
     maxItems: 1
@@ -53,16 +61,6 @@ properties:
   interrupt-names:
     minItems: 3
     maxItems: 3
-
-  resets:
-    items:
-      - description: MAC Reset signal.
-      - description: AHB Reset signal.
-
-  reset-names:
-    items:
-      - const: stmmaceth
-      - const: ahb
 
   starfive,tx-use-rgmii-clk:
     description:
@@ -93,6 +91,30 @@ required:
 
 allOf:
   - $ref: snps,dwmac.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - starfive,jh8100-dwmac
+    then:
+      properties:
+        resets:
+          items:
+            - description: MAC Reset signal.
+        resets-names:
+          items:
+            - const: stmmaceth
+    else:
+      properties:
+        resets:
+          items:
+            - description: MAC Reset signal.
+            - description: AHB Reset signal.
+        resets-names:
+          items:
+            - const: stmmaceth
+            - const: ahb
 
 unevaluatedProperties: false
 
