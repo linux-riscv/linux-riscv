@@ -123,20 +123,16 @@
 .endm
 #endif /* CONFIG_SHADOW_CALL_STACK */
 
-	/* save all GPs except x1 ~ x5 */
-	.macro save_from_x6_to_x31
+	.macro save_x6_to_x31_except_x10_x16_x17
 	REG_S x6,  PT_T1(sp)
 	REG_S x7,  PT_T2(sp)
 	REG_S x8,  PT_S0(sp)
 	REG_S x9,  PT_S1(sp)
-	REG_S x10, PT_A0(sp)
 	REG_S x11, PT_A1(sp)
 	REG_S x12, PT_A2(sp)
 	REG_S x13, PT_A3(sp)
 	REG_S x14, PT_A4(sp)
 	REG_S x15, PT_A5(sp)
-	REG_S x16, PT_A6(sp)
-	REG_S x17, PT_A7(sp)
 	REG_S x18, PT_S2(sp)
 	REG_S x19, PT_S3(sp)
 	REG_S x20, PT_S4(sp)
@@ -153,20 +149,33 @@
 	REG_S x31, PT_T6(sp)
 	.endm
 
+	/* save all GPs except x1 ~ x5 */
+	.macro save_from_x6_to_x31
+	save_x6_to_x31_except_x10_x16_x17
+	REG_S x10, PT_A0(sp)
+	REG_S x16, PT_A6(sp)
+	REG_S x17, PT_A7(sp)
+	.endm
+
+	.macro save_regs_for_sse
+	save_x6_to_x31_except_x10_x16_x17
+	REG_S ra,  PT_RA(sp)
+	REG_S gp,  PT_GP(sp)
+	REG_S tp,  PT_TP(sp)
+	REG_S t0,  PT_T0(sp)
+	.endm
+
 	/* restore all GPs except x1 ~ x5 */
-	.macro restore_from_x6_to_x31
+	.macro restore_from_x6_to_x31_except_x10_x16_x17
 	REG_L x6,  PT_T1(sp)
 	REG_L x7,  PT_T2(sp)
 	REG_L x8,  PT_S0(sp)
 	REG_L x9,  PT_S1(sp)
-	REG_L x10, PT_A0(sp)
 	REG_L x11, PT_A1(sp)
 	REG_L x12, PT_A2(sp)
 	REG_L x13, PT_A3(sp)
 	REG_L x14, PT_A4(sp)
 	REG_L x15, PT_A5(sp)
-	REG_L x16, PT_A6(sp)
-	REG_L x17, PT_A7(sp)
 	REG_L x18, PT_S2(sp)
 	REG_L x19, PT_S3(sp)
 	REG_L x20, PT_S4(sp)
@@ -181,6 +190,21 @@
 	REG_L x29, PT_T4(sp)
 	REG_L x30, PT_T5(sp)
 	REG_L x31, PT_T6(sp)
+	.endm
+
+	.macro restore_from_x6_to_x31
+	restore_from_x6_to_x31_except_x10_x16_x17
+	REG_L x10, PT_A0(sp)
+	REG_L x16, PT_A6(sp)
+	REG_L x17, PT_A7(sp)
+	.endm
+
+	.macro restore_regs_for_sse
+	restore_from_x6_to_x31_except_x10_x16_x17
+	REG_L ra,  PT_RA(sp)
+	REG_L gp,  PT_GP(sp)
+	REG_L tp,  PT_TP(sp)
+	REG_L t0,  PT_T0(sp)
 	.endm
 
 #endif /* __ASSEMBLY__ */

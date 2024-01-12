@@ -10,12 +10,16 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/suspend.h>
+#include <linux/riscv_sse.h>
 #include <asm/kvm_host.h>
 #include <asm/thread_info.h>
 #include <asm/ptrace.h>
 #include <asm/cpu_ops_sbi.h>
 #include <asm/stacktrace.h>
+#include <asm/sbi.h>
+#include <asm/sse.h>
 #include <asm/suspend.h>
+#include <asm/stacktrace.h>
 
 void asm_offsets(void);
 
@@ -488,4 +492,26 @@ void asm_offsets(void)
 	DEFINE(STACKFRAME_SIZE_ON_STACK, ALIGN(sizeof(struct stackframe), STACK_ALIGN));
 	OFFSET(STACKFRAME_FP, stackframe, fp);
 	OFFSET(STACKFRAME_RA, stackframe, ra);
+
+#ifdef CONFIG_RISCV_SSE
+	OFFSET(SSE_REG_EVT_STACK, sse_registered_event, stack);
+	OFFSET(SSE_REG_EVT_SHADOW_STACK, sse_registered_event, shadow_stack);
+	OFFSET(SSE_REG_EVT_EVT_ID, sse_registered_event, evt_id);
+	OFFSET(SSE_REG_EVT_STATE, sse_registered_event, state);
+	OFFSET(SSE_REG_EVT_STATE_PHYS, sse_registered_event, state_phys);
+	OFFSET(SSE_REG_EVT_STATE_MODE, sse_registered_event, state.mode);
+	OFFSET(SSE_REG_EVT_STATE_PC, sse_registered_event, state.pc);
+	OFFSET(SSE_REG_EVT_STATE_A0, sse_registered_event, state.a0);
+	OFFSET(SSE_REG_EVT_STATE_A6, sse_registered_event, state.a6);
+	OFFSET(SSE_REG_EVT_STATE_A7, sse_registered_event, state.a7);
+
+	DEFINE(SBI_EXT_SSE, SBI_EXT_SSE);
+	DEFINE(SBI_SSE_EVENT_COMPLETE, SBI_SSE_EVENT_COMPLETE);
+	DEFINE(SBI_SSE_EVENT_ATTR_READ, SBI_SSE_EVENT_ATTR_READ);
+	DEFINE(SBI_SSE_ATTR_INTERRUPTED_MODE, SBI_SSE_ATTR_INTERRUPTED_MODE);
+	DEFINE(SBI_SSE_ATTR_INTERRUPTED_SIZE, SBI_SSE_ATTR_INTERRUPTED_A7 -
+					      SBI_SSE_ATTR_INTERRUPTED_MODE);
+#endif
+
+	DEFINE(ASM_PAGE_OFFSET, CONFIG_PAGE_OFFSET);
 }
