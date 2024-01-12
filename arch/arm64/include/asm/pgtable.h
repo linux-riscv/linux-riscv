@@ -341,9 +341,10 @@ static inline void __sync_cache_and_tags(pte_t pte, unsigned int nr_pages)
 		mte_sync_tags(pte, nr_pages);
 }
 
-static inline void set_ptes(struct mm_struct *mm,
-			    unsigned long __always_unused addr,
-			    pte_t *ptep, pte_t pte, unsigned int nr)
+static inline void __set_ptes(struct mm_struct *mm,
+			      unsigned long __always_unused addr,
+			      pte_t *ptep, pte_t pte, unsigned int nr,
+			      unsigned long pgsize)
 {
 	page_table_check_ptes_set(mm, ptep, pte, nr);
 	__sync_cache_and_tags(pte, nr);
@@ -354,10 +355,26 @@ static inline void set_ptes(struct mm_struct *mm,
 		if (--nr == 0)
 			break;
 		ptep++;
-		pte_val(pte) += PAGE_SIZE;
+		pte_val(pte) += pgsize;
 	}
 }
-#define set_ptes set_ptes
+
+#define set_ptes(mm, addr, ptep, pte, nr)				\
+			__set_ptes(mm, addr, ptep, pte, nr, PAGE_SIZE)
+
+#define set_pmds(mm, addr, ptep, pte, nr)				\
+			__set_ptes(mm, addr, ptep, pte, nr, PMD_SIZE)
+
+static inline void set_contptes(struct mm_struct *mm,
+				unsigned long __always_unused addr,
+				pte_t *ptep, pte_t pte, unsigned int nr,
+				unsigned long pgsize)
+{
+	if (pgsize == PMD_SIZE)
+		set_pmds(mm, addr, ptep, pte, nr);
+	else
+		set_ptes(mm, addr, ptep, pte, nr);
+}
 
 /*
  * Huge pte definitions.
@@ -1124,6 +1141,37 @@ extern pte_t ptep_modify_prot_start(struct vm_area_struct *vma,
 extern void ptep_modify_prot_commit(struct vm_area_struct *vma,
 				    unsigned long addr, pte_t *ptep,
 				    pte_t old_pte, pte_t new_pte);
+
+static inline int arch_contpte_get_num_contig(pte_t *ptep, unsigned long size,
+					      size_t *pgsize)
+{
+	int contig_ptes = 0;
+
+	*pgsize = size;
+
+	switch (size) {
+#ifndef __PAGETABLE_PMD_FOLDED
+	case PUD_SIZE:
+		if (pud_sect_supported())
+			contig_ptes = 1;
+		break;
+#endif
+	case PMD_SIZE:
+		contig_ptes = 1;
+		break;
+	case CONT_PMD_SIZE:
+		*pgsize = PMD_SIZE;
+		contig_ptes = CONT_PMDS;
+		break;
+	case CONT_PTE_SIZE:
+		*pgsize = PAGE_SIZE;
+		contig_ptes = CONT_PTES;
+		break;
+	}
+
+	return contig_ptes;
+}
+
 #endif /* !__ASSEMBLY__ */
 
 #endif /* __ASM_PGTABLE_H */

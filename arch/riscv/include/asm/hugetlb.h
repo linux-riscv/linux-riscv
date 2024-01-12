@@ -16,7 +16,7 @@ bool arch_hugetlb_migration_supported(struct hstate *h);
 #define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
 #endif
 
-#ifdef CONFIG_RISCV_ISA_SVNAPOT
+#ifdef CONFIG_ARCH_HAS_CONTPTE
 #define __HAVE_ARCH_HUGE_PTE_CLEAR
 void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
 		    pte_t *ptep, unsigned long sz);
@@ -49,7 +49,7 @@ pte_t huge_ptep_get(pte_t *ptep);
 pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags);
 #define arch_make_huge_pte arch_make_huge_pte
 
-#endif /*CONFIG_RISCV_ISA_SVNAPOT*/
+#endif /* CONFIG_ARCH_HAS_CONTPTE */
 
 #include <asm-generic/hugetlb.h>
 
