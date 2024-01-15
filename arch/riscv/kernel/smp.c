@@ -26,6 +26,8 @@
 #include <asm/cacheflush.h>
 #include <asm/cpu_ops.h>
 
+#include <trace/events/ipi.h>
+
 enum ipi_message_type {
 	IPI_RESCHEDULE,
 	IPI_CALL_FUNC,
@@ -34,6 +36,15 @@ enum ipi_message_type {
 	IPI_IRQ_WORK,
 	IPI_TIMER,
 	IPI_MAX
+};
+
+static const char * const ipi_names[] __tracepoint_string = {
+	[IPI_RESCHEDULE]	= "Rescheduling interrupts",
+	[IPI_CALL_FUNC]		= "Function call interrupts",
+	[IPI_CPU_STOP]		= "CPU stop interrupts",
+	[IPI_CPU_CRASH_STOP]	= "CPU stop (for crash dump) interrupts",
+	[IPI_IRQ_WORK]		= "IRQ work interrupts",
+	[IPI_TIMER]		= "Timer broadcast interrupts",
 };
 
 unsigned long __cpuid_to_hartid_map[NR_CPUS] __ro_after_init = {
@@ -96,24 +107,23 @@ static inline void ipi_cpu_crash_stop(unsigned int cpu, struct pt_regs *regs)
 
 static void send_ipi_mask(const struct cpumask *mask, enum ipi_message_type op)
 {
+	trace_ipi_raise(mask, ipi_names[op]);
 	__ipi_send_mask(ipi_desc[op], mask);
-}
-
-static void send_ipi_single(int cpu, enum ipi_message_type op)
-{
-	__ipi_send_mask(ipi_desc[op], cpumask_of(cpu));
 }
 
 #ifdef CONFIG_IRQ_WORK
 void arch_irq_work_raise(void)
 {
-	send_ipi_single(smp_processor_id(), IPI_IRQ_WORK);
+	send_ipi_mask(cpumask_of(smp_processor_id()), IPI_IRQ_WORK);
 }
 #endif
 
 static irqreturn_t handle_IPI(int irq, void *data)
 {
 	int ipi = irq - ipi_virq_base;
+
+	if ((unsigned int)ipi < IPI_MAX)
+		trace_ipi_entry(ipi_names[ipi]);
 
 	switch (ipi) {
 	case IPI_RESCHEDULE:
@@ -140,6 +150,9 @@ static irqreturn_t handle_IPI(int irq, void *data)
 		pr_warn("CPU%d: unhandled IPI%d\n", smp_processor_id(), ipi);
 		break;
 	}
+
+	if ((unsigned int)ipi < IPI_MAX)
+		trace_ipi_exit(ipi_names[ipi]);
 
 	return IRQ_HANDLED;
 }
@@ -205,15 +218,6 @@ void riscv_ipi_set_virq_range(int virq, int nr, bool use_for_rfence)
 		static_branch_disable(&riscv_ipi_for_rfence);
 }
 
-static const char * const ipi_names[] = {
-	[IPI_RESCHEDULE]	= "Rescheduling interrupts",
-	[IPI_CALL_FUNC]		= "Function call interrupts",
-	[IPI_CPU_STOP]		= "CPU stop interrupts",
-	[IPI_CPU_CRASH_STOP]	= "CPU stop (for crash dump) interrupts",
-	[IPI_IRQ_WORK]		= "IRQ work interrupts",
-	[IPI_TIMER]		= "Timer broadcast interrupts",
-};
-
 void show_ipi_stats(struct seq_file *p, int prec)
 {
 	unsigned int cpu, i;
@@ -234,7 +238,7 @@ void arch_send_call_function_ipi_mask(struct cpumask *mask)
 
 void arch_send_call_function_single_ipi(int cpu)
 {
-	send_ipi_single(cpu, IPI_CALL_FUNC);
+	send_ipi_mask(cpumask_of(cpu), IPI_CALL_FUNC);
 }
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
@@ -329,6 +333,6 @@ bool smp_crash_stop_failed(void)
 
 void arch_smp_send_reschedule(int cpu)
 {
-	send_ipi_single(cpu, IPI_RESCHEDULE);
+	send_ipi_mask(cpumask_of(cpu), IPI_RESCHEDULE);
 }
 EXPORT_SYMBOL_GPL(arch_smp_send_reschedule);
