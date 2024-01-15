@@ -119,5 +119,17 @@
 			reg = <0x74000000 0x10000>;
 			interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
 		};
+
+		rtc: rtc@5025000 {
+			compatible = "sophgo,cv1800-rtc", "syscon";
+			reg = <0x5025000 0x2000>;
+			interrupts = <17 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&osc>;
+		};
+
+		por {
+			compatible = "sophgo,cv1800-por";
+			sophgo,rtc-sysreg = <&rtc>;
+		};
 	};
 };
