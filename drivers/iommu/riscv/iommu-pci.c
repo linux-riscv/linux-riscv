@@ -72,6 +72,7 @@ static int riscv_iommu_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 	/* Check device reported capabilities / features. */
 	iommu->caps = riscv_iommu_readq(iommu, RISCV_IOMMU_REG_CAP);
 	iommu->fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
+	dev_info(dev, "caps: %016llx\n", iommu->caps);
 
 	/* The PCI driver only uses MSIs, make sure the IOMMU supports this */
 	switch (FIELD_GET(RISCV_IOMMU_CAP_IGS, iommu->caps)) {
