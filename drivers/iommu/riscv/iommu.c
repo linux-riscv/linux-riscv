@@ -1678,8 +1678,12 @@ static int riscv_iommu_attach_paging_domain(struct iommu_domain *iommu_domain,
 	struct page *page;
 	int rc;
 
-	if (!riscv_iommu_pt_supported(iommu, domain->pgd_mode))
+	if (!riscv_iommu_pt_supported(iommu, domain->pgd_mode)) {
+		dev_err(iommu->dev, "Cannot attach domain for device %s, "
+			"translation mode %d not supported\n",
+			dev_name(dev), domain->pgd_mode);
 		return -ENODEV;
+	}
 
 	if (list_empty(&domain->bonds)) {
 		domain->numa_node = dev_to_node(iommu->dev);
