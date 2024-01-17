@@ -31,6 +31,8 @@
 #include <linux/mm.h>
 #include <linux/pci.h>
 #include <linux/sched/mm.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
 #include <drm/drm_ioctl.h>
@@ -39,6 +41,9 @@
 #include "dpa_drm.h"
 #include "dpa_daffy.h"
 #include "duc_structs.h"
+
+static int force_fwq_hbm = false;
+module_param(force_fwq_hbm, int, 0660);
 
 static void dpa_release_process(struct kref *ref);
 
@@ -748,7 +753,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dev, "No ACPI handle\n");
 	}
 
-	force_hbm = (pdev->revision == PCI_DEVICE_REV_HYBRID);
+	force_hbm = force_fwq_hbm || (pdev->revision == PCI_DEVICE_REV_HYBRID);
 	err = daffy_init(dpa, force_hbm);
 	if (err)
 		goto disable_sva;
