@@ -1416,6 +1416,8 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	 * can't use hugepage mappings for 2-level page table because in case of
 	 * memory hotplug, we are not able to update all the page tables with
 	 * the new PMDs.
+	 * Defer the required TLB flush until the entire VMEMMAP region has been
+	 * populated.
 	 */
 	return vmemmap_populate_hugepages(start, end, node, NULL);
 }
