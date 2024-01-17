@@ -3054,6 +3054,7 @@ struct pci_bus *pci_create_root_bus(struct device *parent, int bus,
 	bridge->sysdata = sysdata;
 	bridge->busnr = bus;
 	bridge->ops = ops;
+	bridge->msi_domain = true;
 
 	error = pci_register_host_bridge(bridge);
 	if (error < 0)
