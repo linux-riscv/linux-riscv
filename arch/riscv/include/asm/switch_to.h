@@ -8,6 +8,7 @@
 
 #include <linux/jump_label.h>
 #include <linux/sched/task_stack.h>
+#include <linux/mm_types.h>
 #include <asm/vector.h>
 #include <asm/cpufeature.h>
 #include <asm/processor.h>
@@ -73,6 +74,17 @@ static __always_inline bool has_fpu(void) { return false; }
 extern struct task_struct *__switch_to(struct task_struct *,
 				       struct task_struct *);
 
+static inline bool switch_to_should_flush_icache(struct task_struct *task)
+{
+	unsigned int cpu = smp_processor_id();
+	bool stale_mm = task->mm && (task->mm->context.force_icache_flush &&
+				     (cpu != task->mm->context.prev_cpu));
+	bool stale_thread = task->thread.force_icache_flush &&
+			    (cpu != task->thread.prev_cpu);
+
+	return stale_mm || stale_thread;
+}
+
 #define switch_to(prev, next, last)			\
 do {							\
 	struct task_struct *__prev = (prev);		\
@@ -81,7 +93,12 @@ do {							\
 		__switch_to_fpu(__prev, __next);	\
 	if (has_vector())					\
 		__switch_to_vector(__prev, __next);	\
+	if (switch_to_should_flush_icache(__next))	\
+		local_flush_icache_all();		\
 	((last) = __switch_to(__prev, __next));		\
+	__next->thread.prev_cpu = smp_processor_id();	\
+	if (__next->mm)					\
+		__next->mm->context.prev_cpu = smp_processor_id();	\
 } while (0)
 
 #endif /* _ASM_RISCV_SWITCH_TO_H */

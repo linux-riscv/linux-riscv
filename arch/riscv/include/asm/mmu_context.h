@@ -30,6 +30,9 @@ static inline int init_new_context(struct task_struct *tsk,
 #ifdef CONFIG_MMU
 	atomic_long_set(&mm->context.id, 0);
 #endif
+#ifdef CONFIG_SMP
+	mm->context.prev_cpu = tsk->thread.prev_cpu;
+#endif
 	return 0;
 }
 
