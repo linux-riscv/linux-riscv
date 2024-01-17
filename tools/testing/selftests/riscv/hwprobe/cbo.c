@@ -36,7 +36,7 @@ static void sigill_handler(int sig, siginfo_t *info, void *context)
 	regs[0] += 4;
 }
 
-static void cbo_insn(char *base, int fn)
+static __always_inline void cbo_insn(char *base, int fn)
 {
 	uint32_t insn = MK_CBO(fn);
 
@@ -47,10 +47,11 @@ static void cbo_insn(char *base, int fn)
 	: : "r" (base), "i" (fn), "i" (insn) : "a0", "a1", "memory");
 }
 
-static void cbo_inval(char *base) { cbo_insn(base, 0); }
-static void cbo_clean(char *base) { cbo_insn(base, 1); }
-static void cbo_flush(char *base) { cbo_insn(base, 2); }
-static void cbo_zero(char *base)  { cbo_insn(base, 4); }
+#define OPTIMIZE __attribute__((optimize("O")))
+OPTIMIZE static void cbo_inval(char *base) { cbo_insn(base, 0); }
+OPTIMIZE static void cbo_clean(char *base) { cbo_insn(base, 1); }
+OPTIMIZE static void cbo_flush(char *base) { cbo_insn(base, 2); }
+OPTIMIZE static void cbo_zero(char *base)  { cbo_insn(base, 4); }
 
 static void test_no_zicbom(void *arg)
 {
