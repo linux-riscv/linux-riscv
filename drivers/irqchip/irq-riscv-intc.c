@@ -17,6 +17,59 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/smp.h>
+#include <asm/hwcap.h>
+
+#include <linux/sched/debug.h>
+#include <linux/percpu-defs.h>
+
+#ifdef CONFIG_RISCV_TIMER_REGDUMP
+
+/* Enable periodic regdump by adding "dumpregs=40" to the kernel
+ * cmdline.  The number is the period between timer IRQs; 40 is
+ * about right.
+ */
+static u32 _dumpperiod = 0;
+DEFINE_PER_CPU(unsigned, _dumpnum);
+DEFINE_PER_CPU(unsigned, _dumpctr);
+
+#define DUMPREGS_DEFAULT_PERIOD	40
+
+static int __init early_dumpregs(char *p)
+{
+	if (!p)
+		/* No parameter: use default period */
+		_dumpperiod = DUMPREGS_DEFAULT_PERIOD;
+	else
+		get_option(&p, &_dumpperiod);
+
+	_dumpctr = _dumpperiod;
+
+	return 0;
+}
+
+early_param("dumpregs", early_dumpregs);
+
+static void dbg_dump(struct pt_regs *regs, unsigned long cause)
+{
+	if (!_dumpperiod || (cause != RV_IRQ_TIMER))
+		return;
+
+	// ME
+	if (__this_cpu_dec_return(_dumpctr) == 1) {
+	    this_cpu_write(_dumpctr, _dumpperiod);
+
+	    pr_err("Regs (seq %d): \n", __this_cpu_inc_return(_dumpnum) - 1);
+	    pr_err(" CPU: %d PID: %d Comm: %.20s %s\n", raw_smp_processor_id(),
+		   current->pid, current->comm, user_mode(regs) ? "USER" : "KERN");
+	    pr_err(" epc: " REG_FMT " ra: " REG_FMT " sp: " REG_FMT "\n",
+		   regs->epc, regs->ra, regs->sp);
+	}
+}
+#else
+static void dbg_dump(struct pt_regs *regs, unsigned long cause)
+{
+}
+#endif
 
 static struct irq_domain *intc_domain;
 
@@ -24,10 +77,23 @@ static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 {
 	unsigned long cause = regs->cause & ~CAUSE_IRQ_FLAG;
 
+	dbg_dump(regs, cause);
+
 	if (unlikely(cause >= BITS_PER_LONG))
 		panic("unexpected interrupt cause");
 
 	generic_handle_domain_irq(intc_domain, cause);
+}
+
+static asmlinkage void riscv_intc_aia_irq(struct pt_regs *regs)
+{
+	unsigned long topi;
+
+	while ((topi = csr_read(CSR_TOPI))) {
+		dbg_dump(regs, topi >> TOPI_IID_SHIFT);
+		generic_handle_domain_irq(intc_domain,
+					  topi >> TOPI_IID_SHIFT);
+	}
 }
 
 /*
@@ -39,12 +105,18 @@ static asmlinkage void riscv_intc_irq(struct pt_regs *regs)
 
 static void riscv_intc_irq_mask(struct irq_data *d)
 {
-	csr_clear(CSR_IE, BIT(d->hwirq));
+	if (IS_ENABLED(CONFIG_32BIT) && d->hwirq >= BITS_PER_LONG)
+		csr_clear(CSR_IEH, BIT(d->hwirq - BITS_PER_LONG));
+	else
+		csr_clear(CSR_IE, BIT(d->hwirq));
 }
 
 static void riscv_intc_irq_unmask(struct irq_data *d)
 {
-	csr_set(CSR_IE, BIT(d->hwirq));
+	if (IS_ENABLED(CONFIG_32BIT) && d->hwirq >= BITS_PER_LONG)
+		csr_set(CSR_IEH, BIT(d->hwirq - BITS_PER_LONG));
+	else
+		csr_set(CSR_IE, BIT(d->hwirq));
 }
 
 static void riscv_intc_irq_eoi(struct irq_data *d)
@@ -115,16 +187,20 @@ static struct fwnode_handle *riscv_intc_hwnode(void)
 
 static int __init riscv_intc_init_common(struct fwnode_handle *fn)
 {
-	int rc;
+	int rc, nr_irqs = riscv_isa_extension_available(NULL, SxAIA) ?
+			  64 : BITS_PER_LONG;
 
-	intc_domain = irq_domain_create_linear(fn, BITS_PER_LONG,
+	intc_domain = irq_domain_create_linear(fn, nr_irqs,
 					       &riscv_intc_domain_ops, NULL);
 	if (!intc_domain) {
 		pr_err("unable to add IRQ domain\n");
 		return -ENXIO;
 	}
 
-	rc = set_handle_irq(&riscv_intc_irq);
+	if (riscv_isa_extension_available(NULL, SxAIA))
+		rc = set_handle_irq(&riscv_intc_aia_irq);
+	else
+		rc = set_handle_irq(&riscv_intc_irq);
 	if (rc) {
 		pr_err("failed to set irq handler\n");
 		return rc;
@@ -132,7 +208,9 @@ static int __init riscv_intc_init_common(struct fwnode_handle *fn)
 
 	riscv_set_intc_hwnode_fn(riscv_intc_hwnode);
 
-	pr_info("%d local interrupts mapped\n", BITS_PER_LONG);
+	pr_info("%d local interrupts mapped%s\n",
+		nr_irqs, riscv_isa_extension_available(NULL, SxAIA) ?
+			 " using AIA" : "");
 
 	return 0;
 }
