@@ -193,6 +193,12 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	__flush_tlb_range(NULL, start, end - start, PAGE_SIZE);
 }
 
+/* Flush a range of kernel pages without broadcasting */
+void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
+{
+	local_flush_tlb_range_asid(start, end - start, PAGE_SIZE, FLUSH_TLB_NO_ASID);
+}
+
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			unsigned long end)
