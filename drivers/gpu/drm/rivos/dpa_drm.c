@@ -697,6 +697,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	acpi_handle handle;
 	int err, vec;
 	u16 vendor, device;
+	bool force_hbm = false;
 
 	dev_warn(dev, "%s: DPA start\n", __func__);
 	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
@@ -747,7 +748,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_warn(dev, "No ACPI handle\n");
 	}
 
-	err = daffy_init(dpa);
+	force_hbm = (pdev->revision == PCI_DEVICE_REV_HYBRID);
+	err = daffy_init(dpa, force_hbm);
 	if (err)
 		goto disable_sva;
 

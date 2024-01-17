@@ -36,6 +36,9 @@
 #define PCI_VENDOR_ID_RIVOS         0x1efd
 #define PCI_DEVICE_ID_RIVOS_DPA     0x0012
 
+/* this revision indicates a test environment where we should allocate in HBM */
+#define PCI_DEVICE_REV_HYBRID  0xFF
+
 #define DPA_DB_PAGES_BASE	0x0
 #define DPA_FWQ_BASE		0x11000
 #define DPA_PERF_MON_BASE	0x12000

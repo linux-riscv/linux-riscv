@@ -57,7 +57,7 @@ struct dpa_daffy {
 struct dpa_device;
 struct dpa_process;
 
-int daffy_init(struct dpa_device *dpa_dev);
+int daffy_init(struct dpa_device *dpa_dev, bool use_hbm);
 void daffy_free(struct dpa_device *dpa_dev);
 irqreturn_t daffy_handle_irq(int irq, void *dpa_dev);
 

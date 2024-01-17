@@ -32,20 +32,42 @@
 
 #define DAFFY_ENABLE_TIMEOUT_US	500000
 
-int daffy_init(struct dpa_device *dpa)
+int daffy_init(struct dpa_device *dpa, bool use_hbm)
 {
 	struct dpa_daffy *daffy = &dpa->daffy;
 	u64 version, ctrl;
 	ktime_t timeout;
 	int i;
+	struct page *fwq_page;
+	int fwq_nid = -1;
+
+	if (use_hbm)
+		fwq_nid = dev_to_node(dpa->dev);
+
+	dev_dbg(dpa->dev, "%s: allocing fwq on node %d\n", __func__, fwq_nid);
+	fwq_page = alloc_pages_node(fwq_nid, GFP_KERNEL,
+				    get_order(sizeof(*daffy->fwq)));
+	if (!fwq_page) {
+		dev_warn(dpa->dev, "failed to alloc fwq page\n");
+		return -ENOMEM;
+	}
+
+	daffy->fwq = page_to_virt(fwq_page);
+	daffy->fwq_dma_addr = dma_map_page(dpa->dev, fwq_page, 0,
+					   sizeof(*daffy->fwq),
+					   DMA_BIDIRECTIONAL);
+	if (!daffy->fwq_dma_addr) {
+		dev_warn(dpa->dev, "failed to iommu map fwq page");
+		free_page((unsigned long)daffy->fwq);
+		daffy->fwq = NULL;
+		return -ENOMEM;
+	}
+	dev_dbg(dpa->dev, "fw queue at %px phys 0x%llx DMA %pad\n", daffy->fwq,
+		page_to_phys(fwq_page),
+		&daffy->fwq_dma_addr);
 
 	version = dpa_fwq_read(dpa, DPA_FWQ_VERSION_ID);
 	dev_info(dpa->dev, "Daffy queue version %llu\n", version);
-
-	daffy->fwq = dma_alloc_coherent(dpa->dev, sizeof(*daffy->fwq),
-					&daffy->fwq_dma_addr, GFP_KERNEL);
-	if (!daffy->fwq)
-		return -ENOMEM;
 
 	daffy->fwq->desc.magic = DAFFY_QUEUE_MAGIC;
 	daffy->fwq->desc.version = DAFFY_QUEUE_DESC_VERSION;
@@ -59,8 +81,6 @@ int daffy_init(struct dpa_device *dpa)
 		daffy->fwq_dma_addr + offsetof(struct dpa_fwq, h_ring);
 	daffy->fwq->desc.d_ring_base_ptr =
 		daffy->fwq_dma_addr + offsetof(struct dpa_fwq, d_ring);
-
-	dev_dbg(dpa->dev, "fw queue at %pad\n", &daffy->fwq_dma_addr);
 
 	/* Invalidate all packet headers. */
 	for (i = 0; i < DPA_FW_QUEUE_SIZE; i++) {
@@ -112,8 +132,8 @@ void daffy_free(struct dpa_device *dpa)
 	WARN_ON((ctrl & (DPA_FWQ_QUEUE_CTRL_BUSY | DPA_FWQ_QUEUE_CTRL_ENABLE)));
 
 	dpa_fwq_write(dpa, 0, DPA_FWQ_QUEUE_DESCRIPTOR);
-	dma_free_coherent(dpa->dev, sizeof(*daffy->fwq), daffy->fwq,
-			  daffy->fwq_dma_addr);
+	dma_unmap_single(dpa->dev, daffy->fwq_dma_addr, sizeof(daffy->fwq), DMA_BIDIRECTIONAL);
+	free_page((unsigned long)daffy->fwq);
 }
 
 static void daffy_process_host_queue(struct dpa_device *dpa)
