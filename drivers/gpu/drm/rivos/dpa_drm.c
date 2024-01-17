@@ -708,7 +708,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_read_config_word(pdev, PCI_VENDOR_ID, &vendor);
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
-	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X\n", vendor, device);
+	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X rev 0x%X\n", vendor,
+		 device, pdev->revision);
 
 	err = pcim_enable_device(pdev);
 	if (err)
@@ -733,11 +734,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
 
 	dpa->regs = pcim_iomap_table(pdev)[0];
-
-	err = daffy_init(dpa);
-	if (err)
-		goto disable_sva;
-
 	handle = ACPI_HANDLE(dev);
 	if (handle) {
 		int nid = acpi_get_node(handle);
@@ -750,6 +746,10 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	} else {
 		dev_warn(dev, "No ACPI handle\n");
 	}
+
+	err = daffy_init(dpa);
+	if (err)
+		goto disable_sva;
 
 	err = pci_alloc_irq_vectors(pdev, DPA_NUM_MSI, DPA_NUM_MSI,
 				    PCI_IRQ_MSIX);
