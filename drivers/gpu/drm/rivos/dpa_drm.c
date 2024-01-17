@@ -563,7 +563,7 @@ static void dpa_release_process(struct kref *ref)
 
 	/*
 	 * We're dropping the last reference to the process, so there must
-	 * not be any threads in wait_signal() at this piont.
+	 * not be any threads in wait_signal() at this point.
 	 */
 	WARN_ON(p->num_signal_waiters);
 	if (p->num_signal_pages > 0)
@@ -610,7 +610,6 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	INIT_LIST_HEAD(&dpa_app->queue_list);
 	kref_init(&dpa_app->ref);
 
-	/* Only one DPA device for now */
 	dpa_app->dev = dpa;
 
 	/* Bind device and allocate PASID */

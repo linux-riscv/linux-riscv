@@ -56,11 +56,6 @@
 #define DPA_NUM_MSIX		8
 
 struct dpa_device {
-	/* big lock for device data structures */
-	struct mutex lock;
-
-	/* list of processes using device */
-	//struct list *plist;
 	struct device *dev;
 	struct pci_dev			*pdev;
 	struct drm_device		ddev;
