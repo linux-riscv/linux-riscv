@@ -4,6 +4,7 @@
 #include <linux/smp.h>
 #include <linux/sched.h>
 #include <linux/hugetlb.h>
+#include <linux/mmu_notifier.h>
 #include <asm/sbi.h>
 #include <asm/mmu_context.h>
 
@@ -135,8 +136,11 @@ static void __flush_tlb_range(struct mm_struct *mm, unsigned long start,
 		local_flush_tlb_range_asid(start, size, stride, asid);
 	}
 
-	if (mm)
+	if (mm) {
 		put_cpu();
+		mmu_notifier_arch_invalidate_secondary_tlbs(mm,
+							    start, start + size);
+	}
 }
 
 void flush_tlb_mm(struct mm_struct *mm)
