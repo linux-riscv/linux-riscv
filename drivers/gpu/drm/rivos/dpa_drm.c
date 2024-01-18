@@ -734,7 +734,8 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
 	if (err) {
-		dev_warn(dev, "%s: Unable to turn on SVA feature\n", __func__);
+		iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_IOPF);
+		dev_warn(dev, "%s: Unable to turn on SVA feature", __func__);
 		return err;
 	}
 	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
@@ -806,6 +807,7 @@ free_fc_page:
 free_daffy:
 	daffy_free(dpa);
 disable_sva:
+	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_IOPF);
 	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_SVA);
 
 	return err;
@@ -819,6 +821,7 @@ static void dpa_pci_remove(struct pci_dev *pdev)
 	daffy_free(dpa);
 	__free_page(dpa->fc_page);
 	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_SVA);
+	iommu_dev_disable_feature(dpa->dev, IOMMU_DEV_FEAT_IOPF);
 }
 
 static const struct pci_device_id dpa_pci_table[] = {
