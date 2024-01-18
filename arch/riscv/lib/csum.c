@@ -178,22 +178,35 @@ do_csum_with_alignment(const unsigned char *buff, int len)
 				  : no_zbb);
 
 #ifdef CONFIG_32BIT
-		asm_volatile_goto(".option push			\n\
+		/*
+		 * OutputOperands in asm goto is not supported until GCC 11, so
+		 * this asm has to be split to be compatible.
+		 */
+		asm (".option push				\n\
 		.option arch,+zbb				\n\
 			rori	%[fold_temp], %[csum], 16	\n\
 			andi	%[offset], %[offset], 1		\n\
 			add	%[csum], %[fold_temp], %[csum]	\n\
-			beq	%[offset], zero, %l[end]	\n\
-			rev8	%[csum], %[csum]		\n\
 		.option pop"
 			: [csum] "+r" (csum), [fold_temp] "=&r" (fold_temp)
-			: [offset] "r" (offset)
-			:
-			: end);
+			: [offset] "r" (offset));
+
+		if (offset == 0)
+			goto end;
+
+		asm (".option push				\n\
+		.option arch, +zbb				\n\
+			rev8	%[csum], %[csum]		\n\
+		.option pop"
+			: [csum] "+r" (csum));
 
 		return (unsigned short)csum;
 #else /* !CONFIG_32BIT */
-		asm_volatile_goto(".option push			\n\
+		/*
+		 * OutputOperands in asm goto is not supported until GCC 11, so
+		 * this asm has to be split to be compatible.
+		 */
+		asm (".option push				\n\
 		.option arch,+zbb				\n\
 			rori	%[fold_temp], %[csum], 32	\n\
 			add	%[csum], %[fold_temp], %[csum]	\n\
@@ -201,13 +214,18 @@ do_csum_with_alignment(const unsigned char *buff, int len)
 			roriw	%[fold_temp], %[csum], 16	\n\
 			addw	%[csum], %[fold_temp], %[csum]	\n\
 			andi	%[offset], %[offset], 1		\n\
-			beq	%[offset], zero, %l[end]	\n\
-			rev8	%[csum], %[csum]		\n\
 		.option pop"
 			: [csum] "+r" (csum), [fold_temp] "=&r" (fold_temp)
-			: [offset] "r" (offset)
-			:
-			: end);
+			: [offset] "r" (offset));
+
+		if (offset == 0)
+			goto end;
+
+		asm (".option push				\n\
+		.option arch, +zbb				\n\
+			rev8	%[csum], %[csum]		\n\
+		.option pop"
+			: [csum] "+r" (csum));
 
 		return (csum << 16) >> 48;
 #endif /* !CONFIG_32BIT */
