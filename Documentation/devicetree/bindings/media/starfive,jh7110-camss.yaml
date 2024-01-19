@@ -4,14 +4,14 @@
 $id: http://devicetree.org/schemas/media/starfive,jh7110-camss.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Starfive SoC CAMSS ISP
+title: StarFive SoC CAMSS ISP
 
 maintainers:
   - Jack Zhu <jack.zhu@starfivetech.com>
   - Changhuang Liang <changhuang.liang@starfivetech.com>
 
 description:
-  The Starfive CAMSS ISP is a Camera interface for Starfive JH7110 SoC. It
+  The StarFive CAMSS ISP is a Camera interface for StarFive JH7110 SoC. It
   consists of a VIN controller (Video In Controller, a top-level control unit)
   and an ISP.
 
@@ -28,26 +28,21 @@ properties:
       - const: isp
 
   clocks:
-    maxItems: 7
+    maxItems: 3
 
   clock-names:
     items:
-      - const: apb_func
       - const: wrapper_clk_c
-      - const: dvp_inv
-      - const: axiwr
-      - const: mipi_rx0_pxl
       - const: ispcore_2x
       - const: isp_axi
 
   resets:
-    maxItems: 6
+    maxItems: 5
 
   reset-names:
     items:
       - const: wrapper_p
       - const: wrapper_c
-      - const: axird
       - const: axiwr
       - const: isp_top_n
       - const: isp_top_axi
@@ -57,7 +52,7 @@ properties:
       - description: JH7110 ISP Power Domain Switch Controller.
 
   interrupts:
-    maxItems: 4
+    maxItems: 3
 
   ports:
     $ref: /schemas/graph.yaml#/properties/ports
@@ -125,34 +120,24 @@ examples:
         reg = <0x19840000 0x10000>,
               <0x19870000 0x30000>;
         reg-names = "syscon", "isp";
-        clocks = <&ispcrg 0>,
-                 <&ispcrg 13>,
-                 <&ispcrg 2>,
-                 <&ispcrg 12>,
-                 <&ispcrg 1>,
+        clocks = <&ispcrg 13>,
                  <&syscrg 51>,
                  <&syscrg 52>;
-        clock-names = "apb_func",
-                      "wrapper_clk_c",
-                      "dvp_inv",
-                      "axiwr",
-                      "mipi_rx0_pxl",
+        clock-names = "wrapper_clk_c",
                       "ispcore_2x",
                       "isp_axi";
         resets = <&ispcrg 0>,
                  <&ispcrg 1>,
-                 <&ispcrg 10>,
                  <&ispcrg 11>,
                  <&syscrg 41>,
                  <&syscrg 42>;
         reset-names = "wrapper_p",
                       "wrapper_c",
-                      "axird",
                       "axiwr",
                       "isp_top_n",
                       "isp_top_axi";
         power-domains = <&pwrc 5>;
-        interrupts = <92>, <87>, <88>, <90>;
+        interrupts = <92>, <87>, <90>;
 
         ports {
             #address-cells = <1>;
