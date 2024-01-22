@@ -1018,8 +1018,13 @@ long dce_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 #ifdef CONFIG_IOMMU_SVA
 	/* prevent all ioctl from succeeding if the fd is from a parent process*/
+#ifdef CONFIG_IOMMU_MM_DATA
+	if (ctx->pasid != mm_get_enqcmd_pasid(current->mm))
+		return -EBADFD;
+#else
 	if (ctx->pasid != current->mm->pasid)
 		return -EBADFD;
+#endif
 #endif
 	switch (cmd) {
 	case REQUEST_KERNEL_WQ:
