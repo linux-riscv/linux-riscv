@@ -1002,7 +1002,7 @@ int isbdmex_send_command(struct isbdm *ii, struct isbdm_user_ctx *user_ctx,
 	struct isbdm_command *command;
 	struct task_struct *task = get_current();
 	int not_done;
-	uint64_t pasid = task->mm->pasid;
+	uint64_t pasid = mm_get_enqcmd_pasid(task->mm);
 	int rc;
 	uint64_t value;
 
@@ -1081,7 +1081,7 @@ int isbdmex_alloc_rmb(struct isbdm *ii, struct file *file,
 {
 	struct task_struct *task = get_current();
 	int not_done;
-	uint64_t pasid = task->mm->pasid;
+	uint64_t pasid = mm_get_enqcmd_pasid(task->mm);
 	struct isbdm_remote_buffer rbcopy;
 	uint64_t value;
 

@@ -284,7 +284,7 @@ int isbdm_alloc_pd(struct ib_pd *pd, struct ib_udata *udata)
 		}
 
 		ipd->mm = current->mm;
-		ipd->pasid = ipd->mm->pasid;
+		ipd->pasid = mm_get_enqcmd_pasid(ipd->mm);
 
 		WARN_ON_ONCE(ipd->pasid == IOMMU_PASID_INVALID);
 	}

@@ -39,7 +39,7 @@ int isbdm_create_local_mb(struct isbdm_mr *mr)
 	/* This is a usermode address if mem_obj is non-NULL. */
 	if (mr->mem->mem_obj != NULL) {
 		struct task_struct *task = get_current();
-		uint64_t pasid = task->mm->pasid;
+		uint64_t pasid = mm_get_enqcmd_pasid(task->mm);
 
 		if (pasid == IOMMU_PASID_INVALID) {
 			dev_err(&sdev->ii->pdev->dev,
