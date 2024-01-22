@@ -71,6 +71,12 @@ static void ci_leaf_init(struct cacheinfo *this_leaf,
 	this_leaf->type = type;
 }
 
+int init_cache_level(unsigned int cpu)
+{
+	/* The topology has been parsed by acpi or dt, return true. */
+	return 0;
+}
+
 int populate_cache_leaves(unsigned int cpu)
 {
 	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
