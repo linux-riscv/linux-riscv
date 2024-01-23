@@ -81,6 +81,10 @@
 #define RISCV_ISA_EXT_ZTSO		72
 #define RISCV_ISA_EXT_ZACAS		73
 
+
+/* from lists */
+#define RISCV_ISA_EXT_SVADU		127
+
 #define RISCV_ISA_EXT_MAX		128
 #define RISCV_ISA_EXT_INVALID		U32_MAX
 
