@@ -2,6 +2,7 @@
 #ifndef __ASM_SH_UACCESS_H
 #define __ASM_SH_UACCESS_H
 
+#ifdef CONFIG_MMU
 #include <asm/extable.h>
 #include <asm-generic/access_ok.h>
 
@@ -129,5 +130,9 @@ struct mem_access {
 
 int handle_unaligned_access(insn_size_t instruction, struct pt_regs *regs,
 			    struct mem_access *ma, int, unsigned long address);
+
+#else
+#include <asm-generic/uaccess.h>
+#endif
 
 #endif /* __ASM_SH_UACCESS_H */

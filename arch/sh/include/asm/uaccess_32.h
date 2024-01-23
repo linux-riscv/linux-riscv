@@ -35,7 +35,6 @@ do {								\
 	}							\
 } while (0)
 
-#ifdef CONFIG_MMU
 #define __get_user_asm(x, addr, err, insn) \
 ({ \
 __asm__ __volatile__( \
@@ -56,16 +55,6 @@ __asm__ __volatile__( \
 	".previous" \
 	:"=&r" (err), "=&r" (x) \
 	:"m" (__m(addr)), "i" (-EFAULT), "0" (err)); })
-#else
-#define __get_user_asm(x, addr, err, insn)		\
-do {							\
-	__asm__ __volatile__ (				\
-		"mov." insn "	%1, %0\n\t"		\
-		: "=&r" (x)				\
-		: "m" (__m(addr))			\
-	);						\
-} while (0)
-#endif /* CONFIG_MMU */
 
 extern void __get_user_unknown(void);
 
@@ -140,7 +129,6 @@ do {							\
 	}						\
 } while (0)
 
-#ifdef CONFIG_MMU
 #define __put_user_asm(x, addr, err, insn)			\
 do {								\
 	__asm__ __volatile__ (					\
@@ -164,17 +152,6 @@ do {								\
 		: "memory"					\
 	);							\
 } while (0)
-#else
-#define __put_user_asm(x, addr, err, insn)		\
-do {							\
-	__asm__ __volatile__ (				\
-		"mov." insn "	%0, %1\n\t"		\
-		: /* no outputs */			\
-		: "r" (x), "m" (__m(addr))		\
-		: "memory"				\
-	);						\
-} while (0)
-#endif /* CONFIG_MMU */
 
 #if defined(CONFIG_CPU_LITTLE_ENDIAN)
 #define __put_user_u64(val,addr,retval) \
