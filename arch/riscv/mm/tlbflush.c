@@ -6,28 +6,36 @@
 #include <linux/hugetlb.h>
 #include <asm/sbi.h>
 #include <asm/mmu_context.h>
+#include <asm/tlbflush.h>
 
-static inline void local_flush_tlb_all_asid(unsigned long asid)
+static unsigned long get_stride_size(struct vm_area_struct *vma)
 {
-	if (asid != FLUSH_TLB_NO_ASID)
-		__asm__ __volatile__ ("sfence.vma x0, %0"
-				:
-				: "r" (asid)
-				: "memory");
-	else
-		local_flush_tlb_all();
-}
+	unsigned long stride_size;
 
-static inline void local_flush_tlb_page_asid(unsigned long addr,
-		unsigned long asid)
-{
-	if (asid != FLUSH_TLB_NO_ASID)
-		__asm__ __volatile__ ("sfence.vma %0, %1"
-				:
-				: "r" (addr), "r" (asid)
-				: "memory");
-	else
-		local_flush_tlb_page(addr);
+	if (!is_vm_hugetlb_page(vma))
+		return PAGE_SIZE;
+
+	stride_size = huge_page_size(hstate_vma(vma));
+
+	/*
+	 * As stated in the privileged specification, every PTE in a
+	 * NAPOT region must be invalidated, so reset the stride in that
+	 * case.
+	 */
+	if (has_svnapot()) {
+		if (stride_size >= PGDIR_SIZE)
+			stride_size = PGDIR_SIZE;
+		else if (stride_size >= P4D_SIZE)
+			stride_size = P4D_SIZE;
+		else if (stride_size >= PUD_SIZE)
+			stride_size = PUD_SIZE;
+		else if (stride_size >= PMD_SIZE)
+			stride_size = PMD_SIZE;
+		else
+			stride_size = PAGE_SIZE;
+	}
+
+	return stride_size;
 }
 
 /*
@@ -66,30 +74,11 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
 		local_flush_tlb_range_threshold_asid(start, size, stride, asid);
 }
 
-void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
-{
-	local_flush_tlb_range_asid(start, end, PAGE_SIZE, FLUSH_TLB_NO_ASID);
-}
-
+#ifdef CONFIG_SMP
 static void __ipi_flush_tlb_all(void *info)
 {
 	local_flush_tlb_all();
 }
-
-void flush_tlb_all(void)
-{
-	if (riscv_use_ipi_for_rfence())
-		on_each_cpu(__ipi_flush_tlb_all, NULL, 1);
-	else
-		sbi_remote_sfence_vma_asid(NULL, 0, FLUSH_TLB_MAX_SIZE, FLUSH_TLB_NO_ASID);
-}
-
-struct flush_tlb_range_data {
-	unsigned long asid;
-	unsigned long start;
-	unsigned long size;
-	unsigned long stride;
-};
 
 static void __ipi_flush_tlb_range_asid(void *info)
 {
@@ -138,10 +127,18 @@ static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
 		put_cpu();
 }
 
-static inline unsigned long get_mm_asid(struct mm_struct *mm)
+void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
 {
-	return static_branch_unlikely(&use_asid_allocator) ?
-			atomic_long_read(&mm->context.id) & asid_mask : FLUSH_TLB_NO_ASID;
+	__flush_tlb_range(mm_cpumask(vma->vm_mm), get_mm_asid(vma->vm_mm),
+			  addr, PAGE_SIZE, PAGE_SIZE);
+}
+
+void flush_tlb_all(void)
+{
+	if (riscv_use_ipi_for_rfence())
+		on_each_cpu(__ipi_flush_tlb_all, NULL, 1);
+	else
+		sbi_remote_sfence_vma_asid(NULL, 0, FLUSH_TLB_MAX_SIZE, FLUSH_TLB_NO_ASID);
 }
 
 void flush_tlb_mm(struct mm_struct *mm)
@@ -158,41 +155,12 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 			  start, end - start, page_size);
 }
 
-void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
-{
-	__flush_tlb_range(mm_cpumask(vma->vm_mm), get_mm_asid(vma->vm_mm),
-			  addr, PAGE_SIZE, PAGE_SIZE);
-}
-
 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		     unsigned long end)
 {
 	unsigned long stride_size;
 
-	if (!is_vm_hugetlb_page(vma)) {
-		stride_size = PAGE_SIZE;
-	} else {
-		stride_size = huge_page_size(hstate_vma(vma));
-
-		/*
-		 * As stated in the privileged specification, every PTE in a
-		 * NAPOT region must be invalidated, so reset the stride in that
-		 * case.
-		 */
-		if (has_svnapot()) {
-			if (stride_size >= PGDIR_SIZE)
-				stride_size = PGDIR_SIZE;
-			else if (stride_size >= P4D_SIZE)
-				stride_size = P4D_SIZE;
-			else if (stride_size >= PUD_SIZE)
-				stride_size = PUD_SIZE;
-			else if (stride_size >= PMD_SIZE)
-				stride_size = PMD_SIZE;
-			else
-				stride_size = PAGE_SIZE;
-		}
-	}
-
+	stride_size = get_stride_size(vma);
 	__flush_tlb_range(mm_cpumask(vma->vm_mm), get_mm_asid(vma->vm_mm),
 			  start, end - start, stride_size);
 }
@@ -203,6 +171,12 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 			  start, end - start, PAGE_SIZE);
 }
 
+void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
+{
+	__flush_tlb_range(&batch->cpumask, FLUSH_TLB_NO_ASID, 0,
+			  FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
+}
+
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			unsigned long end)
@@ -211,6 +185,77 @@ void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			  start, end - start, PMD_SIZE);
 }
 #endif
+
+#else
+static void __flush_tlb_range_up(struct mm_struct *mm, unsigned long start,
+				 unsigned long size, unsigned long stride)
+{
+	unsigned long asid = FLUSH_TLB_NO_ASID;
+
+	if (mm)
+		asid = get_mm_asid(mm);
+
+	local_flush_tlb_range_asid(start, size, stride, asid);
+}
+
+void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
+{
+	local_flush_tlb_page(addr);
+}
+
+void flush_tlb_all(void)
+{
+	local_flush_tlb_all();
+}
+
+void flush_tlb_mm(struct mm_struct *mm)
+{
+	__flush_tlb_range_up(mm, 0, FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
+}
+
+void flush_tlb_mm_range(struct mm_struct *mm,
+			unsigned long start, unsigned long end,
+			unsigned int page_size)
+{
+	__flush_tlb_range_up(mm, start, end - start, page_size);
+}
+
+void flush_tlb_range(struct vm_area_struct *vma,
+		unsigned long start, unsigned long end)
+{
+	unsigned long stride_size;
+
+	stride_size = get_stride_size(vma);
+	__flush_tlb_range_up(vma->vm_mm, start, end - start, stride_size);
+}
+
+/* Flush a range of kernel pages */
+void flush_tlb_kernel_range(unsigned long start,
+	unsigned long end)
+{
+	__flush_tlb_range_up(NULL, start, end - start, PAGE_SIZE);
+}
+
+void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
+{
+	__flush_tlb_range_up(NULL, 0, FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
+}
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
+			unsigned long end)
+{
+	__flush_tlb_range_up(vma->vm_mm, start, end - start, PMD_SIZE);
+}
+#endif
+
+#endif
+
+void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
+{
+	local_flush_tlb_range_asid(start, end - start, PAGE_SIZE,
+				   FLUSH_TLB_NO_ASID);
+}
 
 bool arch_tlbbatch_should_defer(struct mm_struct *mm)
 {
@@ -227,10 +272,4 @@ void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
 void arch_flush_tlb_batched_pending(struct mm_struct *mm)
 {
 	flush_tlb_mm(mm);
-}
-
-void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
-{
-	__flush_tlb_range(&batch->cpumask, FLUSH_TLB_NO_ASID, 0,
-			  FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
 }
