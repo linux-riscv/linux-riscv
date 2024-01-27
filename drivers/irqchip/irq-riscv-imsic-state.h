@@ -62,7 +62,6 @@ struct imsic_priv {
 
 	/* IRQ domains (created by platform driver) */
 	struct irq_domain *base_domain;
-	struct irq_domain *plat_domain;
 };
 
 extern struct imsic_priv *imsic;
@@ -101,5 +100,6 @@ void imsic_hwirq_free(unsigned int hwirq);
 void imsic_state_online(void);
 void imsic_state_offline(void);
 int imsic_setup_state(struct fwnode_handle *fwnode);
+int imsic_irqdomain_init(void);
 
 #endif
