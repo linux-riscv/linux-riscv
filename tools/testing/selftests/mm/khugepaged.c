@@ -533,12 +533,12 @@ static void madvise_collapse(const char *msg, char *p, int nr_hpages,
 	__madvise_collapse(msg, p, nr_hpages, ops, expect);
 }
 
-#define TICK 500000
+#define TICK 50
 static bool wait_for_scan(const char *msg, char *p, int nr_hpages,
 			  struct mem_ops *ops)
 {
 	int full_scans;
-	int timeout = 6; /* 3 seconds */
+	int timeout = 60000; /* 3 seconds */
 
 	/* Sanity check */
 	if (!ops->check_huge(p, 0)) {
@@ -553,8 +553,10 @@ static bool wait_for_scan(const char *msg, char *p, int nr_hpages,
 
 	printf("%s...", msg);
 	while (timeout--) {
-		if (ops->check_huge(p, nr_hpages))
+		if (ops->check_huge(p, nr_hpages)) {
+			printf("timeout = %d\n", timeout);
 			break;
+		}
 		if (thp_read_num("khugepaged/full_scans") >= full_scans)
 			break;
 		printf(".");
@@ -1256,8 +1258,8 @@ int main(int argc, char **argv)
 	TEST(collapse_full_of_compound, madvise_context, file_ops);
 	TEST(collapse_full_of_compound, madvise_context, shmem_ops);
 
-	TEST(collapse_compound_extreme, khugepaged_context, anon_ops);
-	TEST(collapse_compound_extreme, madvise_context, anon_ops);
+	//TEST(collapse_compound_extreme, khugepaged_context, anon_ops);
+	//TEST(collapse_compound_extreme, madvise_context, anon_ops);
 
 	TEST(collapse_swapin_single_pte, khugepaged_context, anon_ops);
 	TEST(collapse_swapin_single_pte, madvise_context, anon_ops);

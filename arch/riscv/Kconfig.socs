@@ -116,4 +116,8 @@ config SOC_CANAAN_K210_DTB_SOURCE
 
 endif # ARCH_CANAAN
 
+config RISCV_SKIP_BSSZ
+	bool "Skip zero of BSS on startup"
+	default y if SOC_RIVOS_SIM_TINY
+
 endmenu # "SoC selection"
