@@ -162,6 +162,8 @@ config RISCV
 	select PCI_DOMAINS_GENERIC if PCI
 	select PCI_MSI if PCI
 	select RISCV_ALTERNATIVE if !XIP_KERNEL
+	select RISCV_APLIC
+	select RISCV_IMSIC
 	select RISCV_INTC
 	select RISCV_TIMER if RISCV_SBI
 	select SIFIVE_PLIC
@@ -709,6 +711,12 @@ config RISCV_EFFICIENT_UNALIGNED_ACCESS
 	  on CPUs that do not support efficient unaligned memory accesses.
 
 	  If unsure what to do here, say N.
+
+config RISCV_TIMER_REGDUMP
+        bool "Periodically dump registers"
+	default n
+	help
+	  Dump thread registers every N timer ticks
 
 endmenu # "Platform type"
 
