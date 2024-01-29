@@ -914,6 +914,38 @@
 				 <&syscrg JH7110_SYSRST_WDT_CORE>;
 		};
 
+		can0: can@130d0000 {
+			compatible = "starfive,can";
+			reg = <0x0 0x130d0000 0x0 0x1000>;
+			interrupts = <112>;
+			clocks = <&syscrg JH7110_SYSCLK_CAN0_APB>,
+				 <&syscrg JH7110_SYSCLK_CAN0_TIMER>,
+				 <&syscrg JH7110_SYSCLK_CAN0_CAN>;
+			clock-names = "apb_clk", "timer_clk", "can_clk";
+			resets = <&syscrg JH7110_SYSRST_CAN0_APB>,
+				 <&syscrg JH7110_SYSRST_CAN0_CORE>,
+				 <&syscrg JH7110_SYSRST_CAN0_TIMER>;
+			reset-names = "rst_apb", "rst_core", "rst_timer";
+			starfive,syscon = <&sys_syscon 0x10 0x3 0x8>;
+			status = "disabled";
+		};
+
+		can1: can@130e0000 {
+			compatible = "starfive,can";
+			reg = <0x0 0x130e0000 0x0 0x1000>;
+			interrupts = <113>;
+			clocks = <&syscrg JH7110_SYSCLK_CAN1_APB>,
+				 <&syscrg JH7110_SYSCLK_CAN1_TIMER>,
+				 <&syscrg JH7110_SYSCLK_CAN1_CAN>;
+			clock-names = "apb_clk", "timer_clk", "can_clk";
+			resets = <&syscrg JH7110_SYSRST_CAN1_APB>,
+				 <&syscrg JH7110_SYSRST_CAN1_CORE>,
+				 <&syscrg JH7110_SYSRST_CAN1_TIMER>;
+			reset-names = "rst_apb", "rst_core", "rst_timer";
+			starfive,syscon = <&sys_syscon 0x88 0x12 0x40000>;
+			status = "disabled";
+		};
+
 		crypto: crypto@16000000 {
 			compatible = "starfive,jh7110-crypto";
 			reg = <0x0 0x16000000 0x0 0x4000>;
