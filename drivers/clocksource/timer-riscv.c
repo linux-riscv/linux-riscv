@@ -116,6 +116,9 @@ static int riscv_timer_starting_cpu(unsigned int cpu)
 		ce->rating = 450;
 	clockevents_config_and_register(ce, riscv_timebase, 100, ULONG_MAX);
 
+	/* Clear timer interrupt */
+	riscv_clock_event_stop();
+
 	enable_percpu_irq(riscv_clock_event_irq,
 			  irq_get_trigger_type(riscv_clock_event_irq));
 	return 0;
