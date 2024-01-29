@@ -4723,6 +4723,13 @@ S:	Maintained
 W:	https://wireless.wiki.kernel.org/en/users/Drivers/carl9170
 F:	drivers/net/wireless/ath/carl9170/
 
+CAST CAN DRIVER
+M:	William Qiu <william.qiu@starfivetech.com>
+L:	linux-can@vger.kernel.org
+S:	Supported
+F:	Documentation/devicetree/bindings/net/can/cast,can.yaml
+F:	drivers/net/can/cast_can.c
+
 CAVIUM I2C DRIVER
 M:	Robert Richter <rric@kernel.org>
 S:	Odd Fixes

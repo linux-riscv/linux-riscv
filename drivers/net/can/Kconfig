@@ -124,6 +124,13 @@ config CAN_CAN327
 
 	  If this driver is built as a module, it will be called can327.
 
+config CAN_CASTCAN
+	tristate "CAST CAN"
+	depends on ARCH_STARFIVE || COMPILE_TEST
+	depends on COMMON_CLK && HAS_IOMEM
+	help
+	  CAST CAN driver. This driver supports both CAN and CANFD IP.
+
 config CAN_FLEXCAN
 	tristate "Support for Freescale FLEXCAN based chips"
 	depends on OF || COLDFIRE || COMPILE_TEST
