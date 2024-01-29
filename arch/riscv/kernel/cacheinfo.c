@@ -74,36 +74,27 @@ int populate_cache_leaves(unsigned int cpu)
 {
 	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
 	struct cacheinfo *this_leaf = this_cpu_ci->info_list;
-	struct device_node *np = of_cpu_device_node_get(cpu);
-	struct device_node *prev = NULL;
-	int levels = 1, level = 1;
+	unsigned int level, idx;
 
-	if (of_property_read_bool(np, "cache-size"))
-		ci_leaf_init(this_leaf++, CACHE_TYPE_UNIFIED, level);
-	if (of_property_read_bool(np, "i-cache-size"))
-		ci_leaf_init(this_leaf++, CACHE_TYPE_INST, level);
-	if (of_property_read_bool(np, "d-cache-size"))
-		ci_leaf_init(this_leaf++, CACHE_TYPE_DATA, level);
-
-	prev = np;
-	while ((np = of_find_next_cache_node(np))) {
-		of_node_put(prev);
-		prev = np;
-		if (!of_device_is_compatible(np, "cache"))
-			break;
-		if (of_property_read_u32(np, "cache-level", &level))
-			break;
-		if (level <= levels)
-			break;
-		if (of_property_read_bool(np, "cache-size"))
-			ci_leaf_init(this_leaf++, CACHE_TYPE_UNIFIED, level);
-		if (of_property_read_bool(np, "i-cache-size"))
-			ci_leaf_init(this_leaf++, CACHE_TYPE_INST, level);
-		if (of_property_read_bool(np, "d-cache-size"))
+	for (idx = 0, level = 1; level <= this_cpu_ci->num_levels &&
+	     idx < this_cpu_ci->num_leaves; idx++, level++) {
+		/*
+		 * Since the RISC-V architecture doesn't provide any register for detecting the
+		 * Cache Level and Cache type, this assumes that:
+		 * - There cannot be any split caches (data/instruction) above a unified cache.
+		 * - Data/instruction caches come in pairs.
+		 * - Significant work is required elsewhere to fully support data/instruction-only
+		 *   type caches.
+		 * - The above assumptions are based on conventional system design and known
+		 *   examples.
+		 */
+		if (level == 1) {
 			ci_leaf_init(this_leaf++, CACHE_TYPE_DATA, level);
-		levels = level;
+			ci_leaf_init(this_leaf++, CACHE_TYPE_INST, level);
+		} else {
+			ci_leaf_init(this_leaf++, CACHE_TYPE_UNIFIED, level);
+		}
 	}
-	of_node_put(np);
 
 	return 0;
 }
