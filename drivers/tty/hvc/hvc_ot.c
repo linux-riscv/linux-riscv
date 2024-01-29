@@ -2,7 +2,7 @@
 /* Trivial HVC "driver" for an OpenTitan-like UART,
  * exposed in DT with "opentitan,uart"; polling.
  *
- * Copyright (c) 2022 Rivos Inc.
+ * Copyright (c) 2022-2024 Rivos Inc.
  *
  * Based on hvc_riscv_sbi.c which is: 
  * Copyright (C) 2008 David Gibson, IBM Corporation
@@ -46,9 +46,9 @@ static void ot_putch_blocking(volatile u32 *base, char c)
 	base[OT_UART_WDATA] = c;
 }
 
-static int hvc_ot_tty_put(uint32_t vtermno, const char *buf, int count)
+static ssize_t hvc_ot_tty_put(uint32_t vtermno, const u8 *buf, size_t count)
 {
-	int i;
+	ssize_t i;
 
 	if (!ot_uart_base) {
 		return 0;
@@ -61,9 +61,9 @@ static int hvc_ot_tty_put(uint32_t vtermno, const char *buf, int count)
 	return i;
 }
 
-static int hvc_ot_tty_get(uint32_t vtermno, char *buf, int count)
+static ssize_t hvc_ot_tty_get(uint32_t vtermno, u8 *buf, size_t count)
 {
-	int i;
+	ssize_t i;
 	for (i = 0; i < count; i++) {
 		if (ot_uart_base[OT_UART_FIFO_STATUS] & OT_UART_FIFO_STATUS_RXLVL_MASK)
 			// Char pending
