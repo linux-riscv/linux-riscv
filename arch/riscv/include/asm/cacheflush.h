@@ -42,7 +42,7 @@ extern char _end[];
 #define flush_cache_vmap flush_cache_vmap
 static inline void flush_cache_vmap(unsigned long start, unsigned long end)
 {
-	if (is_vmalloc_or_module_addr(start)) {
+	if (is_vmalloc_or_module_addr((void *)start)) {
 		int i;
 
 		/*
