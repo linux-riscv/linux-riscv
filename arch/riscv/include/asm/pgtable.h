@@ -491,6 +491,7 @@ svvptc:
 	 * Svvptc guarantees that xRET act as a fence, so when the uarch does
 	 * not cache invalid entries, we don't have to do anything.
 	 */
+	;
 }
 #define update_mmu_cache(vma, addr, ptep) \
 	update_mmu_cache_range(NULL, vma, addr, ptep, 1)

@@ -68,7 +68,7 @@ _new_vmalloc_kernel_address:
 	sll	a1, a2, a1
 
 	/* Check the value of new_vmalloc for this cpu */
-	ld	a2, 0(a0)
+	REG_L	a2, 0(a0)
 	and	a2, a2, a1
 	beq	a2, zero, _new_vmalloc_restore_context
 
