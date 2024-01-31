@@ -626,6 +626,17 @@ static struct acpi_scan_handler processor_handler = {
 	},
 };
 
+bool acpi_device_is_processor(const struct acpi_device *adev)
+{
+	if (adev->device_type == ACPI_BUS_TYPE_PROCESSOR)
+		return true;
+
+	if (adev->device_type != ACPI_BUS_TYPE_DEVICE)
+		return false;
+
+	return acpi_scan_check_handler(adev, &processor_handler);
+}
+
 static int acpi_processor_container_attach(struct acpi_device *dev,
 					   const struct acpi_device_id *id)
 {
