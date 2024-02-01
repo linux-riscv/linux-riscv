@@ -202,6 +202,9 @@ static void hwprobe_one_pair(struct riscv_hwprobe *pair,
 		if (hwprobe_ext0_has(cpus, RISCV_HWPROBE_EXT_ZICBOZ))
 			pair->value = riscv_cboz_block_size;
 		break;
+	case RISCV_HWPROBE_KEY_VA_BITS:
+		pair->value = VA_BITS;
+		break;
 
 	/*
 	 * For forward compatibility, unknown keys don't fail the whole
