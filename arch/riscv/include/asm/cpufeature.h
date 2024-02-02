@@ -51,6 +51,12 @@ static inline bool check_unaligned_access_emulated(int cpu)
 static inline void unaligned_emulation_finish(void) {}
 #endif
 
+#ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+static __always_inline bool has_fast_misaligned_accesses(void)
+{
+	return true;
+}
+#else
 DECLARE_PER_CPU(long, misaligned_access_speed);
 
 DECLARE_STATIC_KEY_FALSE(fast_misaligned_access_speed_key);
@@ -59,6 +65,7 @@ static __always_inline bool has_fast_misaligned_accesses(void)
 {
 	return static_branch_likely(&fast_misaligned_access_speed_key);
 }
+#endif
 
 unsigned long riscv_get_elf_hwcap(void);
 
