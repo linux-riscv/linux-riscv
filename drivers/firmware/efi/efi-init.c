@@ -24,13 +24,6 @@
 
 unsigned long __initdata screen_info_table = EFI_INVALID_TABLE_ADDR;
 
-static int __init is_memory(efi_memory_desc_t *md)
-{
-	if (md->attribute & (EFI_MEMORY_WB|EFI_MEMORY_WT|EFI_MEMORY_WC))
-		return 1;
-	return 0;
-}
-
 /*
  * Translate a EFI virtual address into a physical address: this is necessary,
  * as some data members of the EFI system table are virtually remapped after
@@ -195,11 +188,8 @@ static __init void reserve_regions(void)
 		memrange_efi_to_native(&paddr, &npages);
 		size = npages << PAGE_SHIFT;
 
-		if (is_memory(md)) {
+		if (is_usable_memory(md)) {
 			early_init_dt_add_memory_arch(paddr, size);
-
-			if (!is_usable_memory(md))
-				memblock_mark_nomap(paddr, size);
 
 			/* keep ACPI reclaim memory intact for kexec etc. */
 			if (md->type == EFI_ACPI_RECLAIM_MEMORY)
