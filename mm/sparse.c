@@ -149,6 +149,26 @@ static void __meminit mminit_validate_memmodel_limits(unsigned long *start_pfn,
 		WARN_ON_ONCE(1);
 		*end_pfn = max_sparsemem_pfn;
 	}
+
+	/*check vmemmap limits*/
+	#ifdef CONFIG_SPARSEMEM_VMEMMAP
+
+	unsigned long vmemmap_offset_start = (unsigned long) pfn_to_page(*start_pfn);
+	unsigned long vmemmap_offset_end   = (unsigned long) pfn_to_page(*end_pfn);
+
+	if (vmemmap_offset_start < VMEMMAP_START) {
+		mminit_dprintk(MMINIT_WARNING, "pfnvalidation",
+			"Start of range %lu -> %lu exceeds bounds of SPARSEMEM virtual memory map address range %lu -> %lu\n",
+			vmemmap_offset_start, vmemmap_offset_end, VMEMMAP_START,VMEMMAP_END);
+		WARN_ON_ONCE(1);
+
+	} else if (vmemmap_offset_end > VMEMMAP_END ) {
+		mminit_dprintk(MMINIT_WARNING, "pfnvalidation",
+			"End of range %lu -> %lu exceeds bounds of SPARSEMEM virtual memory map address range %lu -> %lu\n",
+			vmemmap_offset_start, vmemmap_offset_end, VMEMMAP_START,VMEMMAP_END);
+		WARN_ON_ONCE(1);
+	}
+	#endif
 }
 
 /*
