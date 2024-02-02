@@ -125,6 +125,8 @@ if [[ "${INTERNAL}" == "true" ]]; then
 fi
 # Maintainer: @mnissler
 ${GIT_MERGE} "${SRC}dev/mnissler/feature/pcs_stub"
+# Maintainer: @abrestic
+${GIT_MERGE} "${SRC}dev/rivos/topic/memory_hotplug"
 
 # After successful merge and test create rivos release tag:
 echo "Apply tag and push to RIVOS repository when tested:"
