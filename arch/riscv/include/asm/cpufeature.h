@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright 2022-2023 Rivos, Inc
+ * Copyright 2022-2024 Rivos, Inc
  */
 
 #ifndef _ASM_CPUFEATURE_H
@@ -28,8 +28,6 @@ struct riscv_isainfo {
 
 DECLARE_PER_CPU(struct riscv_cpuinfo, riscv_cpuinfo);
 
-DECLARE_PER_CPU(long, misaligned_access_speed);
-
 /* Per-cpu ISA extensions. */
 extern struct riscv_isainfo hart_isa[NR_CPUS];
 
@@ -52,6 +50,15 @@ static inline bool check_unaligned_access_emulated(int cpu)
 
 static inline void unaligned_emulation_finish(void) {}
 #endif
+
+DECLARE_PER_CPU(long, misaligned_access_speed);
+
+DECLARE_STATIC_KEY_FALSE(fast_misaligned_access_speed_key);
+
+static __always_inline bool has_fast_misaligned_accesses(void)
+{
+	return static_branch_likely(&fast_misaligned_access_speed_key);
+}
 
 unsigned long riscv_get_elf_hwcap(void);
 
@@ -134,7 +141,5 @@ static __always_inline bool riscv_cpu_has_extension_unlikely(int cpu, const unsi
 
 	return __riscv_isa_extension_available(hart_isa[cpu].isa, ext);
 }
-
-DECLARE_STATIC_KEY_FALSE(fast_misaligned_access_speed_key);
 
 #endif
