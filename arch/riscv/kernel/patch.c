@@ -182,7 +182,7 @@ int patch_text_set_nosync(void *addr, u8 c, size_t len)
 	ret = patch_insn_set(tp, c, len);
 
 	if (!ret)
-		flush_icache_range((uintptr_t)tp, (uintptr_t)tp + len);
+		flush_icache_patch_range((uintptr_t)tp, (uintptr_t)tp + len);
 
 	return ret;
 }
@@ -217,7 +217,7 @@ int patch_text_nosync(void *addr, const void *insns, size_t len)
 	ret = patch_insn_write(tp, insns, len);
 
 	if (!ret)
-		flush_icache_range((uintptr_t) tp, (uintptr_t) tp + len);
+		flush_icache_patch_range((uintptr_t) tp, (uintptr_t) tp + len);
 
 	return ret;
 }

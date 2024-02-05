@@ -17,11 +17,12 @@ static void ipi_remote_fence_i(void *info)
 	return local_flush_icache_all();
 }
 
-void flush_icache_all(void)
+void flush_icache_all(bool want_ipi)
 {
 	local_flush_icache_all();
 
-	if (IS_ENABLED(CONFIG_RISCV_SBI) && !riscv_use_ipi_for_rfence())
+	if (IS_ENABLED(CONFIG_RISCV_SBI) &&
+	    (!want_ipi || !riscv_use_ipi_for_rfence()))
 		sbi_remote_fence_i(NULL);
 	else
 		on_each_cpu(ipi_remote_fence_i, NULL, 1);
@@ -87,7 +88,7 @@ void flush_icache_pte(pte_t pte)
 	struct folio *folio = page_folio(pte_page(pte));
 
 	if (!test_bit(PG_dcache_clean, &folio->flags)) {
-		flush_icache_all();
+		flush_icache_all(true);
 		set_bit(PG_dcache_clean, &folio->flags);
 	}
 }

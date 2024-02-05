@@ -32,7 +32,8 @@ static inline void flush_dcache_page(struct page *page)
  * RISC-V doesn't have an instruction to flush parts of the instruction cache,
  * so instead we just flush the whole thing.
  */
-#define flush_icache_range(start, end) flush_icache_all()
+#define flush_icache_range(start, end) flush_icache_all(true)
+#define flush_icache_patch_range(start, end) flush_icache_all(false)
 #define flush_icache_user_page(vma, pg, addr, len) \
 	flush_icache_mm(vma->vm_mm, 0)
 
@@ -43,12 +44,12 @@ static inline void flush_dcache_page(struct page *page)
 
 #ifndef CONFIG_SMP
 
-#define flush_icache_all() local_flush_icache_all()
+#define flush_icache_all(want_ipi) local_flush_icache_all()
 #define flush_icache_mm(mm, local) flush_icache_all()
 
 #else /* CONFIG_SMP */
 
-void flush_icache_all(void);
+void flush_icache_all(bool want_ipi);
 void flush_icache_mm(struct mm_struct *mm, bool local);
 
 #endif /* CONFIG_SMP */
