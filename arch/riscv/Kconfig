@@ -682,6 +682,13 @@ config IRQ_STACKS
 	  Add independent irq & softirq stacks for percpu to prevent kernel stack
 	  overflows. We may save some memory footprint by disabling IRQ_STACKS.
 
+config RISCV_FAULT_PTE_DUMP
+        bool "Dump PTEs on faults"
+	default n
+	help
+	  When a fatal userspace or kernel fault occurs, dump the PTEs used for
+	  pagewalk for the faulting address.
+
 config THREAD_SIZE_ORDER
 	int "Kernel stack size (in power-of-two numbers of page size)" if VMAP_STACK && EXPERT
 	range 0 4
@@ -695,6 +702,7 @@ config THREAD_SIZE_ORDER
 config RISCV_MISALIGNED
 	bool "Support misaligned load/store traps for kernel and userspace"
 	select SYSCTL_ARCH_UNALIGN_ALLOW
+	depends on !HAVE_EFFICIENT_UNALIGNED_ACCESS
 	default y
 	help
 	  Say Y here if you want the kernel to embed support for misaligned
