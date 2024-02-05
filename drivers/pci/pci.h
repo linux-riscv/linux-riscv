@@ -842,4 +842,11 @@ static inline pci_power_t mid_pci_get_power_state(struct pci_dev *pdev)
 	(PCI_CONF1_ADDRESS(bus, dev, func, reg) | \
 	 PCI_CONF1_EXT_REG(reg))
 
+#ifdef CONFIG_PCI_CAP_CACHE
+bool pci_cap_cache_lookup_cap(struct pci_bus *bus, unsigned int devfn, u8 start,
+			      int cap, u8 *pos);
+bool pci_cap_cache_lookup_ext_cap(struct pci_dev *dev, u16 start, int cap,
+				  u16 *pos);
+#endif
+
 #endif /* DRIVERS_PCI_H */
