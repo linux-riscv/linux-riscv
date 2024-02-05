@@ -716,6 +716,23 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X rev 0x%X\n", vendor,
 		 device, pdev->revision);
+	force_hbm = force_fwq_hbm || (pdev->revision == PCI_DEVICE_REV_HYBRID);
+
+	handle = ACPI_HANDLE(dev);
+	if (handle) {
+		int nid = acpi_get_node(handle);
+		if (nid != NUMA_NO_NODE) {
+			if (force_hbm && !node_state(nid, N_MEMORY))
+				return -EPROBE_DEFER;
+
+			dev_info(dev, "HBM on node %d\n", nid);
+			set_dev_node(dev, nid);
+		} else {
+			dev_info(dev, "No HBM node\n");
+		}
+	} else {
+		dev_warn(dev, "No ACPI handle\n");
+	}
 
 	err = pcim_enable_device(pdev);
 	if (err)
@@ -725,6 +742,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = pcim_iomap_regions(pdev, 1 << 0, "dpa");
 	if (err)
 		return err;
+	dpa->regs = pcim_iomap_table(pdev)[0];
 
 	// Enable PASID support
 	err = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_IOPF);
@@ -740,21 +758,6 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
 
-	dpa->regs = pcim_iomap_table(pdev)[0];
-	handle = ACPI_HANDLE(dev);
-	if (handle) {
-		int nid = acpi_get_node(handle);
-		if (nid != NUMA_NO_NODE) {
-			dev_info(dev, "HBM on node %d\n", nid);
-			set_dev_node(dev, nid);
-		} else {
-			dev_info(dev, "No HBM node\n");
-		}
-	} else {
-		dev_warn(dev, "No ACPI handle\n");
-	}
-
-	force_hbm = force_fwq_hbm || (pdev->revision == PCI_DEVICE_REV_HYBRID);
 	err = daffy_init(dpa, force_hbm);
 	if (err)
 		goto disable_sva;
