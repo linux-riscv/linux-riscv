@@ -30,7 +30,7 @@
 #include "dpa_daffy.h"
 #include "duc_structs.h"
 
-#define DAFFY_ENABLE_TIMEOUT_US	500000
+#define DAFFY_ENABLE_TIMEOUT_MS	50000
 
 int daffy_init(struct dpa_device *dpa, int node)
 {
@@ -92,14 +92,14 @@ int daffy_init(struct dpa_device *dpa, int node)
 
 	dpa_fwq_write(dpa, DPA_FWQ_QUEUE_CTRL_ENABLE | DPA_FWQ_QUEUE_CTRL_BUSY,
 		      DPA_FWQ_QUEUE_CTRL);
-	timeout = ktime_add_us(ktime_get(), DAFFY_ENABLE_TIMEOUT_US);
+	timeout = ktime_add_ms(ktime_get(), DAFFY_ENABLE_TIMEOUT_MS);
 	for (;;) {
 		ctrl = dpa_fwq_read(dpa, DPA_FWQ_QUEUE_CTRL);
 		if (!(ctrl & DPA_FWQ_QUEUE_CTRL_BUSY))
 			break;
 		if (ktime_compare(ktime_get(), timeout) > 0)
 			break;
-		usleep_range(1000, 5000);
+		msleep(10);
 	}
 	if (ctrl & DPA_FWQ_QUEUE_CTRL_BUSY)
 		return -ETIMEDOUT;
@@ -116,14 +116,14 @@ void daffy_free(struct dpa_device *dpa)
 	u64 ctrl;
 
 	dpa_fwq_write(dpa, DPA_FWQ_QUEUE_CTRL_BUSY, DPA_FWQ_QUEUE_CTRL);
-	timeout = ktime_add_us(ktime_get(), DAFFY_ENABLE_TIMEOUT_US);
+	timeout = ktime_add_ms(ktime_get(), DAFFY_ENABLE_TIMEOUT_MS);
 	for (;;) {
 		ctrl = dpa_fwq_read(dpa, DPA_FWQ_QUEUE_CTRL);
 		if (!(ctrl & DPA_FWQ_QUEUE_CTRL_BUSY))
 			break;
 		if (ktime_compare(ktime_get(), timeout) > 0)
 			break;
-		usleep_range(1000, 5000);
+		msleep(10);
 	}
 	WARN_ON((ctrl & (DPA_FWQ_QUEUE_CTRL_BUSY | DPA_FWQ_QUEUE_CTRL_ENABLE)));
 
@@ -260,7 +260,7 @@ static inline bool daffy_host_queue_full(struct dpa_daffy *daffy)
 		DPA_FW_QUEUE_SIZE;
 }
 
-#define DAFFY_SUBMIT_TIMEOUT_MS	1000
+#define DAFFY_SUBMIT_TIMEOUT_MS	100000
 
 static int daffy_submit_sync(struct dpa_device *dpa,
 			     struct daffy_queue_pkt *pkt)
