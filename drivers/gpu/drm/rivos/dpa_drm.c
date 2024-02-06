@@ -700,7 +700,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device *dev = &pdev->dev;
 	struct dpa_device *dpa;
 	acpi_handle handle;
-	int err, vec;
+	int err, vec, nid = NUMA_NO_NODE;
 	u16 vendor, device;
 	bool force_hbm = false;
 
@@ -720,13 +720,11 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	handle = ACPI_HANDLE(dev);
 	if (handle) {
-		int nid = acpi_get_node(handle);
+		nid = acpi_get_node(handle);
 		if (nid != NUMA_NO_NODE) {
 			if (force_hbm && !node_state(nid, N_MEMORY))
 				return -EPROBE_DEFER;
-
 			dev_info(dev, "HBM on node %d\n", nid);
-			set_dev_node(dev, nid);
 		} else {
 			dev_info(dev, "No HBM node\n");
 		}
@@ -758,7 +756,7 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	dev_warn(dev, "%s: SVA feature enabled successfully\n", __func__);
 
-	err = daffy_init(dpa, force_hbm);
+	err = daffy_init(dpa, nid);
 	if (err)
 		goto disable_sva;
 
@@ -802,6 +800,13 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = drm_dev_register(&dpa->ddev, id->driver_data);
 	if (err)
 		goto free_fc_page;
+
+	/*
+	 * We intentionally do this as late as possible to avoid any
+	 * probe-time allocations from HBM unless specifically requested.
+	 */
+	if (nid != NUMA_NO_NODE)
+		set_dev_node(dev, nid);
 
 	return 0;
 

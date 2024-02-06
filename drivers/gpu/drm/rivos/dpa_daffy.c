@@ -32,20 +32,16 @@
 
 #define DAFFY_ENABLE_TIMEOUT_US	500000
 
-int daffy_init(struct dpa_device *dpa, bool use_hbm)
+int daffy_init(struct dpa_device *dpa, int node)
 {
 	struct dpa_daffy *daffy = &dpa->daffy;
 	u64 version, ctrl;
 	ktime_t timeout;
 	int i;
 	struct page *fwq_page;
-	int fwq_nid = -1;
 
-	if (use_hbm)
-		fwq_nid = dev_to_node(dpa->dev);
-
-	dev_dbg(dpa->dev, "%s: allocing fwq on node %d\n", __func__, fwq_nid);
-	fwq_page = alloc_pages_node(fwq_nid, GFP_KERNEL,
+	dev_dbg(dpa->dev, "%s: allocing fwq on node %d\n", __func__, node);
+	fwq_page = alloc_pages_node(node, GFP_KERNEL,
 				    get_order(sizeof(*daffy->fwq)));
 	if (!fwq_page) {
 		dev_warn(dpa->dev, "failed to alloc fwq page\n");
