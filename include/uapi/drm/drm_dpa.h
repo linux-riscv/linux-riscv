@@ -104,6 +104,8 @@ struct drm_dpa_set_notification_queue {
 
 #define DPA_DRM_MAX_SIGNAL_PAGES (16)
 
+#define DPA_DRM_MAX_PROCESSES (DPA_DRM_MAX_SIGNAL_PAGES)
+
 #define DPA_MAX_QUEUE_PRIORITY		15
 
 #endif /* __DRM_DPA_H__ */
