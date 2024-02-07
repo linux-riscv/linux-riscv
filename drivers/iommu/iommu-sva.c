@@ -82,19 +82,23 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev, struct mm_struct *mm
 		goto out_unlock;
 	}
 
+	/* Check if this domain already attached to the device. */
+	domain = iommu_get_domain_for_dev_pasid(dev, iommu_mm->pasid,
+						IOMMU_DOMAIN_SVA);
+	if (IS_ERR(domain)) {
+		ret = PTR_ERR(domain);
+		goto out_unlock;
+	}
+
 	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
 	if (!handle) {
 		ret = -ENOMEM;
 		goto out_unlock;
 	}
 
-	/* Search for an existing domain. */
-	list_for_each_entry(domain, &mm->iommu_mm->sva_domains, next) {
-		ret = iommu_attach_device_pasid(domain, dev, iommu_mm->pasid);
-		if (!ret) {
-			domain->users++;
-			goto out;
-		}
+	if (domain) {
+		domain->users++;
+		goto out;
 	}
 
 	/* Allocate a new domain and set it on device pasid. */
@@ -141,9 +145,9 @@ void iommu_sva_unbind_device(struct iommu_sva *handle)
 	struct device *dev = handle->dev;
 
 	mutex_lock(&iommu_sva_lock);
-	iommu_detach_device_pasid(domain, dev, iommu_mm->pasid);
 	if (--domain->users == 0) {
 		list_del(&domain->next);
+		iommu_detach_device_pasid(domain, dev, iommu_mm->pasid);
 		iommu_domain_free(domain);
 	}
 	mutex_unlock(&iommu_sva_lock);
