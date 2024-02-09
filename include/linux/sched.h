@@ -979,6 +979,11 @@ struct task_struct {
 	/* Canary value for the -fstack-protector GCC feature: */
 	unsigned long			stack_canary;
 #endif
+
+#ifdef CONFIG_DYNAMIC_MEMORY_CONSISTENCY_MODEL
+	unsigned long			memory_consistency_model;
+#endif
+
 	/*
 	 * Pointers to the (original) parent process, youngest child, younger sibling,
 	 * older sibling, respectively.  (p->father can be replaced with

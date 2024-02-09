@@ -1478,6 +1478,20 @@ config ARCH_HAS_NONLEAF_PMD_YOUNG
 	  address translations. Page table walkers that clear the accessed bit
 	  may use this capability to reduce their search space.
 
+config ARCH_HAS_DYNAMIC_MEMORY_CONSISTENCY_MODEL
+	bool
+	help
+	  An arch should select this symbol if it supports switching
+	  the memory consistency model at run-time.
+
+config DYNAMIC_MEMORY_CONSISTENCY_MODEL
+	bool "Dynamic memory consistency model support"
+	depends on ARCH_HAS_DYNAMIC_MEMORY_CONSISTENCY_MODEL
+	default y
+	help
+	  This option turns on the support to switch the memory consistency
+	  model at runtime on a per-process-base.
+
 source "kernel/gcov/Kconfig"
 
 source "scripts/gcc-plugins/Kconfig"

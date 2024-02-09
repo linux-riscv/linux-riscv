@@ -43,6 +43,7 @@ above structured documentation, or deleted if it has served its purpose.
    arch_pgtable_helpers
    balance
    damon/index
+   dynamic-memory-consistency-model
    free_page_reporting
    hmm
    hwpoison
