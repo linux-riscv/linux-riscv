@@ -73,4 +73,14 @@ Supported memory consistency models
 This section defines the memory consistency models which are supported
 by the prctl interface.
 
-<none>
+RISC-V
+------
+
+RISC-V uses RVWMO (RISC-V weak memory ordering) as default memory consistency
+model. TSO (total store ordering) is another specified model and provides
+additional ordering guarantees. Switching user-mode processes from RVWMO to TSO
+is possible when the Ssdtso extension is available.
+
+* :c:macro:`PR_MEMORY_CONSISTENCY_MODEL_RISCV_WMO`: RISC-V weak memory ordering (default).
+
+* :c:macro:`PR_MEMORY_CONSISTENCY_MODEL_RISCV_TSO`: RISC-V total store ordering.
