@@ -47,3 +47,30 @@ at run-time:
 * Only switching from a weaker to a stronger model is safe.
 * The stronger memory model affects all threads of a process, when running in user mode.
 * Forked processes derive their active memory model from their parents.
+
+User API via prctl
+==================
+
+Two prctl calls are defined to get/set the active memory consistency model:
+
+* prctl(PR_GET_MEMORY_CONSISTENCY_MODEL)
+
+    Returns the active memory consistency model for the calling process/thread.
+    If the architecture does not support dynamic memory consistency models,
+    then -1 is returned, and errno is set to EINVAL.
+
+* prctl(PR_SET_MEMORY_CONSISTENCY_MODEL, unsigned long new_model)
+
+    Switches the memory consistency model for the calling process/thread
+    to the given model. If the architecture does not support dynamic
+    memory consistency models, or does not support the provided model, or
+    does not allow to switch to the proveided model then -1 is returned,
+    and errno is set to EINVAL.
+
+Supported memory consistency models
+===================================
+
+This section defines the memory consistency models which are supported
+by the prctl interface.
+
+<none>
