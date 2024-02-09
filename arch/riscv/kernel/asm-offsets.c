@@ -80,6 +80,9 @@ void asm_offsets(void)
 #ifdef CONFIG_STACKPROTECTOR
 	OFFSET(TSK_STACK_CANARY, task_struct, stack_canary);
 #endif
+#ifdef CONFIG_DYNAMIC_MEMORY_CONSISTENCY_MODEL
+	OFFSET(TASK_MEM_CONSISTENCY_MODEL, task_struct, memory_consistency_model);
+#endif
 
 	DEFINE(PT_SIZE, sizeof(struct pt_regs));
 	OFFSET(PT_EPC, pt_regs, epc);

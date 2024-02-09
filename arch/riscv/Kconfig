@@ -23,6 +23,7 @@ config RISCV
 	select ARCH_HAS_DEBUG_VIRTUAL if MMU
 	select ARCH_HAS_DEBUG_VM_PGTABLE
 	select ARCH_HAS_DEBUG_WX
+	select ARCH_HAS_DYNAMIC_MEMORY_CONSISTENCY_MODEL if RISCV_ISA_SSDTSO
 	select ARCH_HAS_FORTIFY_SOURCE
 	select ARCH_HAS_GCOV_PROFILE_ALL
 	select ARCH_HAS_GIGANTIC_PAGE
@@ -483,6 +484,16 @@ config RISCV_ISA_C
 	  Adds "C" to the ISA subsets that the toolchain is allowed to emit
 	  when building Linux, which results in compressed instructions in the
 	  Linux binary.
+
+	  If you don't know what to do here, say Y.
+
+config RISCV_ISA_SSDTSO
+	bool "Ssdtso extension support for dynamic TSO memory ordering"
+	default y
+	help
+	  Adds support to dynamically detect the presence of the Ssdtso
+	  ISA-extension and allows user-space processes to activate/deactivate
+	  the TSO memory ordering model at run-time.
 
 	  If you don't know what to do here, say Y.
 
