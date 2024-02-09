@@ -132,6 +132,8 @@ static void hwprobe_isa_ext0(struct riscv_hwprobe *pair,
 			EXT_KEY(ZFHMIN);
 			EXT_KEY(ZFA);
 		}
+
+		EXT_KEY(SSDTSO);
 #undef EXT_KEY
 	}
 
