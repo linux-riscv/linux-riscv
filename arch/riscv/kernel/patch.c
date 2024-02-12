@@ -155,7 +155,6 @@ NOKPROBE_SYMBOL(__patch_insn_write);
 
 static int patch_insn_set(void *addr, u8 c, size_t len)
 {
-	size_t patched = 0;
 	size_t size;
 	int ret = 0;
 
@@ -163,11 +162,12 @@ static int patch_insn_set(void *addr, u8 c, size_t len)
 	 * __patch_insn_set() can only work on 2 pages at a time so call it in a
 	 * loop with len <= 2 * PAGE_SIZE.
 	 */
-	while (patched < len && !ret) {
-		size = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(addr + patched), len - patched);
-		ret = __patch_insn_set(addr + patched, c, size);
+	while (len && !ret) {
+		size = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(addr), len);
+		ret = __patch_insn_set(addr, c, size);
 
-		patched += size;
+		addr += size;
+		len -= size;
 	}
 
 	return ret;
@@ -190,7 +190,6 @@ NOKPROBE_SYMBOL(patch_text_set_nosync);
 
 int patch_insn_write(void *addr, const void *insn, size_t len)
 {
-	size_t patched = 0;
 	size_t size;
 	int ret = 0;
 
@@ -198,11 +197,13 @@ int patch_insn_write(void *addr, const void *insn, size_t len)
 	 * Copy the instructions to the destination address, two pages at a time
 	 * because __patch_insn_write() can only handle len <= 2 * PAGE_SIZE.
 	 */
-	while (patched < len && !ret) {
-		size = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(addr + patched), len - patched);
-		ret = __patch_insn_write(addr + patched, insn + patched, size);
+	while (len && !ret) {
+		size = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(addr), len);
+		ret = __patch_insn_write(addr, insn, size);
 
-		patched += size;
+		addr += size;
+		insn += size;
+		len -= size;
 	}
 
 	return ret;
