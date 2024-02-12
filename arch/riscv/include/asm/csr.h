@@ -542,6 +542,29 @@
 			      : "memory");			\
 })
 
+#define ALT_CSR_READ(csr)					\
+({								\
+	unsigned long __v;					\
+	__asm__ __volatile__ (					\
+		ALTERNATIVE("li %[v], 0", "csrr %[v], %[r]", 0,	\
+			    csr << 16 | RISCV_ISA_EXT_ZICSR, 1)	\
+		: [v] "=r" (__v)				\
+		: [r] "i" (csr)					\
+		: "memory");					\
+	__v;							\
+})
+
+#define ALT_CSR_WRITE(csr, val)					\
+({								\
+	unsigned long __v = (unsigned long)(val);		\
+	__asm__ __volatile__ (					\
+		ALTERNATIVE("nop", "csrw %[r], %[v]", 0,	\
+			    csr << 16 | RISCV_ISA_EXT_ZICSR, 1)	\
+		: : [r] "i" (csr), [v] "rK" (__v)		\
+		: "memory");					\
+	__v;							\
+})
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_RISCV_CSR_H */

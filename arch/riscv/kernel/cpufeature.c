@@ -969,6 +969,27 @@ void riscv_user_isa_enable(void)
 }
 
 #ifdef CONFIG_RISCV_ALTERNATIVE
+static bool riscv_cpufeature_probe_csr(u16 csr)
+{
+	bool ret = false;
+
+	switch (csr) {
+#define PROBE_CSR_CASE(_csr)			\
+	case _csr:				\
+		asm("1:	csrr zero, %[csr]\n"	\
+		    "	li %[r], 1\n"		\
+		    "2:\n"			\
+		    _ASM_EXTABLE(1b, 2b)	\
+			: [r] "+r" (ret)	\
+			: [csr] "i" (_csr));	\
+		break
+	PROBE_CSR_CASE(CSR_ENVCFG);
+#undef PROBE_CSR_CASE
+	}
+
+	return ret;
+}
+
 /*
  * Alternative patch sites consider 48 bits when determining when to patch
  * the old instruction sequence with the new. These bits are broken into a
@@ -989,6 +1010,8 @@ static bool riscv_cpufeature_patch_check(u16 id, u16 value)
 		return true;
 
 	switch (id) {
+	case RISCV_ISA_EXT_ZICSR:
+		return riscv_cpufeature_probe_csr(value);
 	case RISCV_ISA_EXT_ZICBOZ:
 		/*
 		 * Zicboz alternative applications provide the maximum
