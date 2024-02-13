@@ -72,7 +72,8 @@ static int rasd_map_imsic_pages(struct isbdm *ii)
 		ii->ifiles_per_cpu++;
 
 	/*
-	 * Map the 16 doorbell pages in the control BAR, plus the admin queue.
+	 * Map the 16 doorbell pages in the control BAR plus the admin queue
+	 * which lands on the last CPU.
 	 */
 	WARN_ON(RASD_AWQ_DRBL_PAGE(RASD_APP_DOORBELL_PAGES) != RASD_ADM_Q_DRBL);
 
@@ -105,7 +106,9 @@ static int rasd_map_imsic_pages(struct isbdm *ii)
 
 		iova += RASD_DRBL_PAGE_SIZE;
 		ifile++;
-		if (ifile == ii->ifiles_per_cpu) {
+
+		// Move to the next CPU's ifile. Letting the admin queue land on the last one.
+		if (ifile == ii->ifiles_per_cpu && cpu < ii->cpu_count - 1) {
 			ifile = 0;
 			cpu++;
 		}
