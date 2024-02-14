@@ -1686,7 +1686,7 @@ static int riscv_iommu_attach_paging_domain(struct iommu_domain *iommu_domain,
 	if (list_empty(&domain->bonds)) {
 		domain->numa_node = dev_to_node(iommu->dev);
 		domain->amo_enabled = !!(iommu->caps & RISCV_IOMMU_CAP_AMO);
-		domain->quirk_disable_cmpxchg = !(iommu->caps & RISCV_IOMMU_CAP_VERSION_REV_MASK);
+		domain->quirk_disable_cmpxchg = !domain->amo_enabled;
 	}
 
 	if (!domain->pgd_root) {
@@ -2185,7 +2185,7 @@ static int riscv_iommu_init_check(struct riscv_iommu_device *iommu)
 				  DMA_BIT_MASK(FIELD_GET(RISCV_IOMMU_CAP_PAS, iommu->caps)));
 
 	/* Check hardware quirks */
-	if ((iommu->caps & 0xff) == 0)
+	if ((iommu->caps & RISCV_IOMMU_CAP_S_SV57) == 0)
 		iommu->quirk_no_segment = true;
 
 	return 0;
