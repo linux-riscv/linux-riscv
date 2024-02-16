@@ -164,6 +164,16 @@ config SIFIVE_CCACHE_PMU
 	  for measuring whole-system L2/L3 cache performance using the perf
 	  events subsystem.
 
+config SIFIVE_ECACHE_PMU
+	tristate "SiFive Extensible Cache PMU"
+	depends on RISCV || COMPILE_TEST
+	depends on OF
+	help
+	  Support for the Extensible Cache performance monitoring unit (PMU) on
+	  SiFive platforms. The Composable Cache PMU provides up to 8 counters
+	  for measuring whole-system L2/L3 cache performance using the perf
+	  events subsystem.
+
 config THUNDERX2_PMU
 	tristate "Cavium ThunderX2 SoC PMU UNCORE"
 	depends on ARCH_THUNDER2 || COMPILE_TEST
