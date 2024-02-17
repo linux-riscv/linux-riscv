@@ -109,8 +109,14 @@ int arch_evlist__add_default_attrs(struct evlist *evlist,
 				   struct perf_event_attr *attrs,
 				   size_t nr_attrs);
 
+
 #define evlist__add_default_attrs(evlist, array) \
 	arch_evlist__add_default_attrs(evlist, array, ARRAY_SIZE(array))
+
+int arch_evlist__override_default_attrs(struct evlist *evlist, const char *pmu_name);
+
+#define evlist__override_default_attrs(evlist, pmu_name) \
+	arch_evlist__override_default_attrs(evlist, pmu_name)
 
 int arch_evlist__cmp(const struct evsel *lhs, const struct evsel *rhs);
 

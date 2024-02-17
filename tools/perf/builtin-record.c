@@ -4152,6 +4152,9 @@ int cmd_record(int argc, const char **argv)
 			goto out;
 	}
 
+	if (arch_evlist__override_default_attrs(rec->evlist, "cpu"))
+		goto out;
+
 	if (rec->opts.target.tid && !rec->opts.no_inherit_set)
 		rec->opts.no_inherit = true;
 

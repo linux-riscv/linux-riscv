@@ -7,6 +7,7 @@ from functools import lru_cache
 import json
 import metric
 import os
+import re
 import sys
 from typing import (Callable, Dict, Optional, Sequence, Set, Tuple)
 import collections
@@ -388,6 +389,11 @@ class JsonEvent:
     if arch_std:
       if arch_std.lower() in _arch_std_events:
         event = _arch_std_events[arch_std.lower()].event
+        if eventcode:
+          event = re.sub(r'event=\d+', f'event={llx(eventcode)}', event)
+        if configcode:
+          event = re.sub(r'config=\d+', f'event={llx(configcode)}', event)
+
         # Copy from the architecture standard event to self for undefined fields.
         for attr, value in _arch_std_events[arch_std.lower()].__dict__.items():
           if hasattr(self, attr) and not getattr(self, attr):

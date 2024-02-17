@@ -1672,6 +1672,9 @@ int cmd_top(int argc, const char **argv)
 			goto out_delete_evlist;
 	}
 
+	if (arch_evlist__override_default_attrs(top.evlist, "cpu"))
+		goto out_delete_evlist;
+
 	status = evswitch__init(&top.evswitch, top.evlist, stderr);
 	if (status)
 		goto out_delete_evlist;

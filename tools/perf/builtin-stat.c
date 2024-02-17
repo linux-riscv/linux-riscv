@@ -2713,6 +2713,8 @@ int cmd_stat(int argc, const char **argv)
 
 	if (add_default_attributes())
 		goto out;
+	if (arch_evlist__override_default_attrs(evsel_list, "cpu"))
+		goto out;
 
 	if (stat_config.cgroup_list) {
 		if (nr_cgroups > 0) {
