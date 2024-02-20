@@ -232,7 +232,7 @@ irqreturn_t daffy_handle_irq(int irq, void *data)
 	cause_addr = dpa->regs + DPA_MSIX_CAUSE_BASE + vec * sizeof(u64);
 	cause = readq(cause_addr);
 	writeq(cause, cause_addr);
-	dev_info(dpa->dev, "%s: Received MSI interrupt %d with cause %llu\n",
+	dev_dbg(dpa->dev, "%s: Received MSI interrupt %d with cause %llu\n",
 		__func__, vec, cause);
 
 	/*
@@ -242,10 +242,20 @@ irqreturn_t daffy_handle_irq(int irq, void *data)
 	 */
 	switch (vec) {
 	case DPA_MSI_FW_QUEUE_H2D:
-		daffy_process_host_queue(dpa);
+		if ((cause & BIT_ULL(FW_QUEUE_H2D_PACKET_COMPLETE)) != 0) {
+			daffy_process_host_queue(dpa);
+		}
+		if ((cause & BIT_ULL(FW_QUEUE_H2D_BAD_PACKET)) != 0) {
+			dev_warn(dpa->dev, "bad packet in h2d queue\n");
+		}
 		return IRQ_HANDLED;
 	case DPA_MSI_FW_QUEUE_D2H:
-		daffy_process_device_queue(dpa);
+		if ((cause & BIT_ULL(FW_QUEUE_D2H_NEW_PACKET)) != 0) {
+			daffy_process_device_queue(dpa);
+		}
+		if ((cause & BIT_ULL(FW_QUEUE_D2H_OVERFLOW)) != 0) {
+			dev_warn(dpa->dev, "d2h queue overflow\n");
+		}
 		return IRQ_HANDLED;
 	default:
 		dev_warn(dpa->dev, "%s: MSI vector %d received but not handled",
