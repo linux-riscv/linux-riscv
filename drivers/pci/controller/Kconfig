@@ -264,6 +264,17 @@ config PCI_RCAR_GEN2
 	  There are 3 internal PCI controllers available with a single
 	  built-in EHCI/OHCI host controller present on each one.
 
+config PCIE_RIVOS_PCS_STUB
+	bool "Rivos PCS stub"
+	depends on OF
+	depends on PCI_MSI
+	depends on RISCV
+	help
+	  This selects a stub PCIe host bridge controller configured via kernel
+	  command line parameters. This is intended for hooking up a Rivos PCS
+	  instance that has been placed at static addresses without going
+	  through the hassle of adjusting DT or ACPI.
+
 config PCIE_ROCKCHIP
 	bool
 	depends on PCI
