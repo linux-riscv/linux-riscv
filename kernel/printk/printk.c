@@ -47,6 +47,9 @@
 #include <linux/sched/clock.h>
 #include <linux/sched/debug.h>
 #include <linux/sched/task_stack.h>
+#ifdef CONFIG_PRINT_INSTRET
+#include <asm/csr.h>
+#endif
 
 #include <linux/uaccess.h>
 #include <asm/sections.h>
@@ -1317,12 +1320,21 @@ static size_t print_syslog(unsigned int level, char *buf)
 	return sprintf(buf, "<%u>", level);
 }
 
-static size_t print_time(u64 ts, char *buf)
+static size_t print_time(u64 ts,
+#ifdef CONFIG_PRINT_INSTRET
+			 u64 iret,
+#endif
+			 char *buf)
 {
 	unsigned long rem_nsec = do_div(ts, 1000000000);
 
+#ifdef CONFIG_PRINT_INSTRET
+	return sprintf(buf, "[%5lu.%06lu %x %d]",
+		       (unsigned long)ts, rem_nsec / 1000, (u32)iret, smp_processor_id());
+#else
 	return sprintf(buf, "[%5lu.%06lu]",
 		       (unsigned long)ts, rem_nsec / 1000);
+#endif
 }
 
 #ifdef CONFIG_PRINTK_CALLER
@@ -1347,7 +1359,11 @@ static size_t info_print_prefix(const struct printk_info  *info, bool syslog,
 		len = print_syslog((info->facility << 3) | info->level, buf);
 
 	if (time)
-		len += print_time(info->ts_nsec, buf + len);
+		len += print_time(info->ts_nsec,
+#ifdef CONFIG_PRINT_INSTRET
+				  info->ts_iret,
+#endif
+				  buf + len);
 
 	len += print_caller(info->caller_id, buf + len);
 
@@ -2163,6 +2179,9 @@ int vprintk_store(int facility, int level,
 	u16 text_len;
 	int ret = 0;
 	u64 ts_nsec;
+#ifdef CONFIG_PRINT_INSTRET
+	u64 ts_iret;
+#endif
 
 	if (!printk_enter_irqsave(recursion_ptr, irqflags))
 		return 0;
@@ -2174,6 +2193,9 @@ int vprintk_store(int facility, int level,
 	 * timestamp with respect to the caller.
 	 */
 	ts_nsec = local_clock();
+#ifdef CONFIG_PRINT_INSTRET
+	ts_iret = csr_read(CSR_INSTRET);
+#endif
 
 	caller_id = printk_caller_id();
 
@@ -2243,6 +2265,9 @@ int vprintk_store(int facility, int level,
 	r.info->level = level & 7;
 	r.info->flags = flags & 0x1f;
 	r.info->ts_nsec = ts_nsec;
+#ifdef CONFIG_PRINT_INSTRET
+	r.info->ts_iret = ts_iret;
+#endif
 	r.info->caller_id = caller_id;
 	if (dev_info)
 		memcpy(&r.info->dev_info, dev_info, sizeof(r.info->dev_info));
