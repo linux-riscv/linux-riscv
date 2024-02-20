@@ -29,7 +29,7 @@
 
 #include "duc_structs.h"
 
-#define DPA_FW_QUEUE_SIZE 16
+#define DPA_FW_QUEUE_SIZE 64
 
 struct dpa_fwq {
 	struct daffy_queue_desc desc;
