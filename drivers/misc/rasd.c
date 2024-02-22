@@ -96,20 +96,24 @@ static irqreturn_t rasd_irq_thread(int irq, void *data)
 
 static int rasd_request_irqs(struct pci_dev *pdev)
 {
-	int ret, irq, i;
+	int ret, nvec, irq, i;
 	struct device *dev = &pdev->dev;
 	struct rasd *ra = (struct rasd *)pci_get_drvdata(pdev);
 
 	/* FIXME: Can this leak/does devm sweep this? */
-	ret = pci_alloc_irq_vectors(pdev,
-				    1, 2,
+	nvec = pci_alloc_irq_vectors(pdev,
+				    1, RASD_IRQ_COUNT,
 				    PCI_IRQ_MSI | PCI_IRQ_MSIX);
-	if (ret < 0) {
+	if (nvec < 0) {
 		dev_err(dev, "Failed to allocate MSI (%d)\n", ret);
-		return ret;
+		return nvec;
 	}
 
 	for (i = 0; i < RASD_IRQ_COUNT; i++) {
+		if (i >= nvec) {
+			ra->irqs[i] = -1;
+			continue;
+		}
 		irq = pci_irq_vector(pdev, i);
 		if (irq < 0) {
 			dev_err(dev, "IRQ vector invalid (%d)\n", irq);
