@@ -22,6 +22,7 @@
  * huge_pte_clear()
  * huge_ptep_get_and_clear()
  * huge_ptep_set_access_flags()
+ * huge_ptep_set_wrprotect()
  */
 
 pte_t huge_ptep_get(pte_t *ptep)
@@ -229,4 +230,24 @@ int huge_ptep_set_access_flags(struct vm_area_struct *vma,
 	set_contptes(mm, addr, ptep, pte, ncontig, pgsize);
 
 	return 1;
+}
+
+void huge_ptep_set_wrprotect(struct mm_struct *mm,
+			     unsigned long addr, pte_t *ptep)
+{
+	int ncontig;
+	size_t pgsize;
+	pte_t pte;
+
+	if (!pte_cont(ptep_get(ptep))) {
+		ptep_set_wrprotect(mm, addr, ptep);
+		return;
+	}
+
+	ncontig = arch_contpte_get_num_contig(mm, addr, ptep, 0, &pgsize);
+
+	pte = get_clear_contig_flush(mm, addr, ptep, pgsize, ncontig);
+	pte = pte_wrprotect(pte);
+
+	set_contptes(mm, addr, ptep, pte, ncontig, pgsize);
 }
