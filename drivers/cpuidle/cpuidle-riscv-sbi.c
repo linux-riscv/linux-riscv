@@ -363,6 +363,7 @@ static int sbi_cpuidle_pd_power_off(struct generic_pm_domain *pd)
 {
 	struct genpd_power_state *state = &pd->states[pd->state_idx];
 	u32 *pd_state;
+	int ret;
 
 	if (!state->data)
 		return 0;
@@ -370,11 +371,28 @@ static int sbi_cpuidle_pd_power_off(struct generic_pm_domain *pd)
 	if (!sbi_cpuidle_pd_allow_domain_state)
 		return -EBUSY;
 
+	ret = cpu_cluster_pm_enter();
+	if (ret)
+		return ret;
+
 	/* OSI mode is enabled, set the corresponding domain state. */
 	pd_state = state->data;
 	sbi_set_domain_state(*pd_state);
 
 	return 0;
+}
+
+static int sbi_cpuidle_pd_power_on(struct generic_pm_domain *pd)
+{
+	struct genpd_power_state *state = &pd->states[pd->state_idx];
+
+	if (!state->data)
+		return 0;
+
+	if (!sbi_cpuidle_pd_allow_domain_state)
+		return -EBUSY;
+
+	return cpu_cluster_pm_exit();
 }
 
 struct sbi_pd_provider {
@@ -402,10 +420,12 @@ static int sbi_pd_init(struct device_node *np)
 	pd->flags |= GENPD_FLAG_IRQ_SAFE | GENPD_FLAG_CPU_DOMAIN;
 
 	/* Allow power off when OSI is available. */
-	if (sbi_cpuidle_use_osi)
+	if (sbi_cpuidle_use_osi) {
 		pd->power_off = sbi_cpuidle_pd_power_off;
-	else
+		pd->power_on = sbi_cpuidle_pd_power_on;
+	} else {
 		pd->flags |= GENPD_FLAG_ALWAYS_ON;
+	}
 
 	/* Use governor for CPU PM domains if it has some states to manage. */
 	pd_gov = pd->states ? &pm_domain_cpu_gov : NULL;
