@@ -231,6 +231,7 @@ config ARCH_MMAP_RND_COMPAT_BITS_MAX
 # set if we run in machine mode, cleared if we run in supervisor mode
 config RISCV_M_MODE
 	bool
+	select NOMMU
 	default !MMU
 
 # set if we are running in S-mode and can use SBI calls
@@ -245,6 +246,13 @@ config MMU
 	help
 	  Select if you want MMU-based virtualised addressing space
 	  support by paged memory management. If unsure, say 'Y'.
+
+config NOMMU
+	depends on !MMU
+	bool "NOMMU kernel (DEPRECATED)"
+	help
+	  NOMMU kernel is deprecated and is scheduled for removal by
+	  the beginning of 2027.
 
 config PAGE_OFFSET
 	hex

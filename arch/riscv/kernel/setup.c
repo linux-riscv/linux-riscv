@@ -295,6 +295,10 @@ void __init setup_arch(char **cmdline_p)
 	riscv_set_dma_cache_alignment();
 
 	riscv_user_isa_enable();
+
+#if !defined(CONFIG_MMU)
+	pr_err("RISC-V NOMMU support is deprecated and scheduled for removal by the beginning of 2027\n");
+#endif
 }
 
 bool arch_cpu_is_hotpluggable(int cpu)
