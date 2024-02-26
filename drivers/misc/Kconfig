@@ -574,6 +574,17 @@ config NSM
 	  To compile this driver as a module, choose M here.
 	  The module will be called nsm.
 
+config RIVOS_RASD
+	tristate "Rivos RASD card support"
+	default n
+	help
+	  Support for the Rivos Accelerator Super Duper card.
+
+config RIVOS_ROT
+	tristate "Rivos Root of Trust PCI driver"
+	depends on PCI
+	select PCI_DOE
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
