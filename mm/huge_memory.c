@@ -878,7 +878,10 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		goto release;
 	}
 
-	clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+	if (!(IS_ENABLED(CONFIG_MMAP_ALLOW_UNINITIALIZED) &&
+	      (vma->vm_flags & VM_MAP_UNINITIALIZED))) {
+		clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+	}
 	/*
 	 * The memory barrier inside __folio_mark_uptodate makes sure that
 	 * clear_huge_page writes become visible before the set_pmd_at()

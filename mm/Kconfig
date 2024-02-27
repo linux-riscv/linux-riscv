@@ -370,7 +370,7 @@ config COMPAT_BRK
 
 config MMAP_ALLOW_UNINITIALIZED
 	bool "Allow mmapped anonymous memory to be uninitialized"
-	depends on EXPERT && !MMU
+	depends on EXPERT
 	default n
 	help
 	  Normally, and according to the Linux spec, anonymous memory obtained
