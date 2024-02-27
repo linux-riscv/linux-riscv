@@ -1,6 +1,6 @@
 #!/bin/bash
 
-git clone https://github.com/libhugetlbfs/libhugetlbfs
+git clone https://github.com/libhugetlbfs/libhugetlbfs -b 2.23
 cd libhugetlbfs
 patch -p1 < ../0003-Disable-hugepage-backed-malloc-if-__morecore-is-not-.patch
 make -j8
