@@ -194,6 +194,24 @@ config PCI_HYPERV
 	  The PCI device frontend driver allows the kernel to import arbitrary
 	  PCI devices from a PCI backend to support PCI driver domains.
 
+config PCI_CAP_CACHE
+	bool "PCI capability cache"
+	depends on PCI
+	help
+	  When locating a PCI (extended) capabilities,  the kernel scans over
+	  the capability list, searching for the capability in question.
+	  Whenever a capability is looked up, the kernel normally traverses the
+	  list from the start, even if the respective capability has been
+	  accessed previously.
+
+	  This option enables caching of capability list information
+	  so subsequent capability lookups can be satisfied from the cache,
+	  thus avoiding redundant accesses to PCI configuration space. The
+	  devices for which to use the cache are specified by the
+	  'pci_cap_cache.devices' kernel parameter, which takes a
+	  comma-separated list of segment:bus:device.function specifiers, e.g.
+	  'pci_cap_cache.devices=00ff:00:00.0,00ff:01:00.0'
+
 config PCI_DYNAMIC_OF_NODES
 	bool "Create Device tree nodes for PCI devices"
 	depends on OF_IRQ
