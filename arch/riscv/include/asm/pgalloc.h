@@ -8,6 +8,7 @@
 #define _ASM_RISCV_PGALLOC_H
 
 #include <linux/mm.h>
+#include <asm/sbi.h>
 #include <asm/tlb.h>
 
 #ifdef CONFIG_MMU
@@ -90,10 +91,10 @@ static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 
 static inline void riscv_tlb_remove_ptdesc(struct mmu_gather *tlb, void *pt)
 {
-	if (riscv_use_ipi_for_rfence())
-		tlb_remove_page_ptdesc(tlb, pt);
-	else
+	if (riscv_use_sbi_for_rfence())
 		tlb_remove_ptdesc(tlb, pt);
+	else
+		tlb_remove_page_ptdesc(tlb, pt);
 }
 
 #define pud_free pud_free
