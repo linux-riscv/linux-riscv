@@ -1001,6 +1001,9 @@ config IDLE_PAGE_TRACKING
 config ARCH_HAS_CACHE_LINE_SIZE
 	bool
 
+config ARCH_HAS_CONTPTE
+	bool
+
 config ARCH_HAS_CURRENT_STACK_POINTER
 	bool
 	help
