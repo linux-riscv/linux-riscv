@@ -341,9 +341,10 @@ static inline void __sync_cache_and_tags(pte_t pte, unsigned int nr_pages)
 		mte_sync_tags(pte, nr_pages);
 }
 
-static inline void set_ptes(struct mm_struct *mm,
-			    unsigned long __always_unused addr,
-			    pte_t *ptep, pte_t pte, unsigned int nr)
+static inline void __set_ptes(struct mm_struct *mm,
+			      unsigned long __always_unused addr,
+			      pte_t *ptep, pte_t pte, unsigned int nr,
+			      unsigned long pgsize)
 {
 	page_table_check_ptes_set(mm, ptep, pte, nr);
 	__sync_cache_and_tags(pte, nr);
@@ -354,10 +355,15 @@ static inline void set_ptes(struct mm_struct *mm,
 		if (--nr == 0)
 			break;
 		ptep++;
-		pte_val(pte) += PAGE_SIZE;
+		pte_val(pte) += pgsize;
 	}
 }
-#define set_ptes set_ptes
+
+#define set_ptes(mm, addr, ptep, pte, nr)				\
+			__set_ptes(mm, addr, ptep, pte, nr, PAGE_SIZE)
+
+#define set_contptes(mm, addr, ptep, pte, nr, pgsize)			\
+			__set_ptes(mm, addr, ptep, pte, nr, pgsize)
 
 /*
  * Huge pte definitions.
