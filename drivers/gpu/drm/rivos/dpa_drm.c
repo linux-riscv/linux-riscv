@@ -517,7 +517,7 @@ int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause)
 	return 0;
 }
 
-#define KILL_TIMEOUT_MS	5000
+#define KILL_TIMEOUT_MS	60000
 
 static int dpa_kill_process(struct dpa_process *p)
 {
