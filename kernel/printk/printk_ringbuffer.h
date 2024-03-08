@@ -15,6 +15,9 @@
 struct printk_info {
 	u64	seq;		/* sequence number */
 	u64	ts_nsec;	/* timestamp in nanoseconds */
+#ifdef CONFIG_PRINT_INSTRET
+	u64	ts_iret;	/* timestamp in instructions */
+#endif
 	u16	text_len;	/* length of text message */
 	u8	facility;	/* syslog facility */
 	u8	flags:5;	/* internal record flags */

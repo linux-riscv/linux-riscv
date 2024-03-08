@@ -22,6 +22,59 @@
 
 #include "../kernel/head.h"
 
+
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+static void dump_ptes_for_addr(unsigned long addr)
+{
+	pgd_t *pgd_k;
+	pud_t *pud_k;
+	p4d_t *p4d_k;
+	pmd_t *pmd_k;
+	pte_t *pte_k;
+	int index;
+	unsigned long pfn;
+
+
+	pfn = csr_read(CSR_SATP) & SATP_PPN;
+	printk("----\nAddress %016lx:  satp -> %016lx (virt %px)\n", addr, pfn, pfn_to_virt(pfn));
+	index = pgd_index(addr);
+	pgd_k = (pgd_t *)pfn_to_virt(pfn) + index;
+
+	printk("PGD-L4[0x%03lx]		at %px =%016lx\n", pgd_index(addr), pgd_k, pgd_val(*pgd_k));
+	if (!pgd_present(*pgd_k)) {
+		printk("Done at PGD/L4");
+		return;
+	}
+
+	p4d_k = p4d_offset(pgd_k, addr);
+	printk(" P4D-L3[0x%03lx]*		at %px =%016lx\n", p4d_index(addr), p4d_k, p4d_val(*p4d_k));
+	if (!p4d_present(*p4d_k)) {
+		printk("Done at P4D/L3*");
+		return;
+	}
+
+	pud_k = pud_offset(p4d_k, addr);
+	printk("  PUD-L2[0x%03lx]		at %px =%016lx\n", pud_index(addr), pud_k, pud_val(*pud_k));
+	if (!pud_present(*pud_k)) {
+		printk("Done at PUD/L2");
+		return;
+	}
+
+	pmd_k = pmd_offset(pud_k, addr);
+	printk("   PMD-L1[0x%03lx]		at %px =%016lx\n", pmd_index(addr), pmd_k, pmd_val(*pmd_k));
+	if (!pmd_present(*pmd_k)) {
+		printk("Done at PMD/L1");
+		return;
+	}
+
+	pte_k = pte_offset_kernel(pmd_k, addr);
+	printk("    PTE-L0[0x%03lx]	at %px =%016lx\n", pte_index(addr), pte_k, pte_val(*pte_k));
+	if (!pte_present(*pte_k)) {
+		printk("Done at PTE/L0");
+	}
+}
+#endif
+
 static void die_kernel_fault(const char *msg, unsigned long addr,
 		struct pt_regs *regs)
 {
@@ -29,6 +82,10 @@ static void die_kernel_fault(const char *msg, unsigned long addr,
 
 	pr_alert("Unable to handle kernel %s at virtual address " REG_FMT "\n", msg,
 		addr);
+
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+	dump_ptes_for_addr(addr);
+#endif
 
 	bust_spinlocks(0);
 	die(regs, "Oops");
@@ -70,6 +127,11 @@ static inline void mm_fault_error(struct pt_regs *regs, unsigned long addr, vm_f
 			no_context(regs, addr);
 			return;
 		}
+
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+		printk("*** OOM @%lx:\n", addr);
+		dump_ptes_for_addr(addr);
+#endif
 		pagefault_out_of_memory();
 		return;
 	} else if (fault & (VM_FAULT_SIGBUS | VM_FAULT_HWPOISON | VM_FAULT_HWPOISON_LARGE)) {
@@ -78,6 +140,11 @@ static inline void mm_fault_error(struct pt_regs *regs, unsigned long addr, vm_f
 			no_context(regs, addr);
 			return;
 		}
+
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+		printk("*** SIGBUS @%lx:\n", addr);
+		dump_ptes_for_addr(addr);
+#endif
 		do_trap(regs, SIGBUS, BUS_ADRERR, addr);
 		return;
 	}
@@ -93,6 +160,10 @@ bad_area_nosemaphore(struct pt_regs *regs, int code, unsigned long addr)
 	 */
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+		printk("*** SIGSEGV @%lx:\n", addr);
+		dump_ptes_for_addr(addr);
+#endif
 		do_trap(regs, SIGSEGV, code, addr);
 		return;
 	}
@@ -278,6 +349,15 @@ void handle_page_fault(struct pt_regs *regs)
 	}
 
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
+
+#ifdef CONFIG_RISCV_FAULT_PTE_DUMP
+	/* Dump PTEs for the first few faults, if first > 0: */
+	static int first = 0;
+	if (first) {
+		dump_ptes_for_addr(addr);
+		first--;
+	}
+#endif
 
 	if (cause == EXC_STORE_PAGE_FAULT)
 		flags |= FAULT_FLAG_WRITE;
