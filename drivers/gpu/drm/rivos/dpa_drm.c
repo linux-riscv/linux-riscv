@@ -519,6 +519,35 @@ int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause)
 	return 0;
 }
 
+/*
+ * Requests that DUC initiate a kill sequence. DUC is guaranteed not to access
+ * user pages after receiving this command, however PEs are not guaranteed to
+ * have stopped accessing user pages until the DUC sends a kill complete
+ * notification back.
+ */
+static int dpa_request_kill(struct dpa_process *p)
+{
+	int ret = 0;
+
+	mutex_lock(&p->lock);
+	if (p->killed)
+		goto out;
+	ret = daffy_kill_pasid_cmd(p->dev, p->pasid);
+	if (ret == -EINPROGRESS) {
+		ret = 0;
+	} else if (ret == 0) {
+		/* No async kill completion expected. */
+		complete(&p->kill_done);
+	} else {
+		goto out;
+	}
+	p->killed = true;
+out:
+	mutex_unlock(&p->lock);
+
+	return ret;
+}
+
 #define KILL_TIMEOUT_MS	60000
 
 static int dpa_kill_process(struct dpa_process *p)
@@ -526,8 +555,8 @@ static int dpa_kill_process(struct dpa_process *p)
 	unsigned long timeout = msecs_to_jiffies(KILL_TIMEOUT_MS);
 	int ret;
 
-	ret = daffy_kill_pasid_cmd(p->dev, p->pasid);
-	if (ret != -EINPROGRESS)
+	ret = dpa_request_kill(p);
+	if (ret < 0)
 		return ret;
 
 	ret = wait_for_completion_timeout(&p->kill_done, timeout);
@@ -538,6 +567,72 @@ static int dpa_kill_process(struct dpa_process *p)
 
 	return 0;
 }
+
+/* Returns if the VA range overlaps with any pinned queue or signal pages. */
+static bool dpa_range_is_pinned(struct dpa_process *p, unsigned long start,
+				unsigned long end)
+{
+	struct dpa_queue *q;
+	unsigned long flags;
+	bool found = false;
+
+	mutex_lock(&p->lock);
+	list_for_each_entry(q,  &p->queue_list, list) {
+		if (q->user_addr < end &&
+		    q->user_addr + q->num_pages * PAGE_SIZE > start) {
+			found = true;
+			break;
+		}
+	}
+	if (p->notification_queue) {
+		q = p->notification_queue;
+		if (q->user_addr < end &&
+		    q->user_addr + q->num_pages * PAGE_SIZE > start) {
+			found = true;
+		}
+	}
+	mutex_unlock(&p->lock);
+
+	spin_lock_irqsave(&p->signals.lock, flags);
+	if (p->signals.num_pages > 0 &&
+	    p->signals.user_addr < end &&
+	    p->signals.user_addr + p->signals.num_pages * PAGE_SIZE > start) {
+		found = true;
+	}
+	spin_unlock_irqrestore(&p->signals.lock, flags);
+
+	return found;
+}
+
+static void dpa_mmu_release(struct mmu_notifier *subscription,
+			    struct mm_struct *mm)
+{
+	struct dpa_process *p =
+		container_of(subscription, struct dpa_process, mmu_notifier);
+
+	WARN_ON(dpa_request_kill(p));
+}
+
+static int dpa_mmu_invalidate_range(struct mmu_notifier *subscription,
+				    const struct mmu_notifier_range *range)
+{
+	struct dpa_process *p =
+		container_of(subscription, struct dpa_process, mmu_notifier);
+
+	if (!mmu_notifier_range_blockable(range))
+		return -EAGAIN;
+
+	if (unlikely(dpa_range_is_pinned(p, range->start, range->end))) {
+		return dpa_request_kill(p);
+	}
+
+	return 0;
+}
+
+static const struct mmu_notifier_ops dpa_mmu_notifier_ops = {
+	.release = dpa_mmu_release,
+	.invalidate_range_start = dpa_mmu_invalidate_range,
+};
 
 static void dpa_release_process(struct kref *ref)
 {
@@ -577,6 +672,7 @@ static void dpa_release_process(struct kref *ref)
 		unpin_user_pages(p->signals.pages, p->signals.num_pages);
 
 	iommu_sva_unbind_device(p->sva);
+	mmu_notifier_unregister(&p->mmu_notifier, p->mm);
 
 	mutex_lock(&dpa->dpa_processes_lock);
 	list_del(&p->dpa_process_list);
@@ -619,6 +715,13 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 	dpa_app->dev = dpa;
 
+	dpa_app->mm = current->mm;
+	dpa_app->mmu_notifier.ops = &dpa_mmu_notifier_ops;
+	err = mmu_notifier_register(&dpa_app->mmu_notifier, dpa_app->mm);
+	if (err < 0) {
+		goto free_proc;
+	}
+
 	/* Bind device and allocate PASID */
 	dpa_dev = dpa_app->dev->dev;
 	dpa_app->sva = iommu_sva_bind_device(dpa_dev, current->mm);
@@ -626,7 +729,7 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 		dev_err(dpa_dev, "%s: SVA bind device failed: %ld\n", __func__,
 			PTR_ERR(dpa_app->sva));
 		err = -ENODEV;
-		goto free_proc;
+		goto unregister_mm;
 	}
 	dpa_app->pasid = iommu_sva_get_pasid(dpa_app->sva);
 	if (dpa_app->pasid == IOMMU_PASID_INVALID) {
@@ -665,6 +768,8 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 
 unbind_sva:
 	iommu_sva_unbind_device(dpa_app->sva);
+unregister_mm:
+	mmu_notifier_unregister(&dpa_app->mmu_notifier, dpa_app->mm);
 free_proc:
 	kfree(dpa_app);
 out_unlock:

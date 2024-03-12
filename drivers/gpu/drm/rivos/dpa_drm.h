@@ -24,6 +24,7 @@
 #include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/kernel.h>
+#include <linux/mmu_notifier.h>
 #include <linux/pci.h>
 #include <linux/wait.h>
 
@@ -129,7 +130,11 @@ struct dpa_process {
 	u32 doorbell_offset;
 	u32 doorbell_size;
 
+	bool killed;
 	struct completion kill_done;
+
+	struct mm_struct *mm;
+	struct mmu_notifier mmu_notifier;
 };
 
 static inline struct dpa_device *drm_to_dpa_dev(struct drm_device *ddev)
