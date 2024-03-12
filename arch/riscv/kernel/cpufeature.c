@@ -481,6 +481,10 @@ static void __init riscv_parse_isa_string(unsigned long *this_hwcap, struct risc
 
 		if (unlikely(ext_err))
 			continue;
+
+		for (int i = 0; i < riscv_isa_ext_count; i++)
+			match_isa_ext(&riscv_isa_ext[i], ext, ext_end, isainfo);
+
 		if (!ext_long) {
 			int nr = tolower(*ext) - 'a';
 
@@ -488,9 +492,6 @@ static void __init riscv_parse_isa_string(unsigned long *this_hwcap, struct risc
 				*this_hwcap |= isa2hwcap[nr];
 				set_bit(nr, isainfo->isa);
 			}
-		} else {
-			for (int i = 0; i < riscv_isa_ext_count; i++)
-				match_isa_ext(&riscv_isa_ext[i], ext, ext_end, isainfo);
 		}
 	}
 }
