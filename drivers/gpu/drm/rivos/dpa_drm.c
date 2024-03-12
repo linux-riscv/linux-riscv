@@ -273,6 +273,15 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 	return 0;
 }
 
+static void dpa_wake_all_signals(struct dpa_signal_state *ss)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ss->wqs); i++) {
+		wake_up_interruptible_all(&ss->wqs[i]);
+	}
+}
+
 #define SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct duc_signal))
 
 static bool check_signals(struct dpa_signal_state *ss, u16 *ids, u32 num)
@@ -386,6 +395,11 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		 */
 		if (check_signals(&p->signals, args->signal_ids, args->num_signals))
 			break;
+
+		if (p->killed) {
+			ret = -EIO;
+			goto done;
+		}
 
 		if (signal_pending(current)) {
 			ret = -ERESTARTSYS;
@@ -554,6 +568,7 @@ static int dpa_request_kill(struct dpa_process *p)
 		goto out;
 	}
 	p->killed = true;
+	dpa_wake_all_signals(&p->signals);
 out:
 	mutex_unlock(&p->lock);
 
