@@ -80,6 +80,8 @@ struct dpa_device {
 
 /* State of a single queue. */
 struct dpa_queue {
+	unsigned long user_addr;
+
 	/* Queue ID assigned by the DUC. */
 	u32 id;
 
@@ -91,6 +93,7 @@ struct dpa_queue {
 };
 
 struct dpa_signal_state {
+	unsigned long user_addr;
 	struct page *pages[DPA_DRM_MAX_SIGNAL_PAGES];
 	unsigned int num_pages;
 	unsigned int num_waiters;

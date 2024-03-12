@@ -88,6 +88,7 @@ static int dpa_pin_queue_pages(struct dpa_queue *q, u64 base_address,
 		return -EINVAL;
 	}
 	q->num_pages = num_pages;
+	q->user_addr = base_address;
 
 	return 0;
 }
@@ -244,6 +245,7 @@ static int dpa_drm_ioctl_set_signal_pages(struct drm_device *dev, void *data,
 
 	spin_lock_irqsave(&p->signals.lock, flags);
 	memcpy(p->signals.pages, pages, num_pages * sizeof(*p->signals.pages));
+	p->signals.user_addr = args->va;
 	p->signals.num_pages = num_pages;
 	spin_unlock_irqrestore(&p->signals.lock, flags);
 
