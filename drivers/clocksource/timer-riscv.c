@@ -35,9 +35,10 @@ static bool riscv_timer_cannot_wake_cpu;
 static void riscv_clock_event_stop(void)
 {
 	if (static_branch_likely(&riscv_sstc_available)) {
-		csr_write(CSR_STIMECMP, ULONG_MAX);
 		if (IS_ENABLED(CONFIG_32BIT))
 			csr_write(CSR_STIMECMPH, ULONG_MAX);
+		else
+			csr_write(CSR_STIMECMP, ULONG_MAX);
 	} else {
 		sbi_set_timer(U64_MAX);
 	}
