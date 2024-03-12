@@ -484,8 +484,17 @@ static long dpa_drm_ioctl(struct file *filp,
 			  unsigned int cmd, unsigned long arg)
 {
 	struct drm_file *file_priv = filp->private_data;
+	struct dpa_process *p = file_priv->driver_priv;
 	struct drm_device *dev;
 	long ret;
+
+	/*
+	 * No need to take p->lock; it's ok to race with dpa_request_kill()
+	 * since DUC will reject commands to a processes with an outstanding
+	 * kill request.
+	 */
+	if (p->killed)
+		return -EIO;
 
 	dev = file_priv->minor->dev;
 	ret = pm_runtime_get_sync(dev->dev);
