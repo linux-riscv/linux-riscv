@@ -71,6 +71,9 @@ struct riscv_iommu_device {
 	struct rb_root eps;
 	struct mutex eps_mutex;			/* serialize eps updates */
 
+	/* Clustered IOMMUs, sharing the same device directory */
+	struct list_head cluster;
+
 	/* I/O page fault queue */
 	struct iopf_queue *pq_work;
 

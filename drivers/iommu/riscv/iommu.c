@@ -1126,6 +1126,21 @@ static int riscv_iommu_ddt_alloc(struct riscv_iommu_device *iommu)
 	}
 
 	if (!iommu->ddt_root) {
+		/* In bond mode, reuse shared DDT for IOMMU managed segment. */
+		/* FIXME: all IOMMUs do share the same segment for now. */
+		// module props.
+		static struct riscv_iommu_device *lead = NULL;
+		if (lead == NULL) {
+			lead = iommu;
+		} else {
+			/* TODO: transition to riscv_iommu_directory object */
+			list_add(&iommu->cluster, &lead->cluster);
+			iommu->ddt_root = lead->ddt_root;
+			iommu->ddt_phys = lead->ddt_phys;
+		}
+	}
+
+	if (!iommu->ddt_root) {
 		iommu->ddt_root = (u64 *)riscv_iommu_get_pages(iommu, 0);
 		iommu->ddt_phys = __pa(iommu->ddt_root);
 	}
@@ -1163,51 +1178,117 @@ struct riscv_iommu_domain {
 /* Send IOTLB.INVAL for whole address space for ranges larger than 2MB */
 #define RISCV_IOMMU_IOTLB_INVAL_LIMIT	(512 * PAGE_SIZE)
 
+/* Send IOMMU command to all queues in the iommu cluster */
+static void riscv_iommu_send(struct riscv_iommu_device *iommu,
+			     struct riscv_iommu_command *cmd,
+			     unsigned int timeout_us)
+{
+	struct riscv_iommu_device *lead = iommu;
+
+	do {
+		riscv_iommu_queue_send(&iommu->cmdq, cmd, timeout_us);
+		iommu = list_next_entry(iommu, cluster);
+	} while(lead != iommu);
+}
+
 static void riscv_iommu_iotlb_inval(struct riscv_iommu_domain *domain,
 				    unsigned long start, unsigned long end)
 {
-	struct riscv_iommu_bond *bond;
-	struct riscv_iommu_endpoint *ep;
-	struct riscv_iommu_queue *cmdq;
 	struct riscv_iommu_command cmd;
+	struct riscv_iommu_bond *bond;
+	struct riscv_iommu_device *iommu;
 	unsigned long len = end - start + 1;
 	unsigned long iova;
+	bool ats_iofence = false;
 
+	/* 1. Invalidate IOTLB */
 	list_for_each_entry(bond, &domain->bonds, bonds) {
-		cmdq = &(dev_to_iommu(bond->endpoint->dev))->cmdq;
-		ep = bond->endpoint;
-
+		/*
+		 * TODO: this will issue more than minimum required for domains
+		 * attached to multiple devices sharing the same IOMMU device.
+		 * Can be optimized, however this could be unlikely case, so leaving
+		 * it as brute-force IOTLB inval to all possible IOMMUs.
+		 */
+		iommu = dev_to_iommu(bond->endpoint->dev);
 		riscv_iommu_cmd_inval_vma(&cmd);
 		riscv_iommu_cmd_inval_set_pscid(&cmd, domain->pscid);
 		if (len > 0 && len < RISCV_IOMMU_IOTLB_INVAL_LIMIT) {
 			for (iova = start; iova < end; iova += PAGE_SIZE) {
 				riscv_iommu_cmd_inval_set_addr(&cmd, iova);
-				riscv_iommu_queue_send(cmdq, &cmd, 0);
+				riscv_iommu_send(iommu, &cmd, 0);
 			}
 		} else {
-			riscv_iommu_queue_send(cmdq, &cmd, 0);
+			riscv_iommu_send(iommu, &cmd, 0);
 		}
+	}
 
-		if (!ep->ats_enabled)
-			continue;
-
+	/* 2. Wait for all to complete. */
+	list_for_each_entry(bond, &domain->bonds, bonds) {
+		iommu = dev_to_iommu(bond->endpoint->dev);
 		riscv_iommu_cmd_iofence(&cmd);
-		riscv_iommu_queue_send(cmdq, &cmd, 0);
+		riscv_iommu_send(iommu, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
+	}
+
+	/* 3. Invalidate IOATC */
+	list_for_each_entry(bond, &domain->bonds, bonds) {
+		iommu = dev_to_iommu(bond->endpoint->dev);
+		if (!bond->endpoint->ats_enabled)
+			continue;
+		ats_iofence = true;
 
 		riscv_iommu_cmd_ats_inval(&cmd);
 		if (len)
 			riscv_iommu_cmd_ats_set_range(&cmd, start, end, true);
 		else
 			riscv_iommu_cmd_ats_set_all(&cmd, true);
-		riscv_iommu_cmd_ats_set_devid(&cmd, ep->devid);
-		riscv_iommu_queue_send(cmdq, &cmd, 0);
+		riscv_iommu_cmd_ats_set_devid(&cmd, bond->endpoint->devid);
+
+		riscv_iommu_send(iommu, &cmd, 0);
 	}
 
-	list_for_each_entry(bond, &domain->bonds, bonds) {
-		cmdq = &(dev_to_iommu(bond->endpoint->dev))->cmdq;
+	/* 4. Wait for all to complete, if needed. */
+	if (!ats_iofence)
+		return;
 
+	list_for_each_entry(bond, &domain->bonds, bonds) {
+		iommu = dev_to_iommu(bond->endpoint->dev);
 		riscv_iommu_cmd_iofence(&cmd);
-		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
+		riscv_iommu_send(iommu, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
+	}
+}
+
+static void riscv_iommu_iodir_inval(struct riscv_iommu_device *iommu,
+				    struct riscv_iommu_endpoint *ep,
+				    unsigned int pscid, unsigned int pasid)
+{
+	struct riscv_iommu_command cmd;
+
+	/* 1. Invalidate device & process context cache */
+	riscv_iommu_cmd_iodir_inval_ddt(&cmd);
+	riscv_iommu_cmd_iodir_set_did(&cmd, ep->devid);
+	if (ep->pasid_supported)
+		riscv_iommu_cmd_iodir_set_pid(&cmd, pasid);
+	riscv_iommu_send(iommu, &cmd, 0);
+
+	/* 2. Invalidate IOTLB, IOFENCE */
+	if (pscid) {
+		riscv_iommu_cmd_inval_vma(&cmd);
+		riscv_iommu_cmd_inval_set_pscid(&cmd, pscid);
+		riscv_iommu_send(iommu, &cmd, 0);
+		riscv_iommu_cmd_iofence(&cmd);
+		riscv_iommu_send(iommu, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
+	}
+
+	/* 3. Invalidate IOATC, IOFENCE */
+	if (ep->ats_supported) {
+		riscv_iommu_cmd_ats_inval(&cmd);
+		riscv_iommu_cmd_ats_set_all(&cmd, true);
+		riscv_iommu_cmd_ats_set_devid(&cmd, ep->devid);
+		if (ep->pasid_supported)
+			riscv_iommu_cmd_ats_set_pid(&cmd, pasid);
+		riscv_iommu_send(iommu, &cmd, 0);
+		riscv_iommu_cmd_iofence(&cmd);
+		riscv_iommu_send(iommu, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
 	}
 }
 
@@ -1277,6 +1358,7 @@ static int riscv_iommu_attach_domain(struct device *dev,
 {
 	struct riscv_iommu_device *iommu = dev_to_iommu(dev);
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
+	/* TODO: remove ep->attached with directory method is_xxx() */
 	const bool was_attached = ep->attached;
 	bool amo_enabled = false;
 	struct riscv_iommu_dc *dc;
@@ -1354,37 +1436,8 @@ static int riscv_iommu_attach_domain(struct device *dev,
 
 		if (dev_is_pci(dev))
 			riscv_iommu_enable_pdev(to_pci_dev(dev));
-	}
-
-	if (was_attached) {
-		struct riscv_iommu_queue *cmdq = &iommu->cmdq;
-		struct riscv_iommu_command cmd;
-
-		/* Invalidate device & process context cache */
-		riscv_iommu_cmd_iodir_inval_ddt(&cmd);
-		riscv_iommu_cmd_iodir_set_did(&cmd, ep->devid);
-		if (ep->pasid_supported)
-			riscv_iommu_cmd_iodir_set_pid(&cmd, 0);
-		riscv_iommu_queue_send(cmdq, &cmd, 0);
-
-		/* Invalidate address translation cache for previous domain */
-		if (pscid) {
-			riscv_iommu_cmd_inval_vma(&cmd);
-			riscv_iommu_cmd_inval_set_pscid(&cmd, pscid);
-			riscv_iommu_queue_send(cmdq, &cmd, 0);
-		}
-
-		/* Invalidate ATS */
-		if (ep->ats_supported) {
-			riscv_iommu_cmd_ats_inval(&cmd);
-			riscv_iommu_cmd_ats_set_all(&cmd, true);
-			riscv_iommu_cmd_ats_set_devid(&cmd, ep->devid);
-			riscv_iommu_queue_send(cmdq, &cmd, 0);
-		}
-
-		/* IOFENCE.C */
-		riscv_iommu_cmd_iofence(&cmd);
-		riscv_iommu_queue_send(cmdq, &cmd, RISCV_IOMMU_INVAL_TIMEOUT);
+	} else {
+		riscv_iommu_iodir_inval(iommu, ep, pscid, 0);
 	}
 
 	return 0;
@@ -1819,25 +1872,21 @@ static void riscv_iommu_remove_dev_pasid(struct device *dev, ioasid_t pasid)
 {
 	struct riscv_iommu_endpoint *ep = dev_iommu_priv_get(dev);
 	struct riscv_iommu_device *iommu = dev_to_iommu(dev);
-	struct riscv_iommu_queue *cmdq = &iommu->cmdq;
 	struct iommu_domain *iommu_domain = iommu_get_domain_for_dev_pasid(dev, pasid, 0);
 	struct riscv_iommu_domain *domain = iommu_domain_to_riscv(iommu_domain);
 	struct riscv_iommu_pc *pc;
-	struct riscv_iommu_command cmd;
 
 	pc = riscv_iommu_get_pc(iommu, ep, pasid);
 	if (!pc)
 		return;
 
-	pc->fsc     = 0;
-	pc->ta      = 0;
+	pc->fsc = 0;
+	pc->ta = 0;
 
-	riscv_iommu_cmd_iodir_inval_pdt(&cmd);
-	riscv_iommu_cmd_iodir_set_did(&cmd, ep->devid);
-	riscv_iommu_cmd_iodir_set_pid(&cmd, pasid);
-	riscv_iommu_queue_send(cmdq, &cmd, 0);
+	if (!iommu_domain)
+		return;
 
-	riscv_iommu_iotlb_inval(domain, 0, -1UL);
+	riscv_iommu_iodir_inval(iommu, ep, domain->pscid, pasid);
 }
 
 static const struct iommu_domain_ops riscv_iommu_sva_domain_ops = {
@@ -2188,6 +2237,7 @@ int riscv_iommu_init(struct riscv_iommu_device *iommu)
 	RISCV_IOMMU_QUEUE_INIT(&iommu->cmdq, CQ);
 	RISCV_IOMMU_QUEUE_INIT(&iommu->fltq, FQ);
 	RISCV_IOMMU_QUEUE_INIT(&iommu->priq, PQ);
+	INIT_LIST_HEAD(&iommu->cluster);
 	mutex_init(&iommu->eps_mutex);
 
 	rc = riscv_iommu_init_check(iommu);
