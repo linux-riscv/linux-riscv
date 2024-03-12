@@ -210,7 +210,7 @@ static int dpa_drm_ioctl_set_signal_pages(struct drm_device *dev, void *data,
 	mutex_lock(&p->lock);
 
 	/* XXX we don't support resize yet */
-	if (p->num_signal_pages) {
+	if (p->signals.num_pages) {
 		ret = -EBUSY;
 		goto out_unlock;
 	}
@@ -242,10 +242,10 @@ static int dpa_drm_ioctl_set_signal_pages(struct drm_device *dev, void *data,
 		goto out_unlock;
 	}
 
-	spin_lock_irqsave(&p->signal_lock, flags);
-	memcpy(p->signal_pages, pages, num_pages * sizeof(*p->signal_pages));
-	p->num_signal_pages = num_pages;
-	spin_unlock_irqrestore(&p->signal_lock, flags);
+	spin_lock_irqsave(&p->signals.lock, flags);
+	memcpy(p->signals.pages, pages, num_pages * sizeof(*p->signals.pages));
+	p->signals.num_pages = num_pages;
+	spin_unlock_irqrestore(&p->signals.lock, flags);
 
 out_unlock:
 	mutex_unlock(&p->lock);
@@ -265,7 +265,7 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 		return -ENOENT;
 	}
 
-	wake_up_interruptible_all(&p->signal_wqs[key]);
+	wake_up_interruptible_all(&p->signals.wqs[key]);
 	kref_put(&p->ref, dpa_release_process);
 
 	return 0;
@@ -273,14 +273,14 @@ int dpa_signal_wake(struct dpa_device *dpa, u32 pasid, u64 signal_idx)
 
 #define SIGNALS_PER_PAGE (PAGE_SIZE / sizeof(struct duc_signal))
 
-static bool check_signals(struct dpa_process *p, u16 *ids, u32 num)
+static bool check_signals(struct dpa_signal_state *ss, u16 *ids, u32 num)
 {
 	int i;
 
 	for (i = 0; i < num; i++) {
 		unsigned int pg = ids[i] / SIGNALS_PER_PAGE;
 		unsigned int index = ids[i] % SIGNALS_PER_PAGE;
-		struct duc_signal *signals = page_to_virt(p->signal_pages[pg]);
+		struct duc_signal *signals = page_to_virt(ss->pages[pg]);
 
 		if (READ_ONCE(signals[index].signal_value) == 0)
 			return true;
@@ -299,13 +299,13 @@ struct dpa_signal_waiters {
 	unsigned int num;
 };
 
-static void add_signal_waiters(struct dpa_process *p, u16 *ids, u32 num,
+static void add_signal_waiters(struct dpa_signal_state *ss, u16 *ids, u32 num,
 			       struct dpa_signal_waiters *waiters)
 {
 	u64 key_mask = 0;
 	int i, w;
 
-	BUILD_BUG_ON(sizeof(key_mask) * 8 < ARRAY_SIZE(p->signal_wqs));
+	BUILD_BUG_ON(sizeof(key_mask) * 8 < ARRAY_SIZE(ss->wqs));
 	for (i = 0, w = 0; i < num; i++) {
 		struct dpa_signal_waiter *waiter = &waiters->waiter[w];
 		u32 key = hash_32(ids[i], SIGNAL_WQ_HASH_BITS);
@@ -317,13 +317,13 @@ static void add_signal_waiters(struct dpa_process *p, u16 *ids, u32 num,
 		waiter->key = key;
 		init_waitqueue_entry(&waiter->wq_entry, current);
 		INIT_LIST_HEAD(&waiter->wq_entry.entry);
-		add_wait_queue(&p->signal_wqs[key], &waiter->wq_entry);
+		add_wait_queue(&ss->wqs[key], &waiter->wq_entry);
 		w++;
 	}
 	waiters->num = w;
 }
 
-static void remove_signal_waiters(struct dpa_process *p,
+static void remove_signal_waiters(struct dpa_signal_state *ss,
 				  struct dpa_signal_waiters *waiters)
 {
 	int i;
@@ -331,8 +331,7 @@ static void remove_signal_waiters(struct dpa_process *p,
 	for (i = 0; i < waiters->num; i++) {
 		struct dpa_signal_waiter *waiter = &waiters->waiter[i];
 
-		remove_wait_queue(&p->signal_wqs[waiter->key],
-				  &waiter->wq_entry);
+		remove_wait_queue(&ss->wqs[waiter->key], &waiter->wq_entry);
 	}
 }
 
@@ -355,25 +354,26 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 	if (args->num_signals >= ARRAY_SIZE(args->signal_ids))
 		return -EINVAL;
 
-	spin_lock_irqsave(&p->signal_lock, flags);
+	spin_lock_irqsave(&p->signals.lock, flags);
 	/* Verify signal IDs are in bounds. */
 	for (i = 0; i < args->num_signals; i++) {
 		unsigned int pg = args->signal_ids[i] / SIGNALS_PER_PAGE;
 
-		if (pg >= p->num_signal_pages) {
-			spin_unlock_irqrestore(&p->signal_lock, flags);
+		if (pg >= p->signals.num_pages) {
+			spin_unlock_irqrestore(&p->signals.lock, flags);
 			return -EINVAL;
 		}
 	}
-	p->num_signal_waiters++;
-	spin_unlock_irqrestore(&p->signal_lock, flags);
+	p->signals.num_waiters++;
+	spin_unlock_irqrestore(&p->signals.lock, flags);
 
 	/* Check the signals once before going into the wait loop. */
-	if (check_signals(p, args->signal_ids, args->num_signals))
+	if (check_signals(&p->signals, args->signal_ids, args->num_signals))
 		goto done;
 
 	timeout = timespec64_to_jiffies(&ts);
-	add_signal_waiters(p, args->signal_ids, args->num_signals, &waiters);
+	add_signal_waiters(&p->signals, args->signal_ids, args->num_signals,
+			   &waiters);
 	do {
 		set_current_state(TASK_INTERRUPTIBLE);
 
@@ -382,7 +382,7 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		 * so that a racing waker will wake us up immediately from
 		 * schedule_timeout().
 		 */
-		if (check_signals(p, args->signal_ids, args->num_signals))
+		if (check_signals(&p->signals, args->signal_ids, args->num_signals))
 			break;
 
 		if (signal_pending(current)) {
@@ -395,14 +395,14 @@ static int dpa_drm_ioctl_wait_signal(struct drm_device *drm, void *data,
 		}
 
 		timeout = schedule_timeout(timeout);
-	} while (!check_signals(p, args->signal_ids, args->num_signals));
+	} while (!check_signals(&p->signals, args->signal_ids, args->num_signals));
 	__set_current_state(TASK_RUNNING);
-	remove_signal_waiters(p, &waiters);
+	remove_signal_waiters(&p->signals, &waiters);
 
 done:
-	spin_lock_irqsave(&p->signal_lock, flags);
-	p->num_signal_waiters--;
-	spin_unlock_irqrestore(&p->signal_lock, flags);
+	spin_lock_irqsave(&p->signals.lock, flags);
+	p->signals.num_waiters--;
+	spin_unlock_irqrestore(&p->signals.lock, flags);
 
 	return ret;
 }
@@ -570,9 +570,9 @@ static void dpa_release_process(struct kref *ref)
 	 * We're dropping the last reference to the process, so there must
 	 * not be any threads in wait_signal() at this point.
 	 */
-	WARN_ON(p->num_signal_waiters);
-	if (p->num_signal_pages > 0)
-		unpin_user_pages(p->signal_pages, p->num_signal_pages);
+	WARN_ON(p->signals.num_waiters);
+	if (p->signals.num_pages > 0)
+		unpin_user_pages(p->signals.pages, p->signals.num_pages);
 
 	iommu_sva_unbind_device(p->sva);
 
@@ -648,9 +648,9 @@ static int dpa_driver_open_kms(struct drm_device *dev, struct drm_file *file_pri
 	dpa_app->doorbell_base = pci_resource_start(dpa_app->dev->pdev, 0) +
 		dpa_app->doorbell_offset;
 
-	for (i = 0; i < ARRAY_SIZE(dpa_app->signal_wqs); i++)
-		init_waitqueue_head(&dpa_app->signal_wqs[i]);
-	spin_lock_init(&dpa_app->signal_lock);
+	for (i = 0; i < ARRAY_SIZE(dpa_app->signals.wqs); i++)
+		init_waitqueue_head(&dpa_app->signals.wqs[i]);
+	spin_lock_init(&dpa_app->signals.lock);
 
 	init_completion(&dpa_app->kill_done);
 

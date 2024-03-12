@@ -90,6 +90,15 @@ struct dpa_queue {
 	struct list_head list;
 };
 
+struct dpa_signal_state {
+	struct page *pages[DPA_DRM_MAX_SIGNAL_PAGES];
+	unsigned int num_pages;
+	unsigned int num_waiters;
+	spinlock_t lock;
+#define SIGNAL_WQ_HASH_BITS	3
+	struct wait_queue_head wqs[1 << SIGNAL_WQ_HASH_BITS];
+};
+
 struct dpa_process {
 	// list_head for list of processes using dpa
 	struct list_head dpa_process_list;
@@ -110,13 +119,7 @@ struct dpa_process {
 
 	struct list_head queue_list;
 	struct dpa_queue *notification_queue;
-
-	struct page *signal_pages[DPA_DRM_MAX_SIGNAL_PAGES];
-	unsigned int num_signal_pages;
-	unsigned int num_signal_waiters;
-	spinlock_t signal_lock;
-#define SIGNAL_WQ_HASH_BITS	3
-	struct wait_queue_head signal_wqs[1 << SIGNAL_WQ_HASH_BITS];
+	struct dpa_signal_state signals;
 
 	// Start of doorbell registers in DUC MMIO
 	phys_addr_t doorbell_base;
