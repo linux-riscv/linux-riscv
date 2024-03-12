@@ -20,6 +20,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 
 #include "timer-of.h"
 
@@ -218,9 +219,24 @@ static int __init sun4i_timer_init(struct device_node *node)
 }
 TIMER_OF_DECLARE(sun4i, "allwinner,sun4i-a10-timer",
 		       sun4i_timer_init);
-TIMER_OF_DECLARE(sun8i_a23, "allwinner,sun8i-a23-timer",
-		 sun4i_timer_init);
-TIMER_OF_DECLARE(sun8i_v3s, "allwinner,sun8i-v3s-timer",
-		 sun4i_timer_init);
 TIMER_OF_DECLARE(suniv, "allwinner,suniv-f1c100s-timer",
 		       sun4i_timer_init);
+
+static int __init sun4i_timer_probe(struct platform_device *pdev)
+{
+	return sun4i_timer_init(dev_of_node(&pdev->dev));
+}
+
+static const struct of_device_id sun4i_timer_of_match[] = {
+	{ .compatible = "allwinner,sun8i-a23-timer" },
+	{ .compatible = "allwinner,sun8i-v3s-timer" },
+	{ /* sentinel */ }
+};
+
+static struct platform_driver sun4i_timer_driver = {
+	.driver	= {
+		.name		= "sun4i-timer",
+		.of_match_table	= sun4i_timer_of_match,
+	},
+};
+builtin_platform_driver_probe(sun4i_timer_driver, sun4i_timer_probe);
