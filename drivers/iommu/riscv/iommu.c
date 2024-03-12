@@ -59,6 +59,80 @@ module_param(timeout, uint, 0644);
 static DEFINE_IDA(riscv_iommu_pscids);
 #define RISCV_IOMMU_MAX_PSCID		BIT(20)
 
+/* IOMMU cluster configuration */
+
+#define RISCV_IOMMU_CLUSTER_LIMIT	16
+
+struct riscv_iommu_cluster_config {
+	unsigned int len;
+	unsigned int ids[RISCV_IOMMU_CLUSTER_LIMIT];
+};
+
+static int riscv_iommu_cluster_param_set(const char *val, const struct kernel_param *kp)
+{
+	struct riscv_iommu_cluster_config *cc = (struct riscv_iommu_cluster_config *)kp->arg;
+	unsigned int seg, bus, slot, func, next;
+	int ret, group = 0;
+
+	group = 0;
+	do {
+		ret = sscanf(val, "%x:%x:%x.%x%n", &seg, &bus, &slot, &func, &next);
+
+		if (ret < 0)
+			return ret;
+
+		cc[group].ids[cc[group].len++] = seg << 16 |
+						 PCI_DEVID(bus, PCI_DEVFN(slot, func));
+		val += next;
+		if (*val == ',') {
+			group++;
+			val++;
+		} else if (*val == '+') {
+			val++;
+		}
+	} while (*val && group < RISCV_IOMMU_CLUSTER_LIMIT &&
+		 cc[group].len < RISCV_IOMMU_CLUSTER_LIMIT);
+
+	return 0;
+}
+
+static int riscv_iommu_cluster_param_get(char *buffer, const struct kernel_param *kp)
+{
+	struct riscv_iommu_cluster_config *cc = (struct riscv_iommu_cluster_config *)kp->arg;
+	int group, index, pos;
+
+	pos = 0;
+	for (group = 0; group < RISCV_IOMMU_CLUSTER_LIMIT; group++) {
+		for (index = 0; index < cc[group].len; index++) {
+			unsigned int devid = cc[group].ids[index];
+			unsigned int seg = devid >> 16;
+			pos += sprintf(buffer + pos, "#%d %04x:%02x:%02x.%x\n", group, seg,
+				       PCI_BUS_NUM(devid), PCI_SLOT(devid), PCI_FUNC(devid));
+		}
+	}
+
+	return pos;
+}
+
+static const struct kernel_param_ops riscv_iommu_cluster_param_ops = {
+	.set = riscv_iommu_cluster_param_set,
+	.get = riscv_iommu_cluster_param_get,
+};
+
+static struct riscv_iommu_cluster_config cluster_config[RISCV_IOMMU_CLUSTER_LIMIT];
+static struct riscv_iommu_device *cluster_lead[RISCV_IOMMU_CLUSTER_LIMIT];
+
+/*
+ * Kernel command line definition of the IOMMU cluster:
+ *     ... iommu.cluster=SSSS:BB:DD.F[+SSSS:BB:DD.F][,SSSS:BB:DD.F] ...
+ *   where:
+ *   - SSSS:BB:DD.F is the segment bus device function number of an IOMMU device
+ *   - separator '+' is used to append more devices to the cluster,
+ *   - separator ',' is used to start new cluster block definition.
+ * 
+ */
+module_param_cb(cluster, &riscv_iommu_cluster_param_ops, cluster_config, 0400);
+
 /* Device resource-managed allocations */
 struct riscv_iommu_devres {
 	unsigned long addr;
@@ -1125,18 +1199,27 @@ static int riscv_iommu_ddt_alloc(struct riscv_iommu_device *iommu)
 			memset(iommu->ddt_root, 0, PAGE_SIZE);
 	}
 
-	if (!iommu->ddt_root) {
-		/* In bond mode, reuse shared DDT for IOMMU managed segment. */
-		/* FIXME: all IOMMUs do share the same segment for now. */
-		// module props.
-		static struct riscv_iommu_device *lead = NULL;
-		if (lead == NULL) {
-			lead = iommu;
-		} else {
-			/* TODO: transition to riscv_iommu_directory object */
-			list_add(&iommu->cluster, &lead->cluster);
-			iommu->ddt_root = lead->ddt_root;
-			iommu->ddt_phys = lead->ddt_phys;
+	/* Cluster mode hack. TODO: move to device directory management */
+	if (!iommu->ddt_root && dev_is_pci(iommu->dev)) {
+		struct pci_dev *pdev = to_pci_dev(iommu->dev);
+		unsigned int devid = pci_dev_id(pdev) | pci_domain_nr(pdev->bus) << 16;
+		int group, index;
+
+		for (group = 0; group < RISCV_IOMMU_CLUSTER_LIMIT; group++) {
+			for (index = 0; index < cluster_config[group].len; index++) {
+				if (devid == cluster_config[group].ids[index]) {
+					if (cluster_lead[group]) {
+						list_add(&iommu->cluster,
+							 &cluster_lead[group]->cluster);
+						iommu->ddt_root = cluster_lead[group]->ddt_root;
+						iommu->ddt_phys = cluster_lead[group]->ddt_phys;
+						break;
+					} else {
+						cluster_lead[group] = iommu;
+						break;
+					}
+				}
+			}
 		}
 	}
 
