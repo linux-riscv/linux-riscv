@@ -495,6 +495,9 @@ static long dpa_drm_ioctl(struct file *filp,
 	 */
 	if (p->killed)
 		return -EIO;
+	/* DPA fd cannot cross process boundaries. */
+	if (p->mm != current->mm)
+		return -EBADF;
 
 	dev = file_priv->minor->dev;
 	ret = pm_runtime_get_sync(dev->dev);
