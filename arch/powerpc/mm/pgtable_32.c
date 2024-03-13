@@ -89,7 +89,7 @@ int __ref map_kernel_page(unsigned long va, phys_addr_t pa, pgprot_t prot)
 		 * hash table
 		 */
 		BUG_ON((pte_present(*pg) | pte_hashpte(*pg)) && pgprot_val(prot));
-		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT, prot));
+		set_pte_at_unchecked(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT, prot));
 	}
 	smp_wmb();
 	return err;
