@@ -538,6 +538,12 @@ static inline bool pte_access_permitted(pte_t pte, bool write)
 	return arch_pte_access_permitted(pte_val(pte), write, 0);
 }
 
+#define pte_user_accessible_page pte_user_accessible_page
+static inline bool pte_user_accessible_page(pte_t pte, unsigned long addr)
+{
+	return pte_present(pte) && pte_user(pte);
+}
+
 /*
  * Conversion functions: convert a page and protection to a page entry,
  * and a page entry and page directory to the page they refer to.
@@ -881,6 +887,7 @@ static inline int pud_present(pud_t pud)
 
 extern struct page *pud_page(pud_t pud);
 extern struct page *pmd_page(pmd_t pmd);
+
 static inline pte_t pud_pte(pud_t pud)
 {
 	return __pte_raw(pud_raw(pud));
@@ -924,6 +931,12 @@ static inline int pud_bad(pud_t pud)
 static inline bool pud_access_permitted(pud_t pud, bool write)
 {
 	return pte_access_permitted(pud_pte(pud), write);
+}
+
+#define pud_user_accessible_page pud_user_accessible_page
+static inline bool pud_user_accessible_page(pud_t pud, unsigned long addr)
+{
+	return pte_user_accessible_page(pud_pte(pud), addr);
 }
 
 #define __p4d_raw(x)	((p4d_t) { __pgd_raw(x) })
@@ -1099,6 +1112,12 @@ static inline bool pmd_access_permitted(pmd_t pmd, bool write)
 		return false;
 
 	return pte_access_permitted(pmd_pte(pmd), write);
+}
+
+#define pmd_user_accessible_page pmd_user_accessible_page
+static inline bool pmd_user_accessible_page(pmd_t pmd, unsigned long addr)
+{
+	return pte_user_accessible_page(pmd_pte(pmd), addr);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE

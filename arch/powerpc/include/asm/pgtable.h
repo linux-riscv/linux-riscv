@@ -227,6 +227,32 @@ static inline int pud_pfn(pud_t pud)
 }
 #endif
 
+#ifndef pte_user_accessible_page
+#define pte_user_accessible_page pte_user_accessible_page
+static inline bool pte_user_accessible_page(pte_t pte, unsigned long addr)
+{
+	return pte_present(pte) && !is_kernel_addr(addr);
+}
+#endif
+
+#ifndef pmd_user_accessible_page
+#define pmd_user_accessible_page pmd_user_accessible_page
+static inline bool pmd_user_accessible_page(pmd_t pmd, unsigned long addr)
+{
+	WARN_ONCE(1, "pmd: platform does not use pmd entries directly");
+	return false;
+}
+#endif
+
+#ifndef pud_user_accessible_page
+#define pud_user_accessible_page pud_user_accessible_page
+static inline bool pud_user_accessible_page(pud_t pud, unsigned long addr)
+{
+	WARN_ONCE(1, "pud: platform does not use pud entries directly");
+	return false;
+}
+#endif
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* _ASM_POWERPC_PGTABLE_H */
