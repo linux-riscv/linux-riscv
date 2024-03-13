@@ -17,6 +17,7 @@ extern bool pgtable_l5_enabled;
 #define PGDIR_SHIFT_L4  39
 #define PGDIR_SHIFT_L5  48
 #define PGDIR_SIZE_L3   (_AC(1, UL) << PGDIR_SHIFT_L3)
+#define PGDIR_SIZE_L5   (_AC(1, UL) << PGDIR_SHIFT_L5)
 
 #define PGDIR_SHIFT     (pgtable_l5_enabled ? PGDIR_SHIFT_L5 : \
 		(pgtable_l4_enabled ? PGDIR_SHIFT_L4 : PGDIR_SHIFT_L3))
