@@ -14,7 +14,7 @@
 
 #include <asm/ptrace.h>
 
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
 #define DEFAULT_MAP_WINDOW	(UL(1) << (MMAP_VA_BITS - 1))
 #define STACK_TOP_MAX		TASK_SIZE
 
@@ -57,6 +57,12 @@
 #define STACK_ALIGN		16
 
 #define STACK_TOP		DEFAULT_MAP_WINDOW
+
+#ifdef CONFIG_MMU
+#define user_max_virt_addr() arch_get_mmap_end(ULONG_MAX, 0, 0)
+#else
+#define user_max_virt_addr() 0
+#endif /* CONFIG_MMU */
 
 /*
  * This decides where the kernel will search for a free chunk of vm
