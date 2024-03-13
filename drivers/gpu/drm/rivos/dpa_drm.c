@@ -534,13 +534,15 @@ int dpa_kill_done(struct dpa_device *dpa, u32 pasid, u32 cause)
 	if (!p)
 		return -ENOENT;
 
-	/*
-	 * TODO: Handle DUC-initiated KILL: Mark PASID as having been killed,
-	 * wake up threads blocked in signal_wait, and reject any further ioctls
-	 * from the process.
-	 */
 	dev_dbg(dpa->dev, "DUC completed kill for PASID %u\n", pasid);
+	mutex_lock(&p->lock);
+	if (!p->killed) {
+		p->killed = true;
+		dpa_wake_all_signals(&p->signals);
+	}
+	mutex_unlock(&p->lock);
 	complete(&p->kill_done);
+
 	kref_put(&p->ref, dpa_release_process);
 	return 0;
 }
