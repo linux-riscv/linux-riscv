@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 #include <drm/drm.h>
 #include <drm_dpa.h>
+#include <errno.h>
 
 #include "../../../../drivers/gpu/drm/rivos/duc_structs.h"
 
@@ -99,20 +100,13 @@ static int wait_signal(uint8_t index, uint64_t timeout_sec,
 		       uint64_t timeout_ns)
 {
 	struct drm_dpa_wait_signal args;
-	int ret;
 
 	args.signal_ids[0] = index;
 	args.num_signals = 1;
 	args.timeout.tv_sec = timeout_sec;
 	args.timeout.tv_nsec = timeout_ns;
 
-	ret = ioctl(drm_fd, DRM_IOCTL_DPA_WAIT_SIGNAL, &args);
-	if (ret) {
-		perror("wait signal ioctl");
-		exit(1);
-	}
-
-	return ret;
+	return ioctl(drm_fd, DRM_IOCTL_DPA_WAIT_SIGNAL, &args);
 }
 
 static void destroy_queue(uint32_t q_id)
@@ -305,9 +299,10 @@ int main(int argc, char *argv[])
 			meta->write_index.value);
 		doorbell->doorbell_write_offset = 1;
 		fprintf(stderr, "Rang the doorbell\n");
-		while (wait_count < 10 && meta->read_index.value == 0) {
-			fprintf(stderr, "Waiting for read index to increment: %lu\n",
-				meta->read_index.value);
+		// Sim can be very slow; wait forever.
+		while (meta->read_index.value == 0) {
+			fprintf(stderr, "Waiting for read index (waited %ds, val at %p) to increment: %lu\n",
+				wait_count, &meta->read_index.value, meta->read_index.value);
 			sleep(1);
 			wait_count++;
 		}
@@ -329,10 +324,18 @@ int main(int argc, char *argv[])
 		aql_barrier_packet->header = DUC_PACKET_TYPE_BARRIER_AND;
 		meta->write_index.value += 1;
 		doorbell->doorbell_write_offset = 1;
-		// wait 1 second
-		fprintf(stderr, "waiting for signal back on barrier\n");
-		if ((ret = wait_signal(0, 1, 0))) {
-			fprintf(stderr, "wait for signal returned %d\n", ret);
+		// As above, wait forever for slow sim:
+		fprintf(stderr, "Waiting for signal back on barrier\n");
+		while (1) {
+			ret = wait_signal(0, 10, 0);
+			if (ret == 0) {
+				break;
+			} else if (errno == ETIMEDOUT) {
+				fprintf(stderr, "...still waiting...\n");
+			} else {
+				perror("Wait for signal:");
+				return 1;
+			}
 		}
 		fprintf(stderr, "signal value is now %" PRIu64 "\n",
 			(uint64_t)signal->signal_value);
