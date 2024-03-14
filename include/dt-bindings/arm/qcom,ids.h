@@ -8,9 +8,14 @@
 #define _DT_BINDINGS_ARM_QCOM_IDS_H
 
 /*
- * The MSM chipset and hardware revision used by Qualcomm bootloaders, DTS for
- * older chipsets (qcom,msm-id) and in socinfo driver:
+ * The MSM chipset ID (soc-id) used by Qualcomm bootloaders,
+ * and in socinfo driver:
+ * where, "a" indicates Qualcomm supported chipsets, example MSM8260, MSM8660 etc
  */
+
+#define QCOM_SOC_ID(a)  ((QCOM_ID_##a) && 0xffff)
+
+
 #define QCOM_ID_MSM8260			70
 #define QCOM_ID_MSM8660			71
 #define QCOM_ID_APQ8060			86
@@ -267,16 +272,79 @@
 #define QCOM_ID_IPQ5302			595
 #define QCOM_ID_IPQ5300			624
 
-/*
- * The board type and revision information, used by Qualcomm bootloaders and
- * DTS for older chipsets (qcom,board-id):
- */
-#define QCOM_BOARD_ID(a, major, minor) \
-	(((major & 0xff) << 16) | ((minor & 0xff) << 8) | QCOM_BOARD_ID_##a)
+ /* The SOC revision used by Qualcomm bootloaders (soc-revision) */
 
-#define QCOM_BOARD_ID_MTP			8
-#define QCOM_BOARD_ID_DRAGONBOARD		10
-#define QCOM_BOARD_ID_QRD			11
-#define QCOM_BOARD_ID_SBC			24
+#define QCOM_SOC_REVISION(a)		(a & 0xff)
+
+/*
+ * The board type and revision information (board-id), used by Qualcomm bootloaders
+ * where, "a" indicates board type which can be either MTP, QRD etc
+ */
+
+#define QCOM_BOARD_ID(a, major, minor) \
+	(((major & 0xff) << 16) | ((minor & 0xff) << 8) | ((QCOM_BOARD_ID_##a) & 0xff))
+
+#define QCOM_BOARD_ID_MTP		0x8
+#define QCOM_BOARD_ID_LIQUID		0x9
+#define QCOM_BOARD_ID_DRAGONBOARD	0xA
+#define QCOM_BOARD_ID_QRD		0x11
+#define QCOM_BOARD_ID_ADP		0x19
+#define QCOM_BOARD_ID_HDK		0x1F
+#define QCOM_BOARD_ID_ATP		0x21
+#define QCOM_BOARD_ID_IDP		0x22
+#define QCOM_BOARD_ID_SBC		0x24
+#define QCOM_BOARD_ID_QXR		0x26
+#define QCOM_BOARD_ID_X100		0x26
+#define QCOM_BOARD_ID_CRD		0x28
+
+/*
+ * The platform subtype is used by Qualcomm bootloaders and
+ * DTS (board-subtype)
+ * where, "a" indicates boot device type, it can be EMMC,
+ * UFS, NAND or OTHER (which can be used for default).
+ * "b" indicates DDR type which can be 128MB, 256MB,
+ * 512MB, 1024MB, 2048MB, 3072MB, 4096MB or ANY 
+ * (which can be used for default).
+ */
+#define QCOM_BOARD_SUBTYPE(a, b, SUBTYPE) \
+	(((QCOM_BOARD_BOOT_##a & 0xf) << 16) | ((QCOM_BOARD_DDRTYPE_##b & 0x7) << 8) | \
+	(SUBTYPE & 0xff))
+
+/* Board DDR Type where each value indicates higher limit */
+#define QCOM_BOARD_DDRTYPE_ANY		0x0
+#define QCOM_BOARD_DDRTYPE_128M		0x1
+#define QCOM_BOARD_DDRTYPE_256M		0x2
+#define QCOM_BOARD_DDRTYPE_512M		0x3
+#define QCOM_BOARD_DDRTYPE_1024M	0x4
+#define QCOM_BOARD_DDRTYPE_2048M	0x5
+#define QCOM_BOARD_DDRTYPE_3072M	0x6
+#define QCOM_BOARD_DDRTYPE_4096M	0x7
+
+/* Board Boot Device Type */
+#define QCOM_BOARD_BOOT_EMMC		0x0
+#define QCOM_BOARD_BOOT_UFS		0x1
+#define QCOM_BOARD_BOOT_NAND		0x2
+#define QCOM_BOARD_BOOT_OTHER		0x3
+
+/*
+ * The PMIC slave id is used by Qualcomm bootloaders to
+ * indicates which PMIC is attached (pmic-sid)
+ */
+
+#define QCOM_PMIC_SID(a)		(a & 0xff)
+
+/*
+ * The PMIC ID is used by Qualcomm bootloaders to describe the ID
+ * of PMIC attached to bus described by SID (pmic-model)
+ */
+
+#define QCOM_PMIC_MODEL(ID, major, minor) \
+	(((major & 0xff) << 16) | ((minor & 0xff) << 8) | (ID & 0xff))
+
+/*
+ * The OEM ID consists of 32 bit value to support OEM boards where they
+ * have slight differences on top of Qualcomm's standard boards
+ */
+#define QCOM_OEM_ID(a)		(a & 0xffffffff)
 
 #endif /* _DT_BINDINGS_ARM_QCOM_IDS_H */
