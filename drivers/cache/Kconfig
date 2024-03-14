@@ -14,4 +14,13 @@ config SIFIVE_CCACHE
 	help
 	  Support for the composable cache controller on SiFive platforms.
 
+config STARLINK_500_CACHE
+	bool "StarLink-500 Cache controller"
+	depends on RISCV_DMA_NONCOHERENT
+	depends on ERRATA_STARFIVE
+	select RISCV_NONSTANDARD_CACHE_OPS
+	default y
+	help
+	  Support for the StarLink-500 cache controller on StarFive platforms.
+
 endmenu

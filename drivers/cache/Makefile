@@ -2,3 +2,4 @@
 
 obj-$(CONFIG_AX45MP_L2_CACHE)	+= ax45mp_cache.o
 obj-$(CONFIG_SIFIVE_CCACHE)	+= sifive_ccache.o
+obj-$(CONFIG_STARLINK_500_CACHE) += starlink500_cache.o
