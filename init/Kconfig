@@ -1563,6 +1563,14 @@ config PRINTK
 	  very difficult to diagnose system problems, saying N here is
 	  strongly discouraged.
 
+config PRINT_INSTRET
+	depends on PRINTK
+	default n
+	bool "Print instructions retired count in printk prefix" if EXPERT
+	help
+	  This option enables a prefix to printk that includes the instructions
+	  retired count.
+
 config BUG
 	bool "BUG() support" if EXPERT
 	default y
