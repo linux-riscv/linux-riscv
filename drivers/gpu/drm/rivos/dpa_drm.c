@@ -639,7 +639,9 @@ static void dpa_mmu_release(struct mmu_notifier *subscription,
 	struct dpa_process *p =
 		container_of(subscription, struct dpa_process, mmu_notifier);
 
-	WARN_ON(dpa_request_kill(p));
+	/* Only request a kill if the process has been registered with DUC. */
+	if (p->doorbell_base)
+		WARN_ON(dpa_request_kill(p));
 }
 
 static int dpa_mmu_invalidate_range(struct mmu_notifier *subscription,
