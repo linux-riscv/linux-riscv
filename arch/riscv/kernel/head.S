@@ -165,8 +165,14 @@ secondary_start_sbi:
 #endif
 	call .Lsetup_trap_vector
 	scs_load_current
-	tail smp_callin
+	call smp_callin
 #endif /* CONFIG_SMP */
+
+.align 2
+.Lsecondary_park:
+	/* We lack SMP support or have too many harts, so park this hart */
+	wfi
+	j .Lsecondary_park
 
 .align 2
 .Lsetup_trap_vector:
@@ -180,12 +186,6 @@ secondary_start_sbi:
 	 */
 	csrw CSR_SCRATCH, zero
 	ret
-
-.align 2
-.Lsecondary_park:
-	/* We lack SMP support or have too many harts, so park this hart */
-	wfi
-	j .Lsecondary_park
 
 SYM_CODE_END(_start)
 
