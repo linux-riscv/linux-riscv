@@ -125,8 +125,9 @@ static bool errata_probe_pmu(unsigned int stage,
 	if (!IS_ENABLED(CONFIG_ERRATA_THEAD_PMU))
 		return false;
 
-	/* target-c9xx cores report arch_id and impid as 0 */
-	if (arch_id != 0 || impid != 0)
+	/* Early c9xx cores report arch_id and impid as 0 */
+	if (!((arch_id == 0 && impid == 0) ||
+	      (arch_id == THEAD_C908_ARCH_ID && impid == THEAD_C908_IMP_ID)))
 		return false;
 
 	if (stage == RISCV_ALTERNATIVES_EARLY_BOOT)
