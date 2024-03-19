@@ -59,14 +59,18 @@
 
 #define DPA_NUM_MSIX		8
 
+#define ENV_ID_IS_DPA_HYBRID		BIT(7)
+#define ENV_ID_DPA_HYBRID_NO_AAU	BIT(1)
+#define ENV_ID_DPA_HYBRID_1FGW		BIT(0)
+
 struct dpa_device {
 	struct device *dev;
 	struct pci_dev			*pdev;
 	struct drm_device		ddev;
 
 	void __iomem *regs;
-
 	int base_irq;
+	u32 environment_id;
 
 	/* List of active DPA processes */
 	struct mutex dpa_processes_lock;

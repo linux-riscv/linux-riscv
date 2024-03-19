@@ -837,12 +837,17 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
 	struct dpa_device *dpa;
-	acpi_handle handle;
+	struct acpi_device *adev = ACPI_COMPANION(dev);
+	const union acpi_object *obj;
 	int err, vec, nid = NUMA_NO_NODE;
 	u16 vendor, device;
 	bool force_hbm = false;
 
 	dev_warn(dev, "%s: DPA start\n", __func__);
+	if (!adev) {
+		dev_warn(dev, "No ACPI handle\n");
+		return -ENODEV;
+	}
 	dpa = devm_drm_dev_alloc(dev, &dpa_drm_driver, typeof(*dpa), ddev);
 	if (IS_ERR(dpa))
 		return -ENOMEM;
@@ -854,20 +859,20 @@ static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_read_config_word(pdev, PCI_DEVICE_ID, &device);
 	dev_info(dpa->dev, "Device vid: 0x%X pid: 0x%X rev 0x%X\n", vendor,
 		 device, pdev->revision);
-	force_hbm = force_fwq_hbm || (pdev->revision == PCI_DEVICE_REV_HYBRID);
 
-	handle = ACPI_HANDLE(dev);
-	if (handle) {
-		nid = acpi_get_node(handle);
-		if (nid != NUMA_NO_NODE) {
-			if (force_hbm && !node_state(nid, N_MEMORY))
-				return -EPROBE_DEFER;
-			dev_info(dev, "HBM on node %d\n", nid);
-		} else {
-			dev_info(dev, "No HBM node\n");
-		}
+	if (!acpi_dev_get_property(adev, "environment-id", ACPI_TYPE_INTEGER, &obj)) {
+		dpa->environment_id = obj->integer.value;
+		dev_info(dpa->dev, "environment-id: 0x%x\n", dpa->environment_id);
+	}
+	force_hbm = force_fwq_hbm || ((dpa->environment_id & ENV_ID_IS_DPA_HYBRID) &&
+				      (dpa->environment_id & ENV_ID_DPA_HYBRID_NO_AAU));
+	nid = acpi_get_node(acpi_device_handle(adev));
+	if (nid != NUMA_NO_NODE) {
+		if (force_hbm && !node_state(nid, N_MEMORY))
+			return -EPROBE_DEFER;
+		dev_info(dev, "HBM on node %d\n", nid);
 	} else {
-		dev_warn(dev, "No ACPI handle\n");
+		dev_info(dev, "No HBM node\n");
 	}
 
 	err = pcim_enable_device(pdev);
