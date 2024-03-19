@@ -31,6 +31,7 @@
 #include <linux/mm.h>
 #include <linux/pci.h>
 #include <linux/sched/mm.h>
+#include <linux/sysfs.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <drm/drm_drv.h>
@@ -833,6 +834,20 @@ static const struct drm_driver dpa_drm_driver = {
 	.name = "dpa-drm",
 };
 
+static ssize_t environment_id_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct dpa_device *dpa = dev_get_drvdata(dev);
+	return sysfs_emit(buf, "0x%x\n", dpa->environment_id);
+}
+static DEVICE_ATTR_RO(environment_id);
+
+static struct attribute *dpa_attrs[] = {
+	&dev_attr_environment_id.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(dpa);
+
 static int dpa_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
@@ -987,8 +1002,8 @@ static struct pci_driver dpa_pci_driver = {
 	.id_table = dpa_pci_table,
 	.probe = dpa_pci_probe,
 	.remove = dpa_pci_remove,
+	.dev_groups = dpa_groups,
 };
-
 module_pci_driver(dpa_pci_driver);
 
 MODULE_LICENSE("GPL");
