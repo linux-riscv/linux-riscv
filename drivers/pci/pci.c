@@ -431,6 +431,11 @@ static u8 __pci_find_next_cap_ttl(struct pci_bus *bus, unsigned int devfn,
 	u8 id;
 	u16 ent;
 
+#ifdef CONFIG_PCI_CAP_CACHE
+	if (pci_cap_cache_lookup_cap(bus, devfn, pos, cap, &pos))
+		return pos;
+#endif
+
 	pci_bus_read_config_byte(bus, devfn, pos, &pos);
 
 	while ((*ttl)--) {
@@ -507,6 +512,11 @@ u8 pci_find_capability(struct pci_dev *dev, int cap)
 {
 	u8 pos;
 
+#ifdef CONFIG_PCI_CAP_CACHE
+	if (pci_cap_cache_lookup_cap(dev->bus, dev->devfn, 0, cap, &pos))
+		return pos;
+#endif
+
 	pos = __pci_bus_find_cap_start(dev->bus, dev->devfn, dev->hdr_type);
 	if (pos)
 		pos = __pci_find_next_cap(dev->bus, dev->devfn, pos, cap);
@@ -531,6 +541,11 @@ EXPORT_SYMBOL(pci_find_capability);
 u8 pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap)
 {
 	u8 hdr_type, pos;
+
+#ifdef CONFIG_PCI_CAP_CACHE
+	if (pci_cap_cache_lookup_cap(bus, devfn, 0, cap, &pos))
+		return pos;
+#endif
 
 	pci_bus_read_config_byte(bus, devfn, PCI_HEADER_TYPE, &hdr_type);
 
@@ -564,6 +579,11 @@ u16 pci_find_next_ext_capability(struct pci_dev *dev, u16 start, int cap)
 
 	if (dev->cfg_size <= PCI_CFG_SPACE_SIZE)
 		return 0;
+
+#ifdef CONFIG_PCI_CAP_CACHE
+	if (pci_cap_cache_lookup_ext_cap(dev, start, cap, &pos))
+		return pos;
+#endif
 
 	if (start)
 		pos = start;
