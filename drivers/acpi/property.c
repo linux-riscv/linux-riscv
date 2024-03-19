@@ -1640,6 +1640,26 @@ static int acpi_fwnode_irq_get(const struct fwnode_handle *fwnode,
 	return res.start;
 }
 
+static int acpi_fwnode_add_links(struct fwnode_handle *fwnode)
+{
+	struct fwnode_handle *parent_fwnode;
+	unsigned int i;
+
+	/* This is needed primarily for RISC-V. To reduce risk on  other
+	 * architectures, make it dummy for them.
+	 */
+	if (!IS_ENABLED(CONFIG_RISCV))
+		return 0;
+
+	for (i = 0;
+		acpi_get_gsi_parent_fwnode(ACPI_HANDLE_FWNODE(fwnode), i, &parent_fwnode);
+		i++) {
+			fwnode_link_add(fwnode, parent_fwnode);
+	}
+
+	return 0;
+}
+
 #define DECLARE_ACPI_FWNODE_OPS(ops) \
 	const struct fwnode_operations ops = {				\
 		.device_is_available = acpi_fwnode_device_is_available, \
@@ -1665,6 +1685,7 @@ static int acpi_fwnode_irq_get(const struct fwnode_handle *fwnode,
 		.graph_get_port_parent = acpi_fwnode_get_parent,	\
 		.graph_parse_endpoint = acpi_fwnode_graph_parse_endpoint, \
 		.irq_get = acpi_fwnode_irq_get,				\
+		.add_links = acpi_fwnode_add_links,			\
 	};								\
 	EXPORT_SYMBOL_GPL(ops)
 

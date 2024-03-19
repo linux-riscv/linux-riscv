@@ -26,12 +26,20 @@ struct pnp_dev;
 #ifdef CONFIG_PNP
 struct resource *pnp_get_resource(struct pnp_dev *dev, unsigned long type,
 				unsigned int num);
+
 #else
 static inline struct resource *pnp_get_resource(struct pnp_dev *dev,
 			unsigned long type, unsigned int num)
 {
 	return NULL;
 }
+#endif
+
+#ifdef CONFIG_ARCH_ACPI_DEFERRED_GSI
+void arch_pnp_reconfigure_irq(struct pnp_dev *dev, unsigned int index, struct resource *res);
+#else
+static inline
+void arch_pnp_reconfigure_irq(struct pnp_dev *dev, unsigned int index, struct resource *res) { }
 #endif
 
 static inline int pnp_resource_valid(struct resource *res)
@@ -147,12 +155,19 @@ static inline resource_size_t pnp_mem_len(struct pnp_dev *dev,
 }
 
 
-static inline resource_size_t pnp_irq(struct pnp_dev *dev, unsigned int bar)
+static inline int pnp_irq(struct pnp_dev *dev, unsigned int bar)
 {
 	struct resource *res = pnp_get_resource(dev, IORESOURCE_IRQ, bar);
 
-	if (pnp_resource_valid(res))
+	if (pnp_resource_valid(res)) {
+#if IS_ENABLED(CONFIG_ARCH_ACPI_DEFERRED_GSI)
+		if (!pnp_resource_enabled(res)) {
+			arch_pnp_reconfigure_irq(dev, bar, res);
+		}
+#endif
+
 		return res->start;
+	}
 	return -1;
 }
 
