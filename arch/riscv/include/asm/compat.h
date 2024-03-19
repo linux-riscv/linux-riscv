@@ -12,9 +12,16 @@
 #include <linux/sched/task_stack.h>
 #include <asm-generic/compat.h>
 
+#ifdef CONFIG_COMPAT
+
 static inline int is_compat_task(void)
 {
 	return test_thread_flag(TIF_32BIT);
+}
+
+static inline int is_compat_thread(struct thread_info *thread)
+{
+	return test_ti_thread_flag(thread, TIF_32BIT);
 }
 
 struct compat_user_regs_struct {
@@ -125,5 +132,14 @@ static inline void cregs_to_regs(struct compat_user_regs_struct *cregs,
 	regs->t5	= (unsigned long) cregs->t5;
 	regs->t6	= (unsigned long) cregs->t6;
 };
+
+#else
+
+static inline int is_compat_thread(struct thread_info *thread)
+{
+	return 0;
+}
+
+#endif
 
 #endif /* __ASM_COMPAT_H */
