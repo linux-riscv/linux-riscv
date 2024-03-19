@@ -83,6 +83,9 @@
 
 #define RISCV_ISA_EXT_XLINUXENVCFG	127
 
+/* from lists */
+#define RISCV_ISA_EXT_SVADU		112
+
 #define RISCV_ISA_EXT_MAX		128
 #define RISCV_ISA_EXT_INVALID		U32_MAX
 

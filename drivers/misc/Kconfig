@@ -539,6 +539,13 @@ config TMR_INJECT
 
 	  Say N here unless you know what you are doing.
 
+config RIVOS_MAGICBOX
+	tristate "Rivos MagicBox driver"
+	depends on OF
+	select DEBUG_FS
+	help
+	  Support Magicbox driver
+
 config TPS6594_ESM
 	tristate "TI TPS6594 Error Signal Monitor support"
 	depends on MFD_TPS6594

@@ -157,6 +157,7 @@ calc_vm_flag_bits(unsigned long flags)
 	       _calc_vm_trans(flags, MAP_LOCKED,     VM_LOCKED    ) |
 	       _calc_vm_trans(flags, MAP_SYNC,	     VM_SYNC      ) |
 	       _calc_vm_trans(flags, MAP_STACK,	     VM_NOHUGEPAGE) |
+	       _calc_vm_trans(flags, MAP_UNINITIALIZED, VM_MAP_UNINITIALIZED) |
 	       arch_calc_vm_flag_bits(flags);
 }
 

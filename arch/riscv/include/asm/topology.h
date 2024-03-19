@@ -4,6 +4,8 @@
 
 #include <linux/arch_topology.h>
 
+#ifdef CONFIG_SMP
+
 /* Replace task scheduler's default frequency-invariant accounting */
 #define arch_scale_freq_tick		topology_scale_freq_tick
 #define arch_set_freq_scale		topology_set_freq_scale
@@ -16,6 +18,8 @@
 
 /* Enable topology flag updates */
 #define arch_update_cpu_topology	topology_update_cpu_topology
+
+#endif /* CONFIG_SMP */
 
 #include <asm-generic/topology.h>
 

@@ -391,6 +391,13 @@ extern unsigned int kobjsize(const void *objp);
 # define VM_UFFD_MINOR		VM_NONE
 #endif /* CONFIG_HAVE_ARCH_USERFAULTFD_MINOR */
 
+#ifdef CONFIG_MMAP_ALLOW_UNINITIALIZED
+# define VM_MAP_UNINITIALIZED_BIT	39
+# define VM_MAP_UNINITIALIZED		BIT(VM_MAP_UNINITIALIZED_BIT)
+#else /* !CONFIG_MMAP_ALLOW_UNINITIALIZED */
+# define VM_MAP_UNINITIALIZED		VM_NONE
+#endif /* CONFIG_MMAP_ALLOW_UNINITIALIZED */
+
 /* Bits set in the VMA until the stack is in its final location */
 #define VM_STACK_INCOMPLETE_SETUP (VM_RAND_READ | VM_SEQ_READ | VM_STACK_EARLY)
 
