@@ -124,6 +124,7 @@ struct thread_struct {
 	struct __riscv_v_ext_state vstate;
 	unsigned long align_ctl;
 	struct __riscv_v_ext_state kernel_vstate;
+	u8 pmlen;
 };
 
 /* Whitelist the fstate from the task_struct for hardened usercopy */
