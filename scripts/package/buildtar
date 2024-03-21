@@ -96,7 +96,7 @@ case "${ARCH}" in
 	riscv)
 		for i in Image.bz2 Image.gz Image; do
 			if [ -f "${objtree}/arch/riscv/boot/${i}" ] ; then
-				cp -v -- "${objtree}/arch/riscv/boot/${i}" "${tmpdir}/boot/vmlinux-${KERNELRELEASE}"
+				cp -v -- "${objtree}/arch/riscv/boot/${i}" "${tmpdir}/boot/vmlinuz-${KERNELRELEASE}"
 				break
 			fi
 		done
