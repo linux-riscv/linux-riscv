@@ -15,11 +15,12 @@
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <asm/ucontext.h>
+#include <asm/byteorder.h>
 
 #include "hwprobe.h"
 #include "../../kselftest.h"
 
-#define MK_CBO(fn) cpu_to_le32((fn) << 20 | 10 << 15 | 2 << 12 | 0 << 7 | 15)
+#define MK_CBO(fn) __cpu_to_le32((fn) << 20 | 10 << 15 | 2 << 12 | 0 << 7 | 15)
 
 static char mem[4096] __aligned(4096) = { [0 ... 4095] = 0xa5 };
 
