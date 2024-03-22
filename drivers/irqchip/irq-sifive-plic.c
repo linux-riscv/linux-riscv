@@ -428,8 +428,11 @@ static int __init __plic_init(struct device_node *node,
 		goto out_free_priv;
 	}
 
+	error = of_property_read_u32(node, "riscv,ndev", &nr_irqs);
+	if (error)
+		goto out_iounmap;
+
 	error = -EINVAL;
-	of_property_read_u32(node, "riscv,ndev", &nr_irqs);
 	if (WARN_ON(!nr_irqs))
 		goto out_iounmap;
 
