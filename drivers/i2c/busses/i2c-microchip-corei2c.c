@@ -100,7 +100,7 @@
  * @bus_clk_rate:	current i2c bus clock rate
  * @isr_status:		cached copy of local ISR status
  * @msg_len:		number of bytes transferred in msg
- * @addr:		address of the current slave
+ * @addr:		address of the current client
  */
 struct mchp_corei2c_dev {
 	void __iomem *base;
@@ -359,7 +359,7 @@ static u32 mchp_corei2c_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm mchp_corei2c_algo = {
-	.master_xfer = mchp_corei2c_xfer,
+	.xfer = mchp_corei2c_xfer,
 	.functionality = mchp_corei2c_func,
 };
 
