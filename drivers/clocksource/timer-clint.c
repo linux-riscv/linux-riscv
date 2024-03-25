@@ -32,7 +32,6 @@
 static u32 __iomem *clint_ipi_base;
 static unsigned int clint_ipi_irq;
 static u64 __iomem *clint_timer_cmp;
-static u64 __iomem *clint_timer_val;
 static unsigned long clint_timer_freq;
 static unsigned int clint_timer_irq;
 
@@ -60,31 +59,10 @@ static void clint_ipi_interrupt(struct irq_desc *desc)
 }
 #endif
 
-#ifdef CONFIG_64BIT
-#define clint_get_cycles()	readq_relaxed(clint_timer_val)
-#else
-#define clint_get_cycles()	readl_relaxed(clint_timer_val)
-#define clint_get_cycles_hi()	readl_relaxed(((u32 *)clint_timer_val) + 1)
-#endif
-
-#ifdef CONFIG_64BIT
 static u64 notrace clint_get_cycles64(void)
 {
-	return clint_get_cycles();
+	return get_cycles64();
 }
-#else /* CONFIG_64BIT */
-static u64 notrace clint_get_cycles64(void)
-{
-	u32 hi, lo;
-
-	do {
-		hi = clint_get_cycles_hi();
-		lo = clint_get_cycles();
-	} while (hi != clint_get_cycles_hi());
-
-	return ((u64)hi << 32) | lo;
-}
-#endif /* CONFIG_64BIT */
 
 static u64 clint_rdtime(struct clocksource *cs)
 {
@@ -205,7 +183,6 @@ static int __init clint_timer_init_dt(struct device_node *np)
 
 	clint_ipi_base = base + CLINT_IPI_OFF;
 	clint_timer_cmp = base + CLINT_TIMER_CMP_OFF;
-	clint_timer_val = base + CLINT_TIMER_VAL_OFF;
 	clint_timer_freq = riscv_timebase;
 
 	pr_info("%pOFP: timer running at %ld Hz\n", np, clint_timer_freq);
