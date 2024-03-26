@@ -879,6 +879,7 @@ static int load_flat_binary(struct linux_binprm *bprm)
 	if (res < 0)
 		return res;
 
+#ifndef CONFIG_BINFMT_FLAT_NO_DATA_START_OFFSET
 	/* Update data segment pointers for all libraries */
 	for (i = 0; i < MAX_SHARED_LIBS; i++) {
 		if (!libinfo.lib_list[i].loaded)
@@ -893,6 +894,7 @@ static int load_flat_binary(struct linux_binprm *bprm)
 				return -EFAULT;
 		}
 	}
+#endif
 
 	set_binfmt(&flat_format);
 
