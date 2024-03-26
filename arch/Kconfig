@@ -52,8 +52,8 @@ config GENERIC_ENTRY
 
 config KPROBES
 	bool "Kprobes"
-	depends on MODULES
 	depends on HAVE_KPROBES
+	depends on ALLOC_EXECMEM
 	select KALLSYMS
 	select TASKS_RCU if PREEMPTION
 	help
@@ -214,6 +214,21 @@ config HAVE_OPTPROBES
 
 config HAVE_KPROBES_ON_FTRACE
 	bool
+
+config HAVE_ALLOC_EXECMEM
+	bool
+	help
+	  Architectures that select this option are capable of allocating trampoline
+	  executable memory for tracing subsystems, indepedently of the kernel module
+	  subsystem.
+
+config ALLOC_EXECMEM
+	bool "Executable (trampoline) memory allocation"
+	default y
+	depends on MODULES || HAVE_ALLOC_EXECMEM
+	help
+	  Select this for executable (trampoline) memory. Can be enabled when either
+	  module allocator or arch-specific allocator is available.
 
 config ARCH_CORRECT_STACKTRACE_ON_KRETPROBE
 	bool
