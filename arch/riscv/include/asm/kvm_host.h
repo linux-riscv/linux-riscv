@@ -254,6 +254,7 @@ struct kvm_vcpu_arch {
 
 	/* VCPU power-off state */
 	bool power_off;
+	struct mutex hsm_start_lock;
 
 	/* Don't run the VCPU (blocked) */
 	bool pause;
