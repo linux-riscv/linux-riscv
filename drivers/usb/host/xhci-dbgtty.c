@@ -11,6 +11,7 @@
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/idr.h>
+#include <linux/workqueue.h>
 
 #include "xhci.h"
 #include "xhci-dbgcap.h"
@@ -108,7 +109,7 @@ dbc_read_complete(struct xhci_dbc *dbc, struct dbc_request *req)
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	list_add_tail(&req->list_pool, &port->read_queue);
-	tasklet_schedule(&port->push);
+	queue_work(system_bh_wq, &port->push);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 }
 
@@ -278,7 +279,7 @@ static void dbc_tty_unthrottle(struct tty_struct *tty)
 	unsigned long		flags;
 
 	spin_lock_irqsave(&port->port_lock, flags);
-	tasklet_schedule(&port->push);
+	queue_work(system_bh_wq, &port->push);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 }
 
@@ -294,14 +295,14 @@ static const struct tty_operations dbc_tty_ops = {
 	.unthrottle		= dbc_tty_unthrottle,
 };
 
-static void dbc_rx_push(struct tasklet_struct *t)
+static void dbc_rx_push(struct work_struct *t)
 {
 	struct dbc_request	*req;
 	struct tty_struct	*tty;
 	unsigned long		flags;
 	bool			do_push = false;
 	bool			disconnect = false;
-	struct dbc_port		*port = from_tasklet(port, t, push);
+	struct dbc_port		*port = from_work(port, t, push);
 	struct list_head	*queue = &port->read_queue;
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -355,7 +356,7 @@ static void dbc_rx_push(struct tasklet_struct *t)
 	if (!list_empty(queue) && tty) {
 		if (!tty_throttled(tty)) {
 			if (do_push)
-				tasklet_schedule(&port->push);
+				queue_work(system_bh_wq, &port->push);
 			else
 				pr_warn("ttyDBC0: RX not scheduled?\n");
 		}
@@ -388,7 +389,7 @@ xhci_dbc_tty_init_port(struct xhci_dbc *dbc, struct dbc_port *port)
 {
 	tty_port_init(&port->port);
 	spin_lock_init(&port->port_lock);
-	tasklet_setup(&port->push, dbc_rx_push);
+	INIT_WORK(&port->push, dbc_rx_push);
 	INIT_LIST_HEAD(&port->read_pool);
 	INIT_LIST_HEAD(&port->read_queue);
 	INIT_LIST_HEAD(&port->write_pool);
@@ -400,7 +401,7 @@ xhci_dbc_tty_init_port(struct xhci_dbc *dbc, struct dbc_port *port)
 static void
 xhci_dbc_tty_exit_port(struct dbc_port *port)
 {
-	tasklet_kill(&port->push);
+	cancel_work_sync(&port->push);
 	tty_port_destroy(&port->port);
 }
 

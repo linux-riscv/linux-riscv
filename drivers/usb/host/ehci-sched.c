@@ -682,7 +682,7 @@ static void start_unlink_intr(struct ehci_hcd *ehci, struct ehci_qh *qh)
 
 /*
  * It is common only one intr URB is scheduled on one qh, and
- * given complete() is run in tasklet context, introduce a bit
+ * given complete() is run in work context, introduce a bit
  * delay to avoid unlink qh too early.
  */
 static void start_unlink_intr_wait(struct ehci_hcd *ehci,

@@ -17,7 +17,7 @@
  *  		- Removed the limit on the number of devices
  *  		- Module now autoloads on device plugin
  *  		- Merged relevant parts of sarlib
- *  		- Replaced the kernel thread with a tasklet
+ *  		- Replaced the kernel thread with a work
  *  		- New packet transmission code
  *  		- Changed proc file contents
  *  		- Fixed all known SMP races
@@ -68,6 +68,7 @@
 #include <linux/wait.h>
 #include <linux/kthread.h>
 #include <linux/ratelimit.h>
+#include <linux/workqueue.h>
 
 #ifdef VERBOSE_DEBUG
 static int usbatm_print_packet(struct usbatm_data *instance, const unsigned char *data, int len);
@@ -249,7 +250,7 @@ static void usbatm_complete(struct urb *urb)
 	/* vdbg("%s: urb 0x%p, status %d, actual_length %d",
 	     __func__, urb, status, urb->actual_length); */
 
-	/* Can be invoked from task context, protect against interrupts */
+	/* Can be invoked from work context, protect against interrupts */
 	spin_lock_irqsave(&channel->lock, flags);
 
 	/* must add to the back when receiving; doesn't matter when sending */
@@ -269,7 +270,7 @@ static void usbatm_complete(struct urb *urb)
 		/* throttle processing in case of an error */
 		mod_timer(&channel->delay, jiffies + msecs_to_jiffies(THROTTLE_MSECS));
 	} else
-		tasklet_schedule(&channel->tasklet);
+		queue_work(system_bh_wq, &channel->work);
 }
 
 
@@ -511,10 +512,10 @@ static unsigned int usbatm_write_cells(struct usbatm_data *instance,
 **  receive  **
 **************/
 
-static void usbatm_rx_process(struct tasklet_struct *t)
+static void usbatm_rx_process(struct work_struct *t)
 {
-	struct usbatm_data *instance = from_tasklet(instance, t,
-						    rx_channel.tasklet);
+	struct usbatm_data *instance = from_work(instance, t,
+						    rx_channel.work);
 	struct urb *urb;
 
 	while ((urb = usbatm_pop_urb(&instance->rx_channel))) {
@@ -565,10 +566,10 @@ static void usbatm_rx_process(struct tasklet_struct *t)
 **  send  **
 ***********/
 
-static void usbatm_tx_process(struct tasklet_struct *t)
+static void usbatm_tx_process(struct work_struct *t)
 {
-	struct usbatm_data *instance = from_tasklet(instance, t,
-						    tx_channel.tasklet);
+	struct usbatm_data *instance = from_work(instance, t,
+						    tx_channel.work);
 	struct sk_buff *skb = instance->current_skb;
 	struct urb *urb = NULL;
 	const unsigned int buf_size = instance->tx_channel.buf_size;
@@ -632,13 +633,13 @@ static void usbatm_cancel_send(struct usbatm_data *instance,
 	}
 	spin_unlock_irq(&instance->sndqueue.lock);
 
-	tasklet_disable(&instance->tx_channel.tasklet);
+	disable_work_sync(&instance->tx_channel.work);
 	if ((skb = instance->current_skb) && (UDSL_SKB(skb)->atm.vcc == vcc)) {
 		atm_dbg(instance, "%s: popping current skb (0x%p)\n", __func__, skb);
 		instance->current_skb = NULL;
 		usbatm_pop(vcc, skb);
 	}
-	tasklet_enable(&instance->tx_channel.tasklet);
+	enable_and_queue_work(system_bh_wq, &instance->tx_channel.work);
 }
 
 static int usbatm_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
@@ -677,7 +678,7 @@ static int usbatm_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 	ctrl->crc = crc32_be(~0, skb->data, skb->len);
 
 	skb_queue_tail(&instance->sndqueue, skb);
-	tasklet_schedule(&instance->tx_channel.tasklet);
+	queue_work(system_bh_wq, &instance->tx_channel.work);
 
 	return 0;
 
@@ -695,8 +696,8 @@ static void usbatm_destroy_instance(struct kref *kref)
 {
 	struct usbatm_data *instance = container_of(kref, struct usbatm_data, refcount);
 
-	tasklet_kill(&instance->rx_channel.tasklet);
-	tasklet_kill(&instance->tx_channel.tasklet);
+	cancel_work_sync(&instance->rx_channel.work);
+	cancel_work_sync(&instance->tx_channel.work);
 	usb_put_dev(instance->usb_dev);
 	kfree(instance);
 }
@@ -823,12 +824,12 @@ static int usbatm_atm_open(struct atm_vcc *vcc)
 
 	vcc->dev_data = new;
 
-	tasklet_disable(&instance->rx_channel.tasklet);
+	disable_work_sync(&instance->rx_channel.work);
 	instance->cached_vcc = new;
 	instance->cached_vpi = vpi;
 	instance->cached_vci = vci;
 	list_add(&new->list, &instance->vcc_list);
-	tasklet_enable(&instance->rx_channel.tasklet);
+	enable_and_queue_work(system_bh_wq, &instance->rx_channel.work);
 
 	set_bit(ATM_VF_ADDR, &vcc->flags);
 	set_bit(ATM_VF_PARTIAL, &vcc->flags);
@@ -858,14 +859,14 @@ static void usbatm_atm_close(struct atm_vcc *vcc)
 
 	mutex_lock(&instance->serialize);	/* vs self, usbatm_atm_open, usbatm_usb_disconnect */
 
-	tasklet_disable(&instance->rx_channel.tasklet);
+	disable_work_sync(&instance->rx_channel.work);
 	if (instance->cached_vcc == vcc_data) {
 		instance->cached_vcc = NULL;
 		instance->cached_vpi = ATM_VPI_UNSPEC;
 		instance->cached_vci = ATM_VCI_UNSPEC;
 	}
 	list_del(&vcc_data->list);
-	tasklet_enable(&instance->rx_channel.tasklet);
+	enable_and_queue_work(system_bh_wq, &instance->rx_channel.work);
 
 	kfree_skb(vcc_data->sarb);
 	vcc_data->sarb = NULL;
@@ -991,18 +992,18 @@ static int usbatm_heavy_init(struct usbatm_data *instance)
 	return 0;
 }
 
-static void usbatm_tasklet_schedule(struct timer_list *t)
+static void usbatm_queue_work(system_bh_wq, struct timer_list *t)
 {
 	struct usbatm_channel *channel = from_timer(channel, t, delay);
 
-	tasklet_schedule(&channel->tasklet);
+	queue_work(system_bh_wq, &channel->work);
 }
 
 static void usbatm_init_channel(struct usbatm_channel *channel)
 {
 	spin_lock_init(&channel->lock);
 	INIT_LIST_HEAD(&channel->list);
-	timer_setup(&channel->delay, usbatm_tasklet_schedule, 0);
+	timer_setup(&channel->delay, usbatm_queue_work, 0);
 }
 
 int usbatm_usb_probe(struct usb_interface *intf, const struct usb_device_id *id,
@@ -1074,8 +1075,8 @@ int usbatm_usb_probe(struct usb_interface *intf, const struct usb_device_id *id,
 
 	usbatm_init_channel(&instance->rx_channel);
 	usbatm_init_channel(&instance->tx_channel);
-	tasklet_setup(&instance->rx_channel.tasklet, usbatm_rx_process);
-	tasklet_setup(&instance->tx_channel.tasklet, usbatm_tx_process);
+	INIT_WORK(&instance->rx_channel.work, usbatm_rx_process);
+	INIT_WORK(&instance->tx_channel.work, usbatm_tx_process);
 	instance->rx_channel.stride = ATM_CELL_SIZE + driver->rx_padding;
 	instance->tx_channel.stride = ATM_CELL_SIZE + driver->tx_padding;
 	instance->rx_channel.usbatm = instance->tx_channel.usbatm = instance;
@@ -1231,8 +1232,8 @@ void usbatm_usb_disconnect(struct usb_interface *intf)
 		vcc_release_async(vcc_data->vcc, -EPIPE);
 	mutex_unlock(&instance->serialize);
 
-	tasklet_disable(&instance->rx_channel.tasklet);
-	tasklet_disable(&instance->tx_channel.tasklet);
+	disable_work_sync(&instance->rx_channel.work);
+	disable_work_sync(&instance->tx_channel.work);
 
 	for (i = 0; i < num_rcv_urbs + num_snd_urbs; i++)
 		usb_kill_urb(instance->urbs[i]);
@@ -1245,8 +1246,8 @@ void usbatm_usb_disconnect(struct usb_interface *intf)
 	INIT_LIST_HEAD(&instance->rx_channel.list);
 	INIT_LIST_HEAD(&instance->tx_channel.list);
 
-	tasklet_enable(&instance->rx_channel.tasklet);
-	tasklet_enable(&instance->tx_channel.tasklet);
+	enable_and_queue_work(system_bh_wq, &instance->rx_channel.work);
+	enable_and_queue_work(system_bh_wq, &instance->tx_channel.work);
 
 	if (instance->atm_dev && instance->driver->atm_stop)
 		instance->driver->atm_stop(instance, instance->atm_dev);

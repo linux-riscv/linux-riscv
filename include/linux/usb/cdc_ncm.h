@@ -96,7 +96,7 @@
 struct cdc_ncm_ctx {
 	struct usb_cdc_ncm_ntb_parameters ncm_parm;
 	struct hrtimer tx_timer;
-	struct tasklet_struct bh;
+	struct work_struct bh;
 
 	struct usbnet *dev;
 

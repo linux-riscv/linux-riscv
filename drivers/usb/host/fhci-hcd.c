@@ -211,8 +211,7 @@ static int fhci_mem_init(struct fhci_hcd *fhci)
 	INIT_LIST_HEAD(&fhci->empty_tds);
 
 	/* initialize work queue to handle done list */
-	fhci_tasklet.data = (unsigned long)fhci;
-	fhci->process_done_task = &fhci_tasklet;
+	INIT_WORK(&fhci->process_done_task, process_done_list);
 
 	for (i = 0; i < MAX_TDS; i++) {
 		struct td *td;

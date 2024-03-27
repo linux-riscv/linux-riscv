@@ -35,6 +35,7 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
+#include <linux/workqueue.h>
 #include <soc/fsl/qe/qe.h>
 #include <asm/cpm.h>
 #include <asm/dma.h>
@@ -930,9 +931,9 @@ static int qe_ep_rxframe_handle(struct qe_ep *ep)
 	return 0;
 }
 
-static void ep_rx_tasklet(struct tasklet_struct *t)
+static void ep_rx_work(struct work_struct *t)
 {
-	struct qe_udc *udc = from_tasklet(udc, t, rx_tasklet);
+	struct qe_udc *udc = from_work(udc, t, rx_work);
 	struct qe_ep *ep;
 	struct qe_frame *pframe;
 	struct qe_bd __iomem *bd;
@@ -945,9 +946,9 @@ static void ep_rx_tasklet(struct tasklet_struct *t)
 	for (i = 1; i < USB_MAX_ENDPOINTS; i++) {
 		ep = &udc->eps[i];
 
-		if (ep->dir == USB_DIR_IN || ep->enable_tasklet == 0) {
+		if (ep->dir == USB_DIR_IN || ep->enable_work == 0) {
 			dev_dbg(udc->dev,
-				"This is a transmit ep or disable tasklet!\n");
+				"This is a transmit ep or disable work!\n");
 			continue;
 		}
 
@@ -1012,7 +1013,7 @@ static void ep_rx_tasklet(struct tasklet_struct *t)
 		if (ep->localnack)
 			ep_recycle_rxbds(ep);
 
-		ep->enable_tasklet = 0;
+		ep->enable_work = 0;
 	} /* for i=1 */
 
 	spin_unlock_irqrestore(&udc->lock, flags);
@@ -1057,8 +1058,8 @@ static int qe_ep_rx(struct qe_ep *ep)
 		return 0;
 	}
 
-	tasklet_schedule(&udc->rx_tasklet);
-	ep->enable_tasklet = 1;
+	queue_work(system_bh_wq, &udc->rx_work);
+	ep->enable_work = 1;
 
 	return 0;
 }
@@ -2559,7 +2560,7 @@ static int qe_udc_probe(struct platform_device *ofdev)
 					DMA_TO_DEVICE);
 	}
 
-	tasklet_setup(&udc->rx_tasklet, ep_rx_tasklet);
+	INIT_WORK(&udc->rx_work, ep_rx_work);
 	/* request irq and disable DR  */
 	udc->usb_irq = irq_of_parse_and_map(np, 0);
 	if (!udc->usb_irq) {
@@ -2636,7 +2637,7 @@ static void qe_udc_remove(struct platform_device *ofdev)
 	usb_del_gadget_udc(&udc->gadget);
 
 	udc->done = &done;
-	tasklet_disable(&udc->rx_tasklet);
+	disable_work_sync(&udc->rx_work);
 
 	if (udc->nullmap) {
 		dma_unmap_single(udc->gadget.dev.parent,
@@ -2671,7 +2672,7 @@ static void qe_udc_remove(struct platform_device *ofdev)
 	free_irq(udc->usb_irq, udc);
 	irq_dispose_mapping(udc->usb_irq);
 
-	tasklet_kill(&udc->rx_tasklet);
+	cancel_work_sync(&udc->rx_work);
 
 	iounmap(udc->usb_regs);
 

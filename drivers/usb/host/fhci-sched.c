@@ -628,13 +628,13 @@ irqreturn_t fhci_irq(struct usb_hcd *hcd)
  * is process_del_list(),which unlinks URBs by scanning EDs,instead of scanning
  * the (re-reversed) done list as this does.
  */
-static void process_done_list(unsigned long data)
+static void process_done_list(struct work_struct *t)
 {
 	struct urb *urb;
 	struct ed *ed;
 	struct td *td;
 	struct urb_priv *urb_priv;
-	struct fhci_hcd *fhci = (struct fhci_hcd *)data;
+	struct fhci_hcd *fhci = from_work(fhci, t, process_done_task);
 
 	disable_irq(fhci->timer->irq);
 	disable_irq(fhci_to_hcd(fhci)->irq);
@@ -677,13 +677,13 @@ static void process_done_list(unsigned long data)
 	enable_irq(fhci_to_hcd(fhci)->irq);
 }
 
-DECLARE_TASKLET_OLD(fhci_tasklet, process_done_list);
+DECLARE_WORK(fhci_work, process_done_list);
 
 /* transfer complted callback */
 u32 fhci_transfer_confirm_callback(struct fhci_hcd *fhci)
 {
-	if (!fhci->process_done_task->state)
-		tasklet_schedule(fhci->process_done_task);
+	if (!fhci->process_done_task)
+		queue_work(system_bh_wq, fhci->process_done_task);
 	return 0;
 }
 
