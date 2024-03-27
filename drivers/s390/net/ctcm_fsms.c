@@ -1420,12 +1420,12 @@ static void ctcmpc_chx_rx(fsm_instance *fi, int event, void *arg)
 		case MPCG_STATE_READY:
 			skb_put_data(new_skb, skb->data, block_len);
 			skb_queue_tail(&ch->io_queue, new_skb);
-			tasklet_schedule(&ch->ch_tasklet);
+			queue_work(system_bh_wq, &ch->ch_work);
 			break;
 		default:
 			skb_put_data(new_skb, skb->data, len);
 			skb_queue_tail(&ch->io_queue, new_skb);
-			tasklet_hi_schedule(&ch->ch_tasklet);
+			queue_work(system_bh_highpri_wq, &ch->ch_work);
 			break;
 		}
 	}

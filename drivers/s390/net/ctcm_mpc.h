@@ -13,6 +13,7 @@
 
 #include <linux/interrupt.h>
 #include <linux/skbuff.h>
+#include <linux/workqueue.h>
 #include "fsm.h"
 
 /*
@@ -156,8 +157,8 @@ struct mpcg_info {
 };
 
 struct mpc_group {
-	struct tasklet_struct mpc_tasklet;
-	struct tasklet_struct mpc_tasklet2;
+	struct work_struct mpc_work;
+	struct work_struct mpc_work2;
 	int	changed_side;
 	int	saved_state;
 	int	channels_terminating;
@@ -233,6 +234,6 @@ void mpc_group_ready(unsigned long adev);
 void mpc_channel_action(struct channel *ch, int direction, int action);
 void mpc_action_send_discontact(unsigned long thischan);
 void mpc_action_discontact(fsm_instance *fi, int event, void *arg);
-void ctcmpc_bh(unsigned long thischan);
+void ctcmpc_bh(struct work_struct *t);
 #endif
 /* --- This is the END my friend --- */

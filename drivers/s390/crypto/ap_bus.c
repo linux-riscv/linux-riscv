@@ -111,10 +111,10 @@ static void ap_scan_bus_wq_callback(struct work_struct *);
 static DECLARE_WORK(ap_scan_bus_work, ap_scan_bus_wq_callback);
 
 /*
- * Tasklet & timer for AP request polling and interrupts
+ * Work & timer for AP request polling and interrupts
  */
-static void ap_tasklet_fn(unsigned long);
-static DECLARE_TASKLET_OLD(ap_tasklet, ap_tasklet_fn);
+static void ap_work_fn(struct work_struct *);
+static DECLARE_WORK(ap_work, ap_work_fn);
 static DECLARE_WAIT_QUEUE_HEAD(ap_poll_wait);
 static struct task_struct *ap_poll_kthread;
 static DEFINE_MUTEX(ap_poll_thread_mutex);
@@ -450,16 +450,16 @@ void ap_request_timeout(struct timer_list *t)
  * ap_poll_timeout(): AP receive polling for finished AP requests.
  * @unused: Unused pointer.
  *
- * Schedules the AP tasklet using a high resolution timer.
+ * Schedules the AP work using a high resolution timer.
  */
 static enum hrtimer_restart ap_poll_timeout(struct hrtimer *unused)
 {
-	tasklet_schedule(&ap_tasklet);
+	queue_work(system_bh_wq, &ap_work);
 	return HRTIMER_NORESTART;
 }
 
 /**
- * ap_interrupt_handler() - Schedule ap_tasklet on interrupt
+ * ap_interrupt_handler() - Schedule ap_work on interrupt
  * @airq: pointer to adapter interrupt descriptor
  * @tpi_info: ignored
  */
@@ -467,23 +467,23 @@ static void ap_interrupt_handler(struct airq_struct *airq,
 				 struct tpi_info *tpi_info)
 {
 	inc_irq_stat(IRQIO_APB);
-	tasklet_schedule(&ap_tasklet);
+	queue_work(system_bh_wq, &ap_work);
 }
 
 /**
- * ap_tasklet_fn(): Tasklet to poll all AP devices.
- * @dummy: Unused variable
+ * ap_work_fn(): Work to poll all AP devices.
+ * @t: pointer to work_struct
  *
  * Poll all AP devices on the bus.
  */
-static void ap_tasklet_fn(unsigned long dummy)
+static void ap_work_fn(struct work_struct *t)
 {
 	int bkt;
 	struct ap_queue *aq;
 	enum ap_sm_wait wait = AP_SM_WAIT_NONE;
 
 	/* Reset the indicator if interrupts are used. Thus new interrupts can
-	 * be received. Doing it in the beginning of the tasklet is therefore
+	 * be received. Doing it in the beginning of the work is therefore
 	 * important that no requests on any AP get lost.
 	 */
 	if (ap_irq_flag)
@@ -546,7 +546,7 @@ static int ap_poll_thread(void *data)
 			try_to_freeze();
 			continue;
 		}
-		ap_tasklet_fn(0);
+		queue_work(system_bh_wq, &ap_work);
 	}
 
 	return 0;

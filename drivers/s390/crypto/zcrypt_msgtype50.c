@@ -403,7 +403,7 @@ static int convert_response(struct zcrypt_queue *zq,
 /*
  * This function is called from the AP bus code after a crypto request
  * "msg" has finished with the reply message "reply".
- * It is called from tasklet context.
+ * It is called from work context.
  * @aq: pointer to the AP device
  * @msg: pointer to the AP message
  * @reply: pointer to the AP reply message

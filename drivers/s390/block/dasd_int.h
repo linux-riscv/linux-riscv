@@ -28,7 +28,7 @@
  *   known -> basic: request irq line for the device.
  *   basic -> ready: do the initial analysis, e.g. format detection,
  *                   do block device setup and detect partitions.
- *   ready -> online: schedule the device tasklet.
+ *   ready -> online: schedule the device work.
  * Things to do for shutdown state transitions:
  *   online -> ready: just set the new device state.
  *   ready -> basic: flush requests from the block device layer, clear
@@ -579,8 +579,8 @@ struct dasd_device {
 	struct list_head erp_chunks;
 	struct list_head ese_chunks;
 
-	atomic_t tasklet_scheduled;
-        struct tasklet_struct tasklet;
+	atomic_t work_scheduled;
+	struct work_struct bh;
 	struct work_struct kick_work;
 	struct work_struct reload_device;
 	struct work_struct kick_validate;
@@ -630,8 +630,8 @@ struct dasd_block {
 	struct list_head ccw_queue;
 	spinlock_t queue_lock;
 
-	atomic_t tasklet_scheduled;
-	struct tasklet_struct tasklet;
+	atomic_t work_scheduled;
+	struct work_struct bh;
 	struct timer_list timer;
 
 	struct dentry *debugfs_dentry;

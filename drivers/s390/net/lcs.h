@@ -290,7 +290,7 @@ struct lcs_channel {
 	struct ccw_device *ccwdev;
 	struct ccw1 ccws[LCS_NUM_BUFFS + 1];
 	wait_queue_head_t wait_q;
-	struct tasklet_struct irq_tasklet;
+	struct work_struct irq_work;
 	struct lcs_buffer iob[LCS_NUM_BUFFS];
 	int io_idx;
 	int buf_idx;
