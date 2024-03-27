@@ -18,6 +18,7 @@ select:
         enum:
           - starfive,jh7100-dwmac
           - starfive,jh7110-dwmac
+          - starfive,jh8100-dwmac
   required:
     - compatible
 
@@ -28,6 +29,10 @@ properties:
           - const: starfive,jh7100-dwmac
           - const: snps,dwmac
       - items:
+          - const: starfive,jh7110-dwmac
+          - const: snps,dwmac-5.20
+      - items:
+          - const: starfive,jh8100-dwmac
           - const: starfive,jh7110-dwmac
           - const: snps,dwmac-5.20
 
@@ -116,11 +121,25 @@ allOf:
           minItems: 3
           maxItems: 3
 
-        resets:
-          minItems: 2
+      if:
+        properties:
+          compatible:
+            contains:
+              const: starfive,jh8100-dwmac
+      then:
+        properties:
+          resets:
+            maxItems: 1
 
-        reset-names:
-          minItems: 2
+          reset-names:
+            const: stmmaceth
+      else:
+        properties:
+          resets:
+            minItems: 2
+
+          reset-names:
+            minItems: 2
 
 unevaluatedProperties: false
 
