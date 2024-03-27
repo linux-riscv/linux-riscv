@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
+#include <linux/workqueue.h>
 
 #include "mantis_reg.h"
 #include "mantis_uart.h"
@@ -125,7 +126,7 @@ struct mantis_pci {
 	__le32			*risc_cpu;
 	dma_addr_t		risc_dma;
 
-	struct tasklet_struct	tasklet;
+	struct work_struct 	work;
 	spinlock_t		intmask_lock;
 
 	struct i2c_adapter	adapter;

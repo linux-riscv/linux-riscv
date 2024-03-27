@@ -25,6 +25,7 @@
 #include <linux/clk-provider.h>
 #include <linux/videodev2.h>
 #include <linux/pm_runtime.h>
+#include <linux/workqueue.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-ctrls.h>
@@ -439,9 +440,9 @@ static void mcam_ctlr_dma_vmalloc(struct mcam_camera *cam)
 /*
  * Copy data out to user space in the vmalloc case
  */
-static void mcam_frame_tasklet(struct tasklet_struct *t)
+static void mcam_frame_work(struct work_struct *t)
 {
-	struct mcam_camera *cam = from_tasklet(cam, t, s_tasklet);
+	struct mcam_camera *cam = from_work(cam, t, s_work);
 	int i;
 	unsigned long flags;
 	struct mcam_vb_buffer *buf;
@@ -480,7 +481,7 @@ static void mcam_frame_tasklet(struct tasklet_struct *t)
 
 
 /*
- * Make sure our allocated buffers are up to the task.
+ * Make sure our allocated buffers are up to the work.
  */
 static int mcam_check_dma_buffers(struct mcam_camera *cam)
 {
@@ -493,7 +494,7 @@ static int mcam_check_dma_buffers(struct mcam_camera *cam)
 
 static void mcam_vmalloc_done(struct mcam_camera *cam, int frame)
 {
-	tasklet_schedule(&cam->s_tasklet);
+	queue_work(system_bh_wq, &cam->s_work);
 }
 
 #else /* MCAM_MODE_VMALLOC */
@@ -1305,7 +1306,7 @@ static int mcam_setup_vb2(struct mcam_camera *cam)
 		break;
 	case B_vmalloc:
 #ifdef MCAM_MODE_VMALLOC
-		tasklet_setup(&cam->s_tasklet, mcam_frame_tasklet);
+		INIT_WORK(&cam->s_work, mcam_frame_work);
 		vq->ops = &mcam_vb2_ops;
 		vq->mem_ops = &vb2_vmalloc_memops;
 		cam->dma_setup = mcam_ctlr_dma_vmalloc;

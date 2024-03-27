@@ -35,6 +35,7 @@
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
+#include <linux/workqueue.h>
 
 #include <asm/dma.h>
 #include <asm/irq.h>
@@ -298,7 +299,7 @@ struct ddb_link {
 	spinlock_t             lock; /* lock link access */
 	struct mutex           flash_mutex; /* lock flash access */
 	struct ddb_lnb         lnb;
-	struct tasklet_struct  tasklet;
+	struct work_struct work;
 	struct ddb_ids         ids;
 
 	spinlock_t             temp_lock; /* lock temp chip access */

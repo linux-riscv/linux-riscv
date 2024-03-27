@@ -33,6 +33,7 @@
 #include <linux/time.h>
 #include <linux/usb.h>
 #include <linux/wait.h>
+#include <linux/workqueue.h>
 
 #include "c8sectpfe-common.h"
 #include "c8sectpfe-core.h"
@@ -73,16 +74,16 @@ static void c8sectpfe_timer_interrupt(struct timer_list *t)
 
 		/* is this descriptor initialised and TP enabled */
 		if (channel->irec && readl(channel->irec + DMA_PRDS_TPENABLE))
-			tasklet_schedule(&channel->tsklet);
+			queue_work(system_bh_wq, &channel->tsklet);
 	}
 
 	fei->timer.expires = jiffies +	msecs_to_jiffies(POLL_MSECS);
 	add_timer(&fei->timer);
 }
 
-static void channel_swdemux_tsklet(struct tasklet_struct *t)
+static void channel_swdemux_tsklet(struct work_struct *t)
 {
-	struct channel_info *channel = from_tasklet(channel, t, tsklet);
+	struct channel_info *channel = from_work(channel, t, tsklet);
 	struct c8sectpfei *fei;
 	unsigned long wp, rp;
 	int pos, num_packets, n, size;
@@ -211,7 +212,7 @@ static int c8sectpfe_start_feed(struct dvb_demux_feed *dvbdmxfeed)
 
 		dev_dbg(fei->dev, "Starting channel=%p\n", channel);
 
-		tasklet_setup(&channel->tsklet, channel_swdemux_tsklet);
+		INIT_WORK(&channel->tsklet, channel_swdemux_tsklet);
 
 		/* Reset the internal inputblock sram pointers */
 		writel(channel->fifo,
@@ -304,7 +305,7 @@ static int c8sectpfe_stop_feed(struct dvb_demux_feed *dvbdmxfeed)
 		/* disable this channels descriptor */
 		writel(0,  channel->irec + DMA_PRDS_TPENABLE);
 
-		tasklet_disable(&channel->tsklet);
+		disable_work_sync(&channel->tsklet);
 
 		/* now request memdma channel goes idle */
 		idlereq = (1 << channel->tsin_id) | IDLEREQ;
@@ -631,8 +632,8 @@ static int configure_memdma_and_inputblock(struct c8sectpfei *fei,
 	writel(tsin->back_buffer_busaddr, tsin->irec + DMA_PRDS_BUSWP_TP(0));
 	writel(tsin->back_buffer_busaddr, tsin->irec + DMA_PRDS_BUSRP_TP(0));
 
-	/* initialize tasklet */
-	tasklet_setup(&tsin->tsklet, channel_swdemux_tsklet);
+	/* initialize work */
+	INIT_WORK(&tsin->tsklet, channel_swdemux_tsklet);
 
 	return 0;
 

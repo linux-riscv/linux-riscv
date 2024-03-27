@@ -21,6 +21,7 @@
 #include <linux/byteorder/generic.h>
 #include <linux/firmware.h>
 #include <linux/vmalloc.h>
+#include <linux/workqueue.h>
 
 #include "ngene.h"
 
@@ -50,9 +51,9 @@ DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 /* nGene interrupt handler **************************************************/
 /****************************************************************************/
 
-static void event_tasklet(struct tasklet_struct *t)
+static void event_work(struct work_struct *t)
 {
-	struct ngene *dev = from_tasklet(dev, t, event_tasklet);
+	struct ngene *dev = from_work(dev, t, event_work);
 
 	while (dev->EventQueueReadIndex != dev->EventQueueWriteIndex) {
 		struct EVENT_BUFFER Event =
@@ -68,9 +69,9 @@ static void event_tasklet(struct tasklet_struct *t)
 	}
 }
 
-static void demux_tasklet(struct tasklet_struct *t)
+static void demux_work(struct work_struct *t)
 {
-	struct ngene_channel *chan = from_tasklet(chan, t, demux_tasklet);
+	struct ngene_channel *chan = from_work(chan, t, demux_work);
 	struct device *pdev = &chan->dev->pci_dev->dev;
 	struct SBufferHeader *Cur = chan->nextBuffer;
 
@@ -204,7 +205,7 @@ static irqreturn_t irq_handler(int irq, void *dev_id)
 			dev->EventQueueOverflowFlag = 1;
 		}
 		dev->EventBuffer->EventStatus &= ~0x80;
-		tasklet_schedule(&dev->event_tasklet);
+		queue_work(system_bh_wq, &dev->event_work);
 		rc = IRQ_HANDLED;
 	}
 
@@ -217,8 +218,8 @@ static irqreturn_t irq_handler(int irq, void *dev_id)
 			     ngeneBuffer.SR.Flags & 0xC0) == 0x80) {
 				dev->channel[i].nextBuffer->
 					ngeneBuffer.SR.Flags |= 0x40;
-				tasklet_schedule(
-					&dev->channel[i].demux_tasklet);
+				queue_work(system_bh_wq,
+					&dev->channel[i].demux_work);
 				rc = IRQ_HANDLED;
 			}
 		}
@@ -1181,7 +1182,7 @@ static void ngene_init(struct ngene *dev)
 	struct device *pdev = &dev->pci_dev->dev;
 	int i;
 
-	tasklet_setup(&dev->event_tasklet, event_tasklet);
+	INIT_WORK(&dev->event_work, event_work);
 
 	memset_io(dev->iomem + 0xc000, 0x00, 0x220);
 	memset_io(dev->iomem + 0xc400, 0x00, 0x100);
@@ -1395,7 +1396,7 @@ static void release_channel(struct ngene_channel *chan)
 	if (chan->running)
 		set_transfer(chan, 0);
 
-	tasklet_kill(&chan->demux_tasklet);
+	cancel_work_sync(&chan->demux_work);
 
 	if (chan->ci_dev) {
 		dvb_unregister_device(chan->ci_dev);
@@ -1445,7 +1446,7 @@ static int init_channel(struct ngene_channel *chan)
 	struct ngene_info *ni = dev->card_info;
 	int io = ni->io_type[nr];
 
-	tasklet_setup(&chan->demux_tasklet, demux_tasklet);
+	INIT_WORK(&chan->demux_work, demux_work);
 	chan->users = 0;
 	chan->type = io;
 	chan->mode = chan->type;	/* for now only one mode */
@@ -1647,7 +1648,7 @@ void ngene_remove(struct pci_dev *pdev)
 	struct ngene *dev = pci_get_drvdata(pdev);
 	int i;
 
-	tasklet_kill(&dev->event_tasklet);
+	cancel_work_sync(&dev->event_work);
 	for (i = MAX_STREAM - 1; i >= 0; i--)
 		release_channel(&dev->channel[i]);
 	if (dev->ci.en)
