@@ -134,6 +134,7 @@ static DEFINE_PER_CPU(struct clock_event_device, clint_clock_event) = {
 	.rating				= 100,
 	.set_next_event			= clint_clock_next_event,
 	.set_state_shutdown		= clint_clock_shutdown,
+	.set_state_oneshot_stopped	= clint_clock_shutdown,
 };
 
 static int clint_timer_starting_cpu(unsigned int cpu)
