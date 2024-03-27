@@ -11,6 +11,7 @@
 #define ZFCP_QDIO_H
 
 #include <linux/interrupt.h>
+#include <linux/workqueue.h>
 #include <asm/qdio.h>
 
 #define ZFCP_QDIO_SBALE_LEN	PAGE_SIZE
@@ -30,8 +31,8 @@
  * @req_q_util: used for accounting
  * @req_q_full: queue full incidents
  * @req_q_wq: used to wait for SBAL availability
- * @irq_tasklet: used for QDIO interrupt processing
- * @request_tasklet: used for Request Queue completion processing
+ * @irq_work: used for QDIO interrupt processing
+ * @request_work: used for Request Queue completion processing
  * @request_timer: used to trigger the Request Queue completion processing
  * @adapter: adapter used in conjunction with this qdio structure
  * @max_sbale_per_sbal: qdio limit per sbal
@@ -48,8 +49,8 @@ struct zfcp_qdio {
 	u64			req_q_util;
 	atomic_t		req_q_full;
 	wait_queue_head_t	req_q_wq;
-	struct tasklet_struct	irq_tasklet;
-	struct tasklet_struct	request_tasklet;
+	struct work_struct 	irq_work;
+	struct work_struct 	request_work;
 	struct timer_list	request_timer;
 	struct zfcp_adapter	*adapter;
 	u16			max_sbale_per_sbal;

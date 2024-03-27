@@ -588,7 +588,7 @@ void ctc_mpc_flow_control(int port_num, int flowc)
 			fsm_newstate(grp->fsm, MPCG_STATE_READY);
 			/* ensure any data that has accumulated */
 			/* on the io_queue will now be sen t	*/
-			tasklet_schedule(&rch->ch_tasklet);
+			queue_work(system_bh_wq, &rch->ch_work);
 		}
 		/* possible race condition			*/
 		if (mpcg_state == MPCG_STATE_READY) {
@@ -847,7 +847,7 @@ static void mpc_action_go_ready(fsm_instance *fsm, int event, void *arg)
 	grp->out_of_sequence = 0;
 	grp->estconn_called = 0;
 
-	tasklet_hi_schedule(&grp->mpc_tasklet2);
+	queue_work(system_bh_highpri_wq, &grp->mpc_work2);
 
 	return;
 }
@@ -1213,16 +1213,16 @@ done:
 }
 
 /*
- * tasklet helper for mpc's skb unpacking.
+ * work helper for mpc's skb unpacking.
  *
  * ch		The channel to work on.
  * Allow flow control back pressure to occur here.
  * Throttling back channel can result in excessive
  * channel inactivity and system deact of channel
  */
-void ctcmpc_bh(unsigned long thischan)
+void ctcmpc_bh(struct work_struct *t)
 {
-	struct channel	  *ch	= (struct channel *)thischan;
+	struct channel	  *ch	= from_work(ch, t, ch_work);
 	struct sk_buff	  *skb;
 	struct net_device *dev	= ch->netdev;
 	struct ctcm_priv  *priv	= dev->ml_priv;
@@ -1380,7 +1380,7 @@ static void mpc_action_go_inop(fsm_instance *fi, int event, void *arg)
 	case MPCG_STATE_FLOWC:
 	case MPCG_STATE_READY:
 	default:
-		tasklet_hi_schedule(&wch->ch_disc_tasklet);
+		queue_work(system_bh_wq, &wch->ch_disc_work);
 	}
 
 	grp->xid2_tgnum = 0;

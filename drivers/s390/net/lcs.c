@@ -49,7 +49,7 @@ static struct device *lcs_root_dev;
 /*
  * Some prototypes.
  */
-static void lcs_tasklet(unsigned long);
+static void lcs_work(struct work_struct *);
 static void lcs_start_kernel_thread(struct work_struct *);
 static void lcs_get_frames_cb(struct lcs_channel *, struct lcs_buffer *);
 #ifdef CONFIG_IP_MULTICAST
@@ -140,8 +140,8 @@ static void
 lcs_cleanup_channel(struct lcs_channel *channel)
 {
 	LCS_DBF_TEXT(3, setup, "cleanch");
-	/* Kill write channel tasklets. */
-	tasklet_kill(&channel->irq_tasklet);
+	/* Kill write channel works. */
+	cancel_work_sync(&channel->irq_work);
 	/* Free channel buffers. */
 	lcs_free_channel(channel);
 }
@@ -244,9 +244,8 @@ lcs_setup_read(struct lcs_card *card)
 	LCS_DBF_TEXT(3, setup, "initread");
 
 	lcs_setup_read_ccws(card);
-	/* Initialize read channel tasklet. */
-	card->read.irq_tasklet.data = (unsigned long) &card->read;
-	card->read.irq_tasklet.func = lcs_tasklet;
+	/* Initialize read channel work. */
+	INIT_WORK(card->read.irq_work, lcs_work);
 	/* Initialize waitqueue. */
 	init_waitqueue_head(&card->read.wait_q);
 }
@@ -290,9 +289,8 @@ lcs_setup_write(struct lcs_card *card)
 	LCS_DBF_TEXT(3, setup, "initwrit");
 
 	lcs_setup_write_ccws(card);
-	/* Initialize write channel tasklet. */
-	card->write.irq_tasklet.data = (unsigned long) &card->write;
-	card->write.irq_tasklet.func = lcs_tasklet;
+	/* Initialize write channel work. */
+	INIT_WORK(card->write.irq_work, lcs_work);
 	/* Initialize waitqueue. */
 	init_waitqueue_head(&card->write.wait_q);
 }
@@ -1429,22 +1427,22 @@ lcs_irq(struct ccw_device *cdev, unsigned long intparm, struct irb *irb)
 	}
 	if (irb->scsw.cmd.fctl & SCSW_FCTL_CLEAR_FUNC)
 		channel->state = LCS_CH_STATE_CLEARED;
-	/* Do the rest in the tasklet. */
-	tasklet_schedule(&channel->irq_tasklet);
+	/* Do the rest in the work. */
+	queue_work(system_bh_wq, &channel->irq_work);
 }
 
 /*
- * Tasklet for IRQ handler
+ * Work for IRQ handler
  */
 static void
-lcs_tasklet(unsigned long data)
+lcs_work(struct work_struct *t)
 {
 	unsigned long flags;
 	struct lcs_channel *channel;
 	struct lcs_buffer *iob;
 	int buf_idx;
 
-	channel = (struct lcs_channel *) data;
+	channel = from_work(channel, t, irq_work);
 	LCS_DBF_TEXT_(5, trace, "tlet%s", dev_name(&channel->ccwdev->dev));
 
 	/* Check for processed buffers. */

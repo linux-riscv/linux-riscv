@@ -2911,7 +2911,7 @@ static int qeth_init_input_buffer(struct qeth_card *card,
 	}
 
 	/*
-	 * since the buffer is accessed only from the input_tasklet
+	 * since the buffer is accessed only from the input_work
 	 * there shouldn't be a need to synchronize; also, since we use
 	 * the QETH_IN_BUF_REQUEUE_THRESHOLD we should never run  out off
 	 * buffers

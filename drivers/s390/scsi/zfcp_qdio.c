@@ -13,6 +13,7 @@
 #include <linux/lockdep.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/workqueue.h>
 #include "zfcp_ext.h"
 #include "zfcp_qdio.h"
 
@@ -72,9 +73,9 @@ static void zfcp_qdio_int_req(struct ccw_device *cdev, unsigned int qdio_err,
 	zfcp_qdio_handler_error(qdio, "qdireq1", qdio_err);
 }
 
-static void zfcp_qdio_request_tasklet(struct tasklet_struct *tasklet)
+static void zfcp_qdio_request_work(struct work_struct *work)
 {
-	struct zfcp_qdio *qdio = from_tasklet(qdio, tasklet, request_tasklet);
+	struct zfcp_qdio *qdio = from_work(qdio, work, request_work);
 	struct ccw_device *cdev = qdio->adapter->ccw_device;
 	unsigned int start, error;
 	int completed;
@@ -104,7 +105,7 @@ static void zfcp_qdio_request_timer(struct timer_list *timer)
 {
 	struct zfcp_qdio *qdio = from_timer(qdio, timer, request_timer);
 
-	tasklet_schedule(&qdio->request_tasklet);
+	queue_work(system_bh_wq, &qdio->request_work);
 }
 
 static void zfcp_qdio_int_resp(struct ccw_device *cdev, unsigned int qdio_err,
@@ -158,15 +159,15 @@ static void zfcp_qdio_int_resp(struct ccw_device *cdev, unsigned int qdio_err,
 		zfcp_erp_adapter_reopen(qdio->adapter, 0, "qdires2");
 }
 
-static void zfcp_qdio_irq_tasklet(struct tasklet_struct *tasklet)
+static void zfcp_qdio_irq_work(struct work_struct *work)
 {
-	struct zfcp_qdio *qdio = from_tasklet(qdio, tasklet, irq_tasklet);
+	struct zfcp_qdio *qdio = from_work(qdio, work, irq_work);
 	struct ccw_device *cdev = qdio->adapter->ccw_device;
 	unsigned int start, error;
 	int completed;
 
 	if (atomic_read(&qdio->req_q_free) < QDIO_MAX_BUFFERS_PER_Q)
-		tasklet_schedule(&qdio->request_tasklet);
+		queue_work(system_bh_wq, &qdio->request_work);
 
 	/* Check the Response Queue: */
 	completed = qdio_inspect_input_queue(cdev, 0, &start, &error);
@@ -178,14 +179,14 @@ static void zfcp_qdio_irq_tasklet(struct tasklet_struct *tasklet)
 
 	if (qdio_start_irq(cdev))
 		/* More work pending: */
-		tasklet_schedule(&qdio->irq_tasklet);
+		queue_work(system_bh_wq, &qdio->irq_work);
 }
 
 static void zfcp_qdio_poll(struct ccw_device *cdev, unsigned long data)
 {
 	struct zfcp_qdio *qdio = (struct zfcp_qdio *) data;
 
-	tasklet_schedule(&qdio->irq_tasklet);
+	queue_work(system_bh_wq, &qdio->irq_work);
 }
 
 static struct qdio_buffer_element *
@@ -315,7 +316,7 @@ int zfcp_qdio_send(struct zfcp_qdio *qdio, struct zfcp_qdio_req *q_req)
 
 	/*
 	 * This should actually be a spin_lock_bh(stat_lock), to protect against
-	 * Request Queue completion processing in tasklet context.
+	 * Request Queue completion processing in work context.
 	 * But we can't do so (and are safe), as we always get called with IRQs
 	 * disabled by spin_lock_irq[save](req_q_lock).
 	 */
@@ -339,7 +340,7 @@ int zfcp_qdio_send(struct zfcp_qdio *qdio, struct zfcp_qdio_req *q_req)
 	}
 
 	if (atomic_read(&qdio->req_q_free) <= 2 * ZFCP_QDIO_MAX_SBALS_PER_REQ)
-		tasklet_schedule(&qdio->request_tasklet);
+		queue_work(system_bh_wq, &qdio->request_work);
 	else
 		timer_reduce(&qdio->request_timer,
 			     jiffies + msecs_to_jiffies(ZFCP_QDIO_REQUEST_SCAN_MSECS));
@@ -406,8 +407,8 @@ void zfcp_qdio_close(struct zfcp_qdio *qdio)
 
 	wake_up(&qdio->req_q_wq);
 
-	tasklet_disable(&qdio->irq_tasklet);
-	tasklet_disable(&qdio->request_tasklet);
+	disable_work_sync(&qdio->irq_work);
+	disable_work_sync(&qdio->request_work);
 	del_timer_sync(&qdio->request_timer);
 	qdio_stop_irq(adapter->ccw_device);
 	qdio_shutdown(adapter->ccw_device, QDIO_FLAG_CLEANUP_USING_CLEAR);
@@ -511,11 +512,11 @@ int zfcp_qdio_open(struct zfcp_qdio *qdio)
 	atomic_or(ZFCP_STATUS_ADAPTER_QDIOUP, &qdio->adapter->status);
 
 	/* Enable processing for Request Queue completions: */
-	tasklet_enable(&qdio->request_tasklet);
+	enable_and_queue_work(system_bh_wq, &qdio->request_work);
 	/* Enable processing for QDIO interrupts: */
-	tasklet_enable(&qdio->irq_tasklet);
+	enable_and_queue_work(system_bh_wq, &qdio->irq_work);
 	/* This results in a qdio_start_irq(): */
-	tasklet_schedule(&qdio->irq_tasklet);
+	queue_work(system_bh_wq, &qdio->irq_work);
 
 	zfcp_qdio_shost_update(adapter, qdio);
 
@@ -534,8 +535,8 @@ void zfcp_qdio_destroy(struct zfcp_qdio *qdio)
 	if (!qdio)
 		return;
 
-	tasklet_kill(&qdio->irq_tasklet);
-	tasklet_kill(&qdio->request_tasklet);
+	cancel_work_sync(&qdio->irq_work);
+	cancel_work_sync(&qdio->request_work);
 
 	if (qdio->adapter->ccw_device)
 		qdio_free(qdio->adapter->ccw_device);
@@ -563,10 +564,10 @@ int zfcp_qdio_setup(struct zfcp_adapter *adapter)
 	spin_lock_init(&qdio->req_q_lock);
 	spin_lock_init(&qdio->stat_lock);
 	timer_setup(&qdio->request_timer, zfcp_qdio_request_timer, 0);
-	tasklet_setup(&qdio->irq_tasklet, zfcp_qdio_irq_tasklet);
-	tasklet_setup(&qdio->request_tasklet, zfcp_qdio_request_tasklet);
-	tasklet_disable(&qdio->irq_tasklet);
-	tasklet_disable(&qdio->request_tasklet);
+	INIT_WORK(&qdio->irq_work, zfcp_qdio_irq_work);
+	INIT_WORK(&qdio->request_work, zfcp_qdio_request_work);
+	disable_work_sync(&qdio->irq_work);
+	disable_work_sync(&qdio->request_work);
 
 	adapter->qdio = qdio;
 	return 0;
@@ -580,7 +581,7 @@ int zfcp_qdio_setup(struct zfcp_adapter *adapter)
  * wrapper function sets a flag to ensure hardware logging is only
  * triggered once before going through qdio shutdown.
  *
- * The triggers are always run from qdio tasklet context, so no
+ * The triggers are always run from qdio work context, so no
  * additional synchronization is necessary.
  */
 void zfcp_qdio_siosl(struct zfcp_adapter *adapter)

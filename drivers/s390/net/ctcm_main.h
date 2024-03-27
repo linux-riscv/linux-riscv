@@ -13,6 +13,7 @@
 
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
+#include <linux/workqueue.h>
 
 #include "fsm.h"
 #include "ctcm_dbug.h"
@@ -154,7 +155,7 @@ struct channel {
 	int max_bufsize;
 	struct sk_buff *trans_skb;	/* transmit/receive buffer */
 	struct sk_buff_head io_queue;	/* universal I/O queue */
-	struct tasklet_struct ch_tasklet;	/* MPC ONLY */
+	struct work_struct ch_work;	/* MPC ONLY */
 	/*
 	 * TX queue for collecting skb's during busy.
 	 */
@@ -188,7 +189,7 @@ struct channel {
 	fsm_timer		sweep_timer;
 	struct sk_buff_head	sweep_queue;
 	struct th_header	*discontact_th;
-	struct tasklet_struct	ch_disc_tasklet;
+	struct work_struct 	ch_disc_work;
 	/* MPC ONLY section end */
 
 	int retry;		/* retry counter for misc. operations */

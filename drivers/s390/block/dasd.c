@@ -54,8 +54,8 @@ MODULE_LICENSE("GPL");
  * SECTION: prototypes for static functions of dasd.c
  */
 static int dasd_flush_block_queue(struct dasd_block *);
-static void dasd_device_tasklet(unsigned long);
-static void dasd_block_tasklet(unsigned long);
+static void dasd_device_work(struct work_struct *);
+static void dasd_block_work(struct work_struct *);
 static void do_kick_device(struct work_struct *);
 static void do_reload_device(struct work_struct *);
 static void do_requeue_requests(struct work_struct *);
@@ -114,9 +114,8 @@ struct dasd_device *dasd_alloc_device(void)
 	dasd_init_chunklist(&device->erp_chunks, device->erp_mem, PAGE_SIZE);
 	dasd_init_chunklist(&device->ese_chunks, device->ese_mem, PAGE_SIZE * 2);
 	spin_lock_init(&device->mem_lock);
-	atomic_set(&device->tasklet_scheduled, 0);
-	tasklet_init(&device->tasklet, dasd_device_tasklet,
-		     (unsigned long) device);
+	atomic_set(&device->work_scheduled, 0);
+	INIT_WORK(&device->bh, dasd_device_work);
 	INIT_LIST_HEAD(&device->ccw_queue);
 	timer_setup(&device->timer, dasd_device_timeout, 0);
 	INIT_WORK(&device->kick_work, do_kick_device);
@@ -154,9 +153,8 @@ struct dasd_block *dasd_alloc_block(void)
 	/* open_count = 0 means device online but not in use */
 	atomic_set(&block->open_count, -1);
 
-	atomic_set(&block->tasklet_scheduled, 0);
-	tasklet_init(&block->tasklet, dasd_block_tasklet,
-		     (unsigned long) block);
+	atomic_set(&block->work_scheduled, 0);
+	INIT_WORK(&block->bh, dasd_block_work);
 	INIT_LIST_HEAD(&block->ccw_queue);
 	spin_lock_init(&block->queue_lock);
 	INIT_LIST_HEAD(&block->format_list);
@@ -2148,12 +2146,12 @@ EXPORT_SYMBOL_GPL(dasd_flush_device_queue);
 /*
  * Acquire the device lock and process queues for the device.
  */
-static void dasd_device_tasklet(unsigned long data)
+static void dasd_device_work(struct work_struct *t)
 {
-	struct dasd_device *device = (struct dasd_device *) data;
+	struct dasd_device *device = from_work(device, t, bh);
 	struct list_head final_queue;
 
-	atomic_set (&device->tasklet_scheduled, 0);
+	atomic_set (&device->work_scheduled, 0);
 	INIT_LIST_HEAD(&final_queue);
 	spin_lock_irq(get_ccwdev_lock(device->cdev));
 	/* Check expire time of first request on the ccw queue. */
@@ -2174,15 +2172,15 @@ static void dasd_device_tasklet(unsigned long data)
 }
 
 /*
- * Schedules a call to dasd_tasklet over the device tasklet.
+ * Schedules a call to dasd_work over the device wq.
  */
 void dasd_schedule_device_bh(struct dasd_device *device)
 {
 	/* Protect against rescheduling. */
-	if (atomic_cmpxchg (&device->tasklet_scheduled, 0, 1) != 0)
+	if (atomic_cmpxchg (&device->work_scheduled, 0, 1) != 0)
 		return;
 	dasd_get_device(device);
-	tasklet_hi_schedule(&device->tasklet);
+	queue_work(system_bh_highpri_wq, &device->bh);
 }
 EXPORT_SYMBOL(dasd_schedule_device_bh);
 
@@ -2595,7 +2593,7 @@ int dasd_sleep_on_immediatly(struct dasd_ccw_req *cqr)
 	else
 		rc = -EIO;
 
-	/* kick tasklets */
+	/* kick works */
 	dasd_schedule_device_bh(device);
 	if (device->block)
 		dasd_schedule_block_bh(device->block);
@@ -2891,15 +2889,15 @@ static void __dasd_block_start_head(struct dasd_block *block)
  * block layer request queue, creates ccw requests, enqueues them on
  * a dasd_device and processes ccw requests that have been returned.
  */
-static void dasd_block_tasklet(unsigned long data)
+static void dasd_block_work(struct work_struct *t)
 {
-	struct dasd_block *block = (struct dasd_block *) data;
+	struct dasd_block *block = from_work(block, t, bh);
 	struct list_head final_queue;
 	struct list_head *l, *n;
 	struct dasd_ccw_req *cqr;
 	struct dasd_queue *dq;
 
-	atomic_set(&block->tasklet_scheduled, 0);
+	atomic_set(&block->work_scheduled, 0);
 	INIT_LIST_HEAD(&final_queue);
 	spin_lock_irq(&block->queue_lock);
 	/* Finish off requests on ccw queue */
@@ -2970,7 +2968,7 @@ restart:
 		if (rc < 0)
 			break;
 		/* Rechain request (including erp chain) so it won't be
-		 * touched by the dasd_block_tasklet anymore.
+		 * touched by the dasd_block_work anymore.
 		 * Replace the callback so we notice when the request
 		 * is returned from the dasd_device layer.
 		 */
@@ -3025,16 +3023,16 @@ restart_cb:
 }
 
 /*
- * Schedules a call to dasd_tasklet over the device tasklet.
+ * Schedules a call to dasd_work over the device wq.
  */
 void dasd_schedule_block_bh(struct dasd_block *block)
 {
 	/* Protect against rescheduling. */
-	if (atomic_cmpxchg(&block->tasklet_scheduled, 0, 1) != 0)
+	if (atomic_cmpxchg(&block->work_scheduled, 0, 1) != 0)
 		return;
 	/* life cycle of block is bound to it's base device */
 	dasd_get_device(block->base);
-	tasklet_hi_schedule(&block->tasklet);
+	queue_work(system_bh_highpri_wq, &block->bh);
 }
 EXPORT_SYMBOL(dasd_schedule_block_bh);
 

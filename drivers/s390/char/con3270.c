@@ -28,6 +28,7 @@
 #include <asm/ebcdic.h>
 #include <asm/cpcmd.h>
 #include <linux/uaccess.h>
+#include <linux/workqueue.h>
 
 #include "raw3270.h"
 #include "keyboard.h"
@@ -107,8 +108,8 @@ struct tty3270 {
 	struct raw3270_request *readpartreq;
 	unsigned char inattr;		/* Visible/invisible input. */
 	int throttle, attn;		/* tty throttle/unthrottle. */
-	struct tasklet_struct readlet;	/* Tasklet to issue read request. */
-	struct tasklet_struct hanglet;	/* Tasklet to hang up the tty. */
+	struct work_struct read_work;	/* Work to issue read request. */
+	struct work_struct hang_work;	/* Work to hang up the tty. */
 	struct kbd_data *kbd;		/* key_maps stuff. */
 
 	/* Escape sequence parsing. */
@@ -667,9 +668,9 @@ static void tty3270_scroll_backward(struct kbd_data *kbd)
 /*
  * Pass input line to tty.
  */
-static void tty3270_read_tasklet(unsigned long data)
+static void tty3270_read_work(struct work_struct *T)
 {
-	struct raw3270_request *rrq = (struct raw3270_request *)data;
+	struct raw3270_request *rrq = from_work(rrq, t, read_work);
 	static char kreset_data = TW_KR;
 	struct tty3270 *tp = container_of(rrq->view, struct tty3270, view);
 	char *input;
@@ -734,8 +735,8 @@ static void tty3270_read_callback(struct raw3270_request *rq, void *data)
 	struct tty3270 *tp = container_of(rq->view, struct tty3270, view);
 
 	raw3270_get_view(rq->view);
-	/* Schedule tasklet to pass input to tty. */
-	tasklet_schedule(&tp->readlet);
+	/* Schedule work to pass input to tty. */
+	queue_work(system_bh_wq, &tp->read_work);
 }
 
 /*
@@ -768,9 +769,9 @@ static void tty3270_issue_read(struct tty3270 *tp, int lock)
 /*
  * Hang up the tty
  */
-static void tty3270_hangup_tasklet(unsigned long data)
+static void tty3270_hangup_work(struct work_struct *t)
 {
-	struct tty3270 *tp = (struct tty3270 *)data;
+	struct tty3270 *tp = from_work(tp, t, hang_work);
 
 	tty_port_tty_hangup(&tp->port, true);
 	raw3270_put_view(&tp->view);
@@ -797,7 +798,7 @@ static void tty3270_deactivate(struct raw3270_view *view)
 
 static void tty3270_irq(struct tty3270 *tp, struct raw3270_request *rq, struct irb *irb)
 {
-	/* Handle ATTN. Schedule tasklet to read aid. */
+	/* Handle ATTN. Schedule work to read aid. */
 	if (irb->scsw.cmd.dstat & DEV_STAT_ATTENTION) {
 		if (!tp->throttle)
 			tty3270_issue_read(tp, 0);
@@ -809,7 +810,7 @@ static void tty3270_irq(struct tty3270 *tp, struct raw3270_request *rq, struct i
 		if (irb->scsw.cmd.dstat & DEV_STAT_UNIT_CHECK) {
 			rq->rc = -EIO;
 			raw3270_get_view(&tp->view);
-			tasklet_schedule(&tp->hanglet);
+			queue_work(system_bh_wq, &tp->hang_work);
 		} else {
 			/* Normal end. Copy residual count. */
 			rq->rescnt = irb->scsw.cmd.count;
@@ -850,10 +851,8 @@ static struct tty3270 *tty3270_alloc_view(void)
 
 	tty_port_init(&tp->port);
 	timer_setup(&tp->timer, tty3270_update, 0);
-	tasklet_init(&tp->readlet, tty3270_read_tasklet,
-		     (unsigned long)tp->read);
-	tasklet_init(&tp->hanglet, tty3270_hangup_tasklet,
-		     (unsigned long)tp);
+	INIT_WORK(&tp->read_work, tty3270_read_work);
+	INIT_WORK(&tp->hang_work, tty3270_hangup_work);
 	return tp;
 
 out_readpartreq:

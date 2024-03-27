@@ -223,8 +223,8 @@ static void channel_remove(struct channel *ch)
 				dev_kfree_skb_any(ch->trans_skb);
 			}
 			if (IS_MPC(ch)) {
-				tasklet_kill(&ch->ch_tasklet);
-				tasklet_kill(&ch->ch_disc_tasklet);
+				cancel_work_sync(&ch->ch_work);
+				cancel_work_sync(&ch->ch_disc_work);
 				kfree(ch->discontact_th);
 			}
 			kfree(ch->ccw);
@@ -1027,7 +1027,7 @@ static void ctcm_free_netdevice(struct net_device *dev)
 				kfree_fsm(grp->fsm);
 			dev_kfree_skb(grp->xid_skb);
 			dev_kfree_skb(grp->rcvd_xid_skb);
-			tasklet_kill(&grp->mpc_tasklet2);
+			cancel_work_sync(&grp->mpc_work2);
 			kfree(grp);
 			priv->mpcg = NULL;
 		}
@@ -1118,8 +1118,7 @@ static struct net_device *ctcm_init_netdevice(struct ctcm_priv *priv)
 			free_netdev(dev);
 			return NULL;
 		}
-		tasklet_init(&grp->mpc_tasklet2,
-				mpc_group_ready, (unsigned long)dev);
+		INIT_WORK(&grp->mpc_work2, mpc_group_ready);
 		dev->mtu = MPC_BUFSIZE_DEFAULT -
 				TH_HEADER_LENGTH - PDU_HEADER_LENGTH;
 
@@ -1319,10 +1318,8 @@ static int add_channel(struct ccw_device *cdev, enum ctcm_channel_types type,
 					goto nomem_return;
 
 		ch->discontact_th->th_blk_flag = TH_DISCONTACT;
-		tasklet_init(&ch->ch_disc_tasklet,
-			mpc_action_send_discontact, (unsigned long)ch);
-
-		tasklet_init(&ch->ch_tasklet, ctcmpc_bh, (unsigned long)ch);
+		INIT_WORK(&ch->ch_disc_work, mpc_action_send_discontact);
+		INIT_WORK(&ch->ch_work, ctcmpc_bh);
 		ch->max_bufsize = (MPC_BUFSIZE_DEFAULT - 35);
 		ccw_num = 17;
 	} else

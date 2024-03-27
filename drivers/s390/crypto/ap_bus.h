@@ -223,7 +223,7 @@ struct ap_message {
 	u16 flags;			/* Flags, see AP_MSG_FLAG_xxx */
 	int rc;				/* Return code for this message */
 	void *private;			/* ap driver private pointer. */
-	/* receive is called from tasklet context */
+	/* receive is called from work context */
 	void (*receive)(struct ap_queue *, struct ap_message *,
 			struct ap_message *);
 };
