@@ -5271,7 +5271,7 @@ int irdma_process_cqp_cmd(struct irdma_sc_dev *dev,
 }
 
 /**
- * irdma_process_bh - called from tasklet for cqp list
+ * irdma_process_bh - called from work for cqp list
  * @dev: sc device struct
  */
 int irdma_process_bh(struct irdma_sc_dev *dev)

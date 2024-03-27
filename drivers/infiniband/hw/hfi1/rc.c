@@ -1210,7 +1210,7 @@ static inline void hfi1_queue_rc_ack(struct hfi1_packet *packet, bool is_fecn)
 	if (is_fecn)
 		qp->s_flags |= RVT_S_ECN;
 
-	/* Schedule the send tasklet. */
+	/* Schedule the send work. */
 	hfi1_schedule_send(qp);
 unlock:
 	spin_unlock_irqrestore(&qp->s_lock, flags);

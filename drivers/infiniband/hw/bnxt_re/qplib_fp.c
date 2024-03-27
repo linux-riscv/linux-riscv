@@ -46,6 +46,7 @@
 #include <linux/delay.h>
 #include <linux/prefetch.h>
 #include <linux/if_ether.h>
+#include <linux/workqueue.h>
 #include <rdma/ib_mad.h>
 
 #include "roce_hsi.h"
@@ -294,9 +295,9 @@ static void __wait_for_all_nqes(struct bnxt_qplib_cq *cq, u16 cnq_events)
 	}
 }
 
-static void bnxt_qplib_service_nq(struct tasklet_struct *t)
+static void bnxt_qplib_service_nq(struct work_struct *t)
 {
-	struct bnxt_qplib_nq *nq = from_tasklet(nq, t, nq_tasklet);
+	struct bnxt_qplib_nq *nq = from_work(nq, t, nq_work);
 	struct bnxt_qplib_hwq *hwq = &nq->hwq;
 	struct bnxt_qplib_cq *cq;
 	int budget = nq->budget;
@@ -394,7 +395,7 @@ void bnxt_re_synchronize_nq(struct bnxt_qplib_nq *nq)
 	int budget = nq->budget;
 
 	nq->budget = nq->hwq.max_elements;
-	bnxt_qplib_service_nq(&nq->nq_tasklet);
+	bnxt_qplib_service_nq(&nq->nq_work);
 	nq->budget = budget;
 }
 
@@ -409,7 +410,7 @@ static irqreturn_t bnxt_qplib_nq_irq(int irq, void *dev_instance)
 	prefetch(bnxt_qplib_get_qe(hwq, sw_cons, NULL));
 
 	/* Fan out to CPU affinitized kthreads? */
-	tasklet_schedule(&nq->nq_tasklet);
+	queue_work(system_bh_wq, &nq->nq_work);
 
 	return IRQ_HANDLED;
 }
@@ -430,8 +431,8 @@ void bnxt_qplib_nq_stop_irq(struct bnxt_qplib_nq *nq, bool kill)
 	nq->name = NULL;
 
 	if (kill)
-		tasklet_kill(&nq->nq_tasklet);
-	tasklet_disable(&nq->nq_tasklet);
+		cancel_work_sync(&nq->nq_work);
+	disable_work_sync(&nq->nq_work);
 }
 
 void bnxt_qplib_disable_nq(struct bnxt_qplib_nq *nq)
@@ -465,9 +466,9 @@ int bnxt_qplib_nq_start_irq(struct bnxt_qplib_nq *nq, int nq_indx,
 
 	nq->msix_vec = msix_vector;
 	if (need_init)
-		tasklet_setup(&nq->nq_tasklet, bnxt_qplib_service_nq);
+		INIT_WORK(&nq->nq_work, bnxt_qplib_service_nq);
 	else
-		tasklet_enable(&nq->nq_tasklet);
+		enable_and_queue_work(system_bh_wq, &nq->nq_work);
 
 	nq->name = kasprintf(GFP_KERNEL, "bnxt_re-nq-%d@pci:%s",
 			     nq_indx, pci_name(res->pdev));
@@ -477,7 +478,7 @@ int bnxt_qplib_nq_start_irq(struct bnxt_qplib_nq *nq, int nq_indx,
 	if (rc) {
 		kfree(nq->name);
 		nq->name = NULL;
-		tasklet_disable(&nq->nq_tasklet);
+		disable_work_sync(&nq->nq_work);
 		return rc;
 	}
 
@@ -541,7 +542,7 @@ int bnxt_qplib_enable_nq(struct pci_dev *pdev, struct bnxt_qplib_nq *nq,
 	nq->cqn_handler = cqn_handler;
 	nq->srqn_handler = srqn_handler;
 
-	/* Have a task to schedule CQ notifiers in post send case */
+	/* Have a work to schedule CQ notifiers in post send case */
 	nq->cqn_wq  = create_singlethread_workqueue("bnxt_qplib_nq");
 	if (!nq->cqn_wq)
 		return -ENOMEM;

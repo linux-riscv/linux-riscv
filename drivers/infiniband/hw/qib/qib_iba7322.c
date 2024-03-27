@@ -46,6 +46,7 @@
 #include <rdma/ib_smi.h>
 #ifdef CONFIG_INFINIBAND_QIB_DCA
 #include <linux/dca.h>
+#include <linux/workqueue.h>
 #endif
 
 #include "qib.h"
@@ -1711,9 +1712,9 @@ done:
 	return;
 }
 
-static void qib_error_tasklet(struct tasklet_struct *t)
+static void qib_error_work(struct work_struct *t)
 {
-	struct qib_devdata *dd = from_tasklet(dd, t, error_tasklet);
+	struct qib_devdata *dd = from_work(dd, t, error_work);
 
 	handle_7322_errors(dd);
 	qib_write_kreg(dd, kr_errmask, dd->cspec->errormask);
@@ -3001,7 +3002,7 @@ static noinline void unlikely_7322_intr(struct qib_devdata *dd, u64 istat)
 		unknown_7322_gpio_intr(dd);
 	if (istat & QIB_I_C_ERROR) {
 		qib_write_kreg(dd, kr_errmask, 0ULL);
-		tasklet_schedule(&dd->error_tasklet);
+		queue_work(system_bh_wq, &dd->error_work);
 	}
 	if (istat & INT_MASK_P(Err, 0) && dd->rcd[0])
 		handle_7322_p_errors(dd->rcd[0]->ppd);
@@ -3515,7 +3516,7 @@ try_intx:
 	for (i = 0; i < ARRAY_SIZE(redirect); i++)
 		qib_write_kreg(dd, kr_intredirect + i, redirect[i]);
 	dd->cspec->main_int_mask = mask;
-	tasklet_setup(&dd->error_tasklet, qib_error_tasklet);
+	INIT_WORK(&dd->error_work, qib_error_work);
 }
 
 /**

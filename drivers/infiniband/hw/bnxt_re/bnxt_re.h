@@ -42,6 +42,7 @@
 #include <rdma/uverbs_ioctl.h>
 #include "hw_counters.h"
 #include <linux/hashtable.h>
+#include <linux/workqueue.h>
 #define ROCE_DRV_MODULE_NAME		"bnxt_re"
 
 #define BNXT_RE_DESC	"Broadcom NetXtreme-C/E RoCE Driver"
@@ -162,7 +163,7 @@ struct bnxt_re_dev {
 	u8				cur_prio_map;
 
 	/* FP Notification Queue (CQ & SRQ) */
-	struct tasklet_struct		nq_task;
+	struct work_struct 		nq_work;
 
 	/* RCFW Channel */
 	struct bnxt_qplib_rcfw		rcfw;

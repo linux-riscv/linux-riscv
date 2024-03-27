@@ -207,7 +207,7 @@ struct bnxt_qplib_creq_ctx {
 	struct bnxt_qplib_hwq		hwq;
 	struct bnxt_qplib_creq_db	creq_db;
 	struct bnxt_qplib_creq_stat	stats;
-	struct tasklet_struct		creq_tasklet;
+	struct work_struct 		creq_work;
 	aeq_handler_t			aeq_handler;
 	u16				ring_id;
 	int				msix_vec;

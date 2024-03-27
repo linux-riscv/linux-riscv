@@ -43,6 +43,7 @@
 #include <linux/pci.h>
 #include <linux/prefetch.h>
 #include <linux/delay.h>
+#include <linux/workqueue.h>
 
 #include "roce_hsi.h"
 #include "qplib_res.h"
@@ -51,7 +52,7 @@
 #include "qplib_fp.h"
 #include "qplib_tlv.h"
 
-static void bnxt_qplib_service_creq(struct tasklet_struct *t);
+static void bnxt_qplib_service_creq(struct work_struct *t);
 
 /**
  * bnxt_qplib_map_rc  -  map return type based on opcode
@@ -165,7 +166,7 @@ static int __wait_for_resp(struct bnxt_qplib_rcfw *rcfw, u16 cookie)
 		if (!crsqe->is_in_used)
 			return 0;
 
-		bnxt_qplib_service_creq(&rcfw->creq.creq_tasklet);
+		bnxt_qplib_service_creq(&rcfw->creq.creq_work);
 
 		if (!crsqe->is_in_used)
 			return 0;
@@ -206,7 +207,7 @@ static int __block_for_resp(struct bnxt_qplib_rcfw *rcfw, u16 cookie)
 
 		udelay(1);
 
-		bnxt_qplib_service_creq(&rcfw->creq.creq_tasklet);
+		bnxt_qplib_service_creq(&rcfw->creq.creq_work);
 		if (!crsqe->is_in_used)
 			return 0;
 
@@ -403,7 +404,7 @@ static int __poll_for_resp(struct bnxt_qplib_rcfw *rcfw, u16 cookie)
 
 		usleep_range(1000, 1001);
 
-		bnxt_qplib_service_creq(&rcfw->creq.creq_tasklet);
+		bnxt_qplib_service_creq(&rcfw->creq.creq_work);
 		if (!crsqe->is_in_used)
 			return 0;
 		if (jiffies_to_msecs(jiffies - issue_time) >
@@ -727,9 +728,9 @@ static int bnxt_qplib_process_qp_event(struct bnxt_qplib_rcfw *rcfw,
 }
 
 /* SP - CREQ Completion handlers */
-static void bnxt_qplib_service_creq(struct tasklet_struct *t)
+static void bnxt_qplib_service_creq(struct work_struct *t)
 {
-	struct bnxt_qplib_rcfw *rcfw = from_tasklet(rcfw, t, creq.creq_tasklet);
+	struct bnxt_qplib_rcfw *rcfw = from_work(rcfw, t, creq.creq_work);
 	struct bnxt_qplib_creq_ctx *creq = &rcfw->creq;
 	u32 type, budget = CREQ_ENTRY_POLL_BUDGET;
 	struct bnxt_qplib_hwq *hwq = &creq->hwq;
@@ -800,7 +801,7 @@ static irqreturn_t bnxt_qplib_creq_irq(int irq, void *dev_instance)
 	sw_cons = HWQ_CMP(hwq->cons, hwq);
 	prefetch(bnxt_qplib_get_qe(hwq, sw_cons, NULL));
 
-	tasklet_schedule(&creq->creq_tasklet);
+	queue_work(system_bh_wq, &creq->creq_work);
 
 	return IRQ_HANDLED;
 }
@@ -1007,8 +1008,8 @@ void bnxt_qplib_rcfw_stop_irq(struct bnxt_qplib_rcfw *rcfw, bool kill)
 	creq->irq_name = NULL;
 	atomic_set(&rcfw->rcfw_intr_enabled, 0);
 	if (kill)
-		tasklet_kill(&creq->creq_tasklet);
-	tasklet_disable(&creq->creq_tasklet);
+		cancel_work_sync(&creq->creq_work);
+	disable_work_sync(&creq->creq_work);
 }
 
 void bnxt_qplib_disable_rcfw_channel(struct bnxt_qplib_rcfw *rcfw)
@@ -1045,9 +1046,9 @@ int bnxt_qplib_rcfw_start_irq(struct bnxt_qplib_rcfw *rcfw, int msix_vector,
 
 	creq->msix_vec = msix_vector;
 	if (need_init)
-		tasklet_setup(&creq->creq_tasklet, bnxt_qplib_service_creq);
+		INIT_WORK(&creq->creq_work, bnxt_qplib_service_creq);
 	else
-		tasklet_enable(&creq->creq_tasklet);
+		enable_and_queue_work(system_bh_wq, &creq->creq_work);
 
 	creq->irq_name = kasprintf(GFP_KERNEL, "bnxt_re-creq@pci:%s",
 				   pci_name(res->pdev));
@@ -1058,7 +1059,7 @@ int bnxt_qplib_rcfw_start_irq(struct bnxt_qplib_rcfw *rcfw, int msix_vector,
 	if (rc) {
 		kfree(creq->irq_name);
 		creq->irq_name = NULL;
-		tasklet_disable(&creq->creq_tasklet);
+		disable_work_sync(&creq->creq_work);
 		return rc;
 	}
 	creq->requested = true;

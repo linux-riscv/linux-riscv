@@ -2316,7 +2316,7 @@ void hfi1_rc_rcv_tid_rdma_read_req(struct hfi1_packet *packet)
 	 */
 	qpriv->r_tid_alloc = qp->r_head_ack_queue;
 
-	/* Schedule the send tasklet. */
+	/* Schedule the send work. */
 	qp->s_flags |= RVT_S_RESP_PENDING;
 	if (fecn)
 		qp->s_flags |= RVT_S_ECN;
@@ -3807,7 +3807,7 @@ update_head:
 	hfi1_tid_write_alloc_resources(qp, true);
 	trace_hfi1_tid_write_rsp_rcv_req(qp);
 
-	/* Schedule the send tasklet. */
+	/* Schedule the send work. */
 	qp->s_flags |= RVT_S_RESP_PENDING;
 	if (fecn)
 		qp->s_flags |= RVT_S_ECN;
@@ -5389,7 +5389,7 @@ static void hfi1_do_tid_send(struct rvt_qp *qp)
 
 			/*
 			 * If the packet cannot be sent now, return and
-			 * the send tasklet will be woken up later.
+			 * the send work will be woken up later.
 			 */
 			if (hfi1_verbs_send(qp, &ps))
 				return;

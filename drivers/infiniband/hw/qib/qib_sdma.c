@@ -34,6 +34,7 @@
 #include <linux/spinlock.h>
 #include <linux/netdevice.h>
 #include <linux/moduleparam.h>
+#include <linux/workqueue.h>
 
 #include "qib.h"
 #include "qib_common.h"
@@ -62,7 +63,7 @@ static void sdma_get(struct qib_sdma_state *);
 static void sdma_put(struct qib_sdma_state *);
 static void sdma_set_state(struct qib_pportdata *, enum qib_sdma_states);
 static void sdma_start_sw_clean_up(struct qib_pportdata *);
-static void sdma_sw_clean_up_task(struct tasklet_struct *);
+static void sdma_sw_clean_up_task(struct work_struct *);
 static void unmap_desc(struct qib_pportdata *, unsigned);
 
 static void sdma_get(struct qib_sdma_state *ss)
@@ -119,9 +120,9 @@ static void clear_sdma_activelist(struct qib_pportdata *ppd)
 	}
 }
 
-static void sdma_sw_clean_up_task(struct tasklet_struct *t)
+static void sdma_sw_clean_up_task(struct work_struct *t)
 {
-	struct qib_pportdata *ppd = from_tasklet(ppd, t,
+	struct qib_pportdata *ppd = from_work(ppd, t,
 						 sdma_sw_clean_up_task);
 	unsigned long flags;
 
@@ -188,7 +189,7 @@ static void sdma_sw_tear_down(struct qib_pportdata *ppd)
 
 static void sdma_start_sw_clean_up(struct qib_pportdata *ppd)
 {
-	tasklet_hi_schedule(&ppd->sdma_sw_clean_up_task);
+	queue_work(system_bh_highpri_wq, &ppd->sdma_sw_clean_up_task);
 }
 
 static void sdma_set_state(struct qib_pportdata *ppd,
@@ -437,7 +438,7 @@ int qib_setup_sdma(struct qib_pportdata *ppd)
 
 	INIT_LIST_HEAD(&ppd->sdma_activelist);
 
-	tasklet_setup(&ppd->sdma_sw_clean_up_task, sdma_sw_clean_up_task);
+	INIT_WORK(&ppd->sdma_sw_clean_up_task, sdma_sw_clean_up_task);
 
 	ret = dd->f_init_sdma_regs(ppd);
 	if (ret)
