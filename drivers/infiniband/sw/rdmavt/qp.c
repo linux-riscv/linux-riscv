@@ -1306,7 +1306,7 @@ int rvt_error_qp(struct rvt_qp *qp, enum ib_wc_status err)
 
 	rdi->driver_f.notify_error_qp(qp);
 
-	/* Schedule the sending tasklet to drain the send work queue. */
+	/* Schedule the sending work to drain the send work queue. */
 	if (READ_ONCE(qp->s_last) != qp->s_head)
 		rdi->driver_f.schedule_send(qp);
 

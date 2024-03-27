@@ -11,6 +11,7 @@
 #include <linux/timer.h>
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
+#include <linux/workqueue.h>
 
 #include "hfi.h"
 #include "common.h"
@@ -190,11 +191,11 @@ static const struct sdma_set_state_action sdma_action_table[] = {
 static void sdma_complete(struct kref *);
 static void sdma_finalput(struct sdma_state *);
 static void sdma_get(struct sdma_state *);
-static void sdma_hw_clean_up_task(struct tasklet_struct *);
+static void sdma_hw_clean_up_task(struct work_struct *);
 static void sdma_put(struct sdma_state *);
 static void sdma_set_state(struct sdma_engine *, enum sdma_states);
 static void sdma_start_hw_clean_up(struct sdma_engine *);
-static void sdma_sw_clean_up_task(struct tasklet_struct *);
+static void sdma_sw_clean_up_task(struct work_struct *);
 static void sdma_sendctrl(struct sdma_engine *, unsigned);
 static void init_sdma_regs(struct sdma_engine *, u32, uint);
 static void sdma_process_event(
@@ -503,9 +504,9 @@ static void sdma_err_progress_check(struct timer_list *t)
 	schedule_work(&sde->err_halt_worker);
 }
 
-static void sdma_hw_clean_up_task(struct tasklet_struct *t)
+static void sdma_hw_clean_up_task(struct work_struct *t)
 {
-	struct sdma_engine *sde = from_tasklet(sde, t,
+	struct sdma_engine *sde = from_work(sde, t,
 					       sdma_hw_clean_up_task);
 	u64 statuscsr;
 
@@ -563,9 +564,9 @@ static void sdma_flush_descq(struct sdma_engine *sde)
 		sdma_desc_avail(sde, sdma_descq_freecnt(sde));
 }
 
-static void sdma_sw_clean_up_task(struct tasklet_struct *t)
+static void sdma_sw_clean_up_task(struct work_struct *t)
 {
-	struct sdma_engine *sde = from_tasklet(sde, t, sdma_sw_clean_up_task);
+	struct sdma_engine *sde = from_work(sde, t, sdma_sw_clean_up_task);
 	unsigned long flags;
 
 	spin_lock_irqsave(&sde->tail_lock, flags);
@@ -624,7 +625,7 @@ static void sdma_sw_tear_down(struct sdma_engine *sde)
 
 static void sdma_start_hw_clean_up(struct sdma_engine *sde)
 {
-	tasklet_hi_schedule(&sde->sdma_hw_clean_up_task);
+	queue_work(system_bh_highpri_wq, &sde->sdma_hw_clean_up_task);
 }
 
 static void sdma_set_state(struct sdma_engine *sde,
@@ -1415,9 +1416,9 @@ int sdma_init(struct hfi1_devdata *dd, u8 port)
 		sde->tail_csr =
 			get_kctxt_csr_addr(dd, this_idx, SD(TAIL));
 
-		tasklet_setup(&sde->sdma_hw_clean_up_task,
+		INIT_WORK(&sde->sdma_hw_clean_up_task,
 			      sdma_hw_clean_up_task);
-		tasklet_setup(&sde->sdma_sw_clean_up_task,
+		INIT_WORK(&sde->sdma_sw_clean_up_task,
 			      sdma_sw_clean_up_task);
 		INIT_WORK(&sde->err_halt_worker, sdma_err_halt_wait);
 		INIT_WORK(&sde->flush_worker, sdma_field_flush);
@@ -2741,7 +2742,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;
@@ -2783,13 +2784,13 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;
 		case sdma_event_e15_hw_halt_done:
 			sdma_set_state(sde, sdma_state_s30_sw_clean_up_wait);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e25_hw_clean_up_done:
 			break;
@@ -2824,13 +2825,13 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;
 		case sdma_event_e15_hw_halt_done:
 			sdma_set_state(sde, sdma_state_s30_sw_clean_up_wait);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e25_hw_clean_up_done:
 			break;
@@ -2864,7 +2865,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;
@@ -2888,7 +2889,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 			break;
 		case sdma_event_e81_hw_frozen:
 			sdma_set_state(sde, sdma_state_s82_freeze_sw_clean);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e82_hw_unfreeze:
 			break;
@@ -2903,7 +2904,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;
@@ -2947,7 +2948,7 @@ static void __sdma_process_event(struct sdma_engine *sde,
 		switch (event) {
 		case sdma_event_e00_go_hw_down:
 			sdma_set_state(sde, sdma_state_s00_hw_down);
-			tasklet_hi_schedule(&sde->sdma_sw_clean_up_task);
+			queue_work(system_bh_highpri_wq, &sde->sdma_sw_clean_up_task);
 			break;
 		case sdma_event_e10_go_hw_start:
 			break;

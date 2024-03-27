@@ -11,6 +11,7 @@
 #include <asm/byteorder.h>
 #include <linux/workqueue.h>
 #include <linux/rculist.h>
+#include <linux/workqueue.h>
 
 #include "hfi.h"
 #include "verbs.h"
@@ -346,11 +347,11 @@ struct sdma_engine {
 
 	/* CONFIG SDMA for now, just blindly duplicate */
 	/* private: */
-	struct tasklet_struct sdma_hw_clean_up_task
+	struct work_struct sdma_hw_clean_up_task
 		____cacheline_aligned_in_smp;
 
 	/* private: */
-	struct tasklet_struct sdma_sw_clean_up_task
+	struct work_struct sdma_sw_clean_up_task
 		____cacheline_aligned_in_smp;
 	/* private: */
 	struct work_struct err_halt_worker;
@@ -471,7 +472,7 @@ void _sdma_txreq_ahgadd(
  * Completions of submitted requests can be gotten on selected
  * txreqs by giving a completion routine callback to sdma_txinit() or
  * sdma_txinit_ahg().  The environment in which the callback runs
- * can be from an ISR, a tasklet, or a thread, so no sleeping
+ * can be from an ISR, a work, or a thread, so no sleeping
  * kernel routines can be used.   Aspects of the sdma ring may
  * be locked so care should be taken with locking.
  *
@@ -551,7 +552,7 @@ static inline int sdma_txinit_ahg(
  * Completions of submitted requests can be gotten on selected
  * txreqs by giving a completion routine callback to sdma_txinit() or
  * sdma_txinit_ahg().  The environment in which the callback runs
- * can be from an ISR, a tasklet, or a thread, so no sleeping
+ * can be from an ISR, a work, or a thread, so no sleeping
  * kernel routines can be used.   The head size of the sdma ring may
  * be locked so care should be taken with locking.
  *

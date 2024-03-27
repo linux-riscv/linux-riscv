@@ -30,6 +30,7 @@
 #endif
 #include <linux/auxiliary_bus.h>
 #include <linux/net/intel/iidc.h>
+#include <linux/workqueue.h>
 #include <crypto/hash.h>
 #include <rdma/ib_smi.h>
 #include <rdma/ib_verbs.h>
@@ -192,7 +193,7 @@ struct irdma_ceq {
 	u32 irq;
 	u32 msix_idx;
 	struct irdma_pci_f *rf;
-	struct tasklet_struct dpc_tasklet;
+	struct work_struct dpc_work;
 	spinlock_t ce_lock; /* sync cq destroy with cq completion event notification */
 };
 
@@ -316,7 +317,7 @@ struct irdma_pci_f {
 	struct mc_table_list mc_qht_list;
 	struct irdma_msix_vector *iw_msixtbl;
 	struct irdma_qvlist_info *iw_qvlist;
-	struct tasklet_struct dpc_tasklet;
+	struct work_struct dpc_work;
 	struct msix_entry *msix_entries;
 	struct irdma_dma_mem obj_mem;
 	struct irdma_dma_mem obj_next;

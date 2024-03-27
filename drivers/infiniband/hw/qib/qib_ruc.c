@@ -257,7 +257,7 @@ void _qib_do_send(struct work_struct *work)
  * @qp: pointer to the QP
  *
  * Process entries in the send work queue until credit or queue is
- * exhausted.  Only allow one CPU to send a packet per QP (tasklet).
+ * exhausted.  Only allow one CPU to send a packet per QP (work).
  * Otherwise, two threads could send packets out of order.
  */
 void qib_do_send(struct rvt_qp *qp)
@@ -299,7 +299,7 @@ void qib_do_send(struct rvt_qp *qp)
 			spin_unlock_irqrestore(&qp->s_lock, flags);
 			/*
 			 * If the packet cannot be sent now, return and
-			 * the send tasklet will be woken up later.
+			 * the send work will be woken up later.
 			 */
 			if (qib_verbs_send(qp, priv->s_hdr, qp->s_hdrwords,
 					   qp->s_cur_sge, qp->s_cur_size))

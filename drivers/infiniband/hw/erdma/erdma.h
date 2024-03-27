@@ -11,6 +11,7 @@
 #include <linux/netdevice.h>
 #include <linux/pci.h>
 #include <linux/xarray.h>
+#include <linux/workqueue.h>
 #include <rdma/ib_verbs.h>
 
 #include "erdma_hw.h"
@@ -161,7 +162,7 @@ struct erdma_eq_cb {
 	void *dev; /* All EQs use this fields to get erdma_dev struct */
 	struct erdma_irq irq;
 	struct erdma_eq eq;
-	struct tasklet_struct tasklet;
+	struct work_struct work;
 };
 
 struct erdma_resource_cb {

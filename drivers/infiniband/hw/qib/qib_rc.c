@@ -593,7 +593,7 @@ bail:
  *
  * This is called from qib_rc_rcv() and qib_kreceive().
  * Note that RDMA reads and atomics are handled in the
- * send side QP state and tasklet.
+ * send side QP state and work.
  */
 void qib_send_rc_ack(struct rvt_qp *qp)
 {
@@ -670,7 +670,7 @@ void qib_send_rc_ack(struct rvt_qp *qp)
 		/*
 		 * We are out of PIO buffers at the moment.
 		 * Pass responsibility for sending the ACK to the
-		 * send tasklet so that when a PIO buffer becomes
+		 * send work so that when a PIO buffer becomes
 		 * available, the ACK is sent ahead of other outgoing
 		 * packets.
 		 */
@@ -715,7 +715,7 @@ queue_ack:
 		qp->s_nak_state = qp->r_nak_state;
 		qp->s_ack_psn = qp->r_ack_psn;
 
-		/* Schedule the send tasklet. */
+		/* Schedule the send work. */
 		qib_schedule_send(qp);
 	}
 unlock:
@@ -806,7 +806,7 @@ done:
 	qp->s_psn = psn;
 	/*
 	 * Set RVT_S_WAIT_PSN as qib_rc_complete() may start the timer
-	 * asynchronously before the send tasklet can get scheduled.
+	 * asynchronously before the send work can get scheduled.
 	 * Doing it in qib_make_rc_req() is too late.
 	 */
 	if ((qib_cmp24(qp->s_psn, qp->s_sending_hpsn) <= 0) &&
@@ -1292,7 +1292,7 @@ static void qib_rc_rcv_resp(struct qib_ibport *ibp,
 		    (qib_cmp24(qp->s_sending_psn, qp->s_sending_hpsn) <= 0)) {
 
 			/*
-			 * If send tasklet not running attempt to progress
+			 * If send work not running attempt to progress
 			 * SDMA queue.
 			 */
 			if (!(qp->s_flags & RVT_S_BUSY)) {
@@ -1629,7 +1629,7 @@ static int qib_rc_rcv_error(struct ib_other_headers *ohdr,
 	case OP(FETCH_ADD): {
 		/*
 		 * If we didn't find the atomic request in the ack queue
-		 * or the send tasklet is already backed up to send an
+		 * or the send work is already backed up to send an
 		 * earlier entry, we can ignore this request.
 		 */
 		if (!e || e->opcode != (u8) opcode || old_req)
@@ -1996,7 +1996,7 @@ send_last:
 		qp->r_nak_state = 0;
 		qp->r_head_ack_queue = next;
 
-		/* Schedule the send tasklet. */
+		/* Schedule the send work. */
 		qp->s_flags |= RVT_S_RESP_PENDING;
 		qib_schedule_send(qp);
 
@@ -2059,7 +2059,7 @@ send_last:
 		qp->r_nak_state = 0;
 		qp->r_head_ack_queue = next;
 
-		/* Schedule the send tasklet. */
+		/* Schedule the send work. */
 		qp->s_flags |= RVT_S_RESP_PENDING;
 		qib_schedule_send(qp);
 

@@ -53,6 +53,7 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/xarray.h>
+#include <linux/workqueue.h>
 #include <rdma/ib_hdrs.h>
 #include <rdma/rdma_vt.h>
 
@@ -562,7 +563,7 @@ struct qib_pportdata {
 	u8                    sdma_generation;
 	u8                    sdma_intrequest;
 
-	struct tasklet_struct sdma_sw_clean_up_task
+	struct work_struct sdma_sw_clean_up_task
 		____cacheline_aligned_in_smp;
 
 	wait_queue_head_t state_wait; /* for state_wanted */
@@ -1068,8 +1069,8 @@ struct qib_devdata {
 	u8 psxmitwait_supported;
 	/* cycle length of PS* counters in HW (in picoseconds) */
 	u16 psxmitwait_check_rate;
-	/* high volume overflow errors defered to tasklet */
-	struct tasklet_struct error_tasklet;
+	/* high volume overflow errors defered to work */
+	struct work_struct error_work;
 
 	int assigned_node_id; /* NUMA node closest to HCA */
 };

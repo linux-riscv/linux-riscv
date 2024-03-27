@@ -494,7 +494,7 @@ struct bnxt_qplib_nq {
 	u16				ring_id;
 	int				msix_vec;
 	cpumask_t			mask;
-	struct tasklet_struct		nq_tasklet;
+	struct work_struct 		nq_work;
 	bool				requested;
 	int				budget;
 
