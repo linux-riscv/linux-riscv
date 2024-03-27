@@ -33,6 +33,7 @@
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/workqueue.h>
 
 #include <asm/cacheflush.h>
 #include <asm/io.h>
@@ -284,12 +285,12 @@ struct atmel_mci_dma {
  *	EVENT_DATA_ERROR is pending.
  * @stop_cmdr: Value to be loaded into CMDR when the stop command is
  *	to be sent.
- * @tasklet: Tasklet running the request state machine.
+ * @work: Work running the request state machine.
  * @pending_events: Bitmask of events flagged by the interrupt handler
- *	to be processed by the tasklet.
+ *	to be processed by the work.
  * @completed_events: Bitmask of events which the state machine has
  *	processed.
- * @state: Tasklet state.
+ * @state: Work state.
  * @queue: List of slots waiting for access to the controller.
  * @need_clock_update: Update the clock rate before the next request.
  * @need_reset: Reset controller before next request.
@@ -363,7 +364,7 @@ struct atmel_mci {
 	u32			data_status;
 	u32			stop_cmdr;
 
-	struct tasklet_struct	tasklet;
+	struct work_struct 	work;
 	unsigned long		pending_events;
 	unsigned long		completed_events;
 	enum atmel_mci_state	state;
@@ -761,7 +762,7 @@ static void atmci_timeout_timer(struct timer_list *t)
 	host->need_reset = 1;
 	host->state = STATE_END_REQUEST;
 	smp_wmb();
-	tasklet_schedule(&host->tasklet);
+	queue_work(system_bh_wq, &host->work);
 }
 
 static inline unsigned int atmci_ns_to_clocks(struct atmel_mci *host,
@@ -983,7 +984,7 @@ static void atmci_pdc_complete(struct atmel_mci *host)
 
 	dev_dbg(&host->pdev->dev, "(%s) set pending xfer complete\n", __func__);
 	atmci_set_pending(host, EVENT_XFER_COMPLETE);
-	tasklet_schedule(&host->tasklet);
+	queue_work(system_bh_wq, &host->work);
 }
 
 static void atmci_dma_cleanup(struct atmel_mci *host)
@@ -997,7 +998,7 @@ static void atmci_dma_cleanup(struct atmel_mci *host)
 }
 
 /*
- * This function is called by the DMA driver from tasklet context.
+ * This function is called by the DMA driver from work context.
  */
 static void atmci_dma_complete(void *arg)
 {
@@ -1020,7 +1021,7 @@ static void atmci_dma_complete(void *arg)
 		dev_dbg(&host->pdev->dev,
 		        "(%s) set pending xfer complete\n", __func__);
 		atmci_set_pending(host, EVENT_XFER_COMPLETE);
-		tasklet_schedule(&host->tasklet);
+		queue_work(system_bh_wq, &host->work);
 
 		/*
 		 * Regardless of what the documentation says, we have
@@ -1033,7 +1034,7 @@ static void atmci_dma_complete(void *arg)
 		 * haven't seen all the potential error bits yet.
 		 *
 		 * The interrupt handler will schedule a different
-		 * tasklet to finish things up when the data transfer
+		 * work to finish things up when the data transfer
 		 * is completely done.
 		 *
 		 * We may not complete the mmc request here anyway
@@ -1765,9 +1766,9 @@ static void atmci_detect_change(struct timer_list *t)
 	}
 }
 
-static void atmci_tasklet_func(struct tasklet_struct *t)
+static void atmci_work_func(struct work_struct *t)
 {
-	struct atmel_mci        *host = from_tasklet(host, t, tasklet);
+	struct atmel_mci        *host = from_work(host, t, work);
 	struct mmc_request	*mrq = host->mrq;
 	struct mmc_data		*data = host->data;
 	enum atmel_mci_state	state = host->state;
@@ -1779,7 +1780,7 @@ static void atmci_tasklet_func(struct tasklet_struct *t)
 	state = host->state;
 
 	dev_vdbg(&host->pdev->dev,
-		"tasklet: state %u pending/completed/mask %lx/%lx/%x\n",
+		"work: state %u pending/completed/mask %lx/%lx/%x\n",
 		state, host->pending_events, host->completed_events,
 		atmci_readl(host, ATMCI_IMR));
 
@@ -2141,7 +2142,7 @@ static irqreturn_t atmci_interrupt(int irq, void *dev_id)
 			dev_dbg(&host->pdev->dev, "set pending data error\n");
 			smp_wmb();
 			atmci_set_pending(host, EVENT_DATA_ERROR);
-			tasklet_schedule(&host->tasklet);
+			queue_work(system_bh_wq, &host->work);
 		}
 
 		if (pending & ATMCI_TXBUFE) {
@@ -2210,7 +2211,7 @@ static irqreturn_t atmci_interrupt(int irq, void *dev_id)
 			smp_wmb();
 			dev_dbg(&host->pdev->dev, "set pending notbusy\n");
 			atmci_set_pending(host, EVENT_NOTBUSY);
-			tasklet_schedule(&host->tasklet);
+			queue_work(system_bh_wq, &host->work);
 		}
 
 		if (pending & ATMCI_NOTBUSY) {
@@ -2219,7 +2220,7 @@ static irqreturn_t atmci_interrupt(int irq, void *dev_id)
 			smp_wmb();
 			dev_dbg(&host->pdev->dev, "set pending notbusy\n");
 			atmci_set_pending(host, EVENT_NOTBUSY);
-			tasklet_schedule(&host->tasklet);
+			queue_work(system_bh_wq, &host->work);
 		}
 
 		if (pending & ATMCI_RXRDY)
@@ -2234,7 +2235,7 @@ static irqreturn_t atmci_interrupt(int irq, void *dev_id)
 			smp_wmb();
 			dev_dbg(&host->pdev->dev, "set pending cmd rdy\n");
 			atmci_set_pending(host, EVENT_CMD_RDY);
-			tasklet_schedule(&host->tasklet);
+			queue_work(system_bh_wq, &host->work);
 		}
 
 		if (pending & (ATMCI_SDIOIRQA | ATMCI_SDIOIRQB))
@@ -2530,7 +2531,7 @@ static int atmci_probe(struct platform_device *pdev)
 
 	host->mapbase = regs->start;
 
-	tasklet_setup(&host->tasklet, atmci_tasklet_func);
+	INIT_WORK(&host->work, atmci_work_func);
 
 	ret = request_irq(irq, atmci_interrupt, 0, dev_name(&pdev->dev), host);
 	if (ret) {

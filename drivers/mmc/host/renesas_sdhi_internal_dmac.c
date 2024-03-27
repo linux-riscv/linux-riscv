@@ -336,7 +336,7 @@ static bool renesas_sdhi_internal_dmac_dma_irq(struct tmio_mmc_host *host)
 		writel(status ^ dma_irqs, host->ctl + DM_CM_INFO1);
 		set_bit(SDHI_DMA_END_FLAG_DMA, &dma_priv->end_flags);
 		if (test_bit(SDHI_DMA_END_FLAG_ACCESS, &dma_priv->end_flags))
-			tasklet_schedule(&dma_priv->dma_complete);
+			queue_work(system_bh_wq, &dma_priv->dma_complete);
 	}
 
 	return status & dma_irqs;
@@ -351,7 +351,7 @@ renesas_sdhi_internal_dmac_dataend_dma(struct tmio_mmc_host *host)
 	set_bit(SDHI_DMA_END_FLAG_ACCESS, &dma_priv->end_flags);
 	if (test_bit(SDHI_DMA_END_FLAG_DMA, &dma_priv->end_flags) ||
 	    host->data->error)
-		tasklet_schedule(&dma_priv->dma_complete);
+		queue_work(system_bh_wq, &dma_priv->dma_complete);
 }
 
 /*
@@ -439,9 +439,9 @@ force_pio:
 	renesas_sdhi_internal_dmac_enable_dma(host, false);
 }
 
-static void renesas_sdhi_internal_dmac_issue_tasklet_fn(unsigned long arg)
+static void renesas_sdhi_internal_dmac_issue_work_fn(struct work_struct *t)
 {
-	struct tmio_mmc_host *host = (struct tmio_mmc_host *)arg;
+	struct tmio_mmc_host *host = from_work(host, t, dma_issue);
 	struct renesas_sdhi *priv = host_to_priv(host);
 
 	tmio_mmc_enable_mmc_irqs(host, TMIO_STAT_DATAEND);
@@ -453,7 +453,7 @@ static void renesas_sdhi_internal_dmac_issue_tasklet_fn(unsigned long arg)
 		/* on CMD errors, simulate DMA end immediately */
 		set_bit(SDHI_DMA_END_FLAG_DMA, &priv->dma_priv.end_flags);
 		if (test_bit(SDHI_DMA_END_FLAG_ACCESS, &priv->dma_priv.end_flags))
-			tasklet_schedule(&priv->dma_priv.dma_complete);
+			queue_work(system_bh_wq, &priv->dma_priv.dma_complete);
 	}
 }
 
@@ -483,9 +483,9 @@ static bool renesas_sdhi_internal_dmac_complete(struct tmio_mmc_host *host)
 	return true;
 }
 
-static void renesas_sdhi_internal_dmac_complete_tasklet_fn(unsigned long arg)
+static void renesas_sdhi_internal_dmac_complete_work_fn(struct work_struct *t)
 {
-	struct tmio_mmc_host *host = (struct tmio_mmc_host *)arg;
+	struct tmio_mmc_host *host = from_work(host, t, dam_complete);
 
 	spin_lock_irq(&host->lock);
 	if (!renesas_sdhi_internal_dmac_complete(host))
@@ -543,12 +543,10 @@ renesas_sdhi_internal_dmac_request_dma(struct tmio_mmc_host *host,
 	/* Each value is set to non-zero to assume "enabling" each DMA */
 	host->chan_rx = host->chan_tx = (void *)0xdeadbeaf;
 
-	tasklet_init(&priv->dma_priv.dma_complete,
-		     renesas_sdhi_internal_dmac_complete_tasklet_fn,
-		     (unsigned long)host);
-	tasklet_init(&host->dma_issue,
-		     renesas_sdhi_internal_dmac_issue_tasklet_fn,
-		     (unsigned long)host);
+	INIT_WORK(&priv->dma_priv.dma_complete,
+			renesas_sdhi_internal_dmac_complete_work_fn);
+	INIT_WORK(&host->dma_issue,
+			renesas_sdhi_internal_dmac_issue_work_fn);
 
 	/* Add pre_req and post_req */
 	host->ops.pre_req = renesas_sdhi_internal_dmac_pre_req;
