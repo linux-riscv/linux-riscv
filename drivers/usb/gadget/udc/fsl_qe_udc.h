@@ -293,7 +293,7 @@ struct qe_ep {
 	u8 init;
 
 	u8 already_seen;
-	u8 enable_tasklet;
+	u8 enable_work;
 	u8 setup_stage;
 	u32 last_io;            /* timestamp */
 
@@ -353,7 +353,7 @@ struct qe_udc {
 	unsigned int usb_irq;
 	struct usb_ctlr __iomem *usb_regs;
 
-	struct tasklet_struct rx_tasklet;
+	struct work_struct rx_work;
 
 	struct completion *done;	/* to make sure release() is done */
 };

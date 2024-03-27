@@ -24,6 +24,7 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/gpio/consumer.h>
+#include <linux/workqueue.h>
 #include <soc/fsl/qe/qe.h>
 #include <soc/fsl/qe/immap_qe.h>
 
@@ -254,7 +255,7 @@ struct fhci_hcd {
 	struct virtual_root_hub *vroot_hub; /* the virtual root hub */
 	int active_urbs;
 	struct fhci_controller_list *hc_list;
-	struct tasklet_struct *process_done_task; /* tasklet for done list */
+	struct work_struct *process_done_task; /* work for done list */
 
 	struct list_head empty_eds;
 	struct list_head empty_tds;
@@ -549,7 +550,7 @@ void fhci_init_ep_registers(struct fhci_usb *usb,
 void fhci_ep0_free(struct fhci_usb *usb);
 
 /* fhci-sched.c */
-extern struct tasklet_struct fhci_tasklet;
+extern struct work_struct fhci_work;
 void fhci_transaction_confirm(struct fhci_usb *usb, struct packet *pkt);
 void fhci_flush_all_transmissions(struct fhci_usb *usb);
 void fhci_schedule_transactions(struct fhci_usb *usb);

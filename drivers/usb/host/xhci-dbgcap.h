@@ -11,6 +11,7 @@
 
 #include <linux/tty.h>
 #include <linux/kfifo.h>
+#include <linux/workqueue.h>
 
 struct dbc_regs {
 	__le32	capability;
@@ -107,7 +108,7 @@ struct dbc_port {
 	struct list_head		read_pool;
 	struct list_head		read_queue;
 	unsigned int			n_read;
-	struct tasklet_struct		push;
+	struct work_struct 		push;
 
 	struct list_head		write_pool;
 	struct kfifo			write_fifo;

@@ -21,6 +21,7 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 #include <linux/ratelimit.h>
+#include <linux/workqueue.h>
 
 /*
 #define VERBOSE_DEBUG
@@ -109,7 +110,7 @@ struct usbatm_channel {
 	unsigned int packet_size;	/* endpoint maxpacket */
 	spinlock_t lock;
 	struct list_head list;
-	struct tasklet_struct tasklet;
+	struct work_struct work;
 	struct timer_list delay;
 	struct usbatm_data *usbatm;
 };

@@ -37,6 +37,7 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/usb/otg.h>
+#include <linux/workqueue.h>
 
 #include "usb.h"
 #include "phy.h"
@@ -884,7 +885,7 @@ static void usb_bus_init (struct usb_bus *bus)
  * usb_register_bus - registers the USB host controller with the usb core
  * @bus: pointer to the bus to register
  *
- * Context: task context, might sleep.
+ * Context: work context, might sleep.
  *
  * Assigns a bus number, and links the controller into usbcore data
  * structures so that it can be seen by scanning the bus list.
@@ -920,7 +921,7 @@ error_find_busnum:
  * usb_deregister_bus - deregisters the USB host controller
  * @bus: pointer to the bus to deregister
  *
- * Context: task context, might sleep.
+ * Context: work context, might sleep.
  *
  * Recycles the bus number, and unlinks the controller from usbcore data
  * structures so that it won't be seen by scanning the bus list.
@@ -1640,7 +1641,7 @@ static void __usb_hcd_giveback_urb(struct urb *urb)
 	/* pass ownership to the completion handler */
 	urb->status = status;
 	/*
-	 * This function can be called in task context inside another remote
+	 * This function can be called in work context inside another remote
 	 * coverage collection section, but kcov doesn't support that kind of
 	 * recursion yet. Only collect coverage in softirq context for now.
 	 */
@@ -1662,10 +1663,9 @@ static void __usb_hcd_giveback_urb(struct urb *urb)
 	usb_put_urb(urb);
 }
 
-static void usb_giveback_urb_bh(struct work_struct *work)
+static void usb_giveback_urb_bh(struct work_struct *t)
 {
-	struct giveback_urb_bh *bh =
-		container_of(work, struct giveback_urb_bh, bh);
+	struct giveback_urb_bh *bh = from_work(bh, t, bh);
 	struct list_head local_list;
 
 	spin_lock_irq(&bh->lock);
@@ -1705,7 +1705,7 @@ static void usb_giveback_urb_bh(struct work_struct *work)
  * @status: completion status code for the URB.
  *
  * Context: atomic. The completion callback is invoked in caller's context.
- * For HCDs with HCD_BH flag set, the completion callback is invoked in BH
+ * For HCDs with HCD_BH flag set, the completion callback is invoked in work
  * context (except for URBs submitted to the root hub which always complete in
  * caller's context).
  *
@@ -1724,7 +1724,7 @@ void usb_hcd_giveback_urb(struct usb_hcd *hcd, struct urb *urb, int status)
 	struct giveback_urb_bh *bh;
 	bool running;
 
-	/* pass status to BH via unlinked */
+	/* pass status to work via unlinked */
 	if (likely(!urb->unlinked))
 		urb->unlinked = status;
 
@@ -2611,7 +2611,7 @@ EXPORT_SYMBOL_GPL(__usb_create_hcd);
  * @primary_hcd: a pointer to the usb_hcd structure that is sharing the
  *              PCI device.  Only allocate certain resources for the primary HCD
  *
- * Context: task context, might sleep.
+ * Context: work context, might sleep.
  *
  * Allocate a struct usb_hcd, with extra space at the end for the
  * HC driver's private data.  Initialize the generic members of the
@@ -2634,7 +2634,7 @@ EXPORT_SYMBOL_GPL(usb_create_shared_hcd);
  * @dev: device for this HC, stored in hcd->self.controller
  * @bus_name: value to store in hcd->self.bus_name
  *
- * Context: task context, might sleep.
+ * Context: work context, might sleep.
  *
  * Allocate a struct usb_hcd, with extra space at the end for the
  * HC driver's private data.  Initialize the generic members of the
@@ -3001,7 +3001,7 @@ EXPORT_SYMBOL_GPL(usb_add_hcd);
  * usb_remove_hcd - shutdown processing for generic HCDs
  * @hcd: the usb_hcd structure to remove
  *
- * Context: task context, might sleep.
+ * Context: work context, might sleep.
  *
  * Disconnects the root hub, then reverses the effects of usb_add_hcd(),
  * invoking the HCD's stop() method.
