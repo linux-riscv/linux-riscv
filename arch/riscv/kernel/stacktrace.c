@@ -18,8 +18,9 @@
 
 extern asmlinkage void ret_from_exception(void);
 
-void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
-			     bool (*fn)(void *, unsigned long), void *arg)
+static __always_inline void
+walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+		bool (*fn)(void *, unsigned long), void *arg)
 {
 	unsigned long fp, sp, pc;
 	int level = 0;
@@ -76,8 +77,9 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
 
 #else /* !CONFIG_FRAME_POINTER */
 
-void notrace walk_stackframe(struct task_struct *task,
-	struct pt_regs *regs, bool (*fn)(void *, unsigned long), void *arg)
+static __always_inline void
+walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+		bool (*fn)(void *, unsigned long), void *arg)
 {
 	unsigned long sp, pc;
 	unsigned long *ksp;
@@ -107,6 +109,12 @@ void notrace walk_stackframe(struct task_struct *task,
 
 #endif /* CONFIG_FRAME_POINTER */
 
+noinline noinstr void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
+				      struct task_struct *task, struct pt_regs *regs)
+{
+	walk_stackframe(task, regs, consume_entry, cookie);
+}
+
 static bool print_trace_address(void *arg, unsigned long pc)
 {
 	const char *loglvl = arg;
@@ -118,7 +126,7 @@ static bool print_trace_address(void *arg, unsigned long pc)
 noinline void dump_backtrace(struct pt_regs *regs, struct task_struct *task,
 		    const char *loglvl)
 {
-	walk_stackframe(task, regs, print_trace_address, (void *)loglvl);
+	arch_stack_walk(print_trace_address, (void *)loglvl, task, regs);
 }
 
 void show_stack(struct task_struct *task, unsigned long *sp, const char *loglvl)
@@ -143,13 +151,7 @@ unsigned long __get_wchan(struct task_struct *task)
 
 	if (!try_get_task_stack(task))
 		return 0;
-	walk_stackframe(task, NULL, save_wchan, &pc);
+	arch_stack_walk(save_wchan, &pc, task, NULL);
 	put_task_stack(task);
 	return pc;
-}
-
-noinline void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
-		     struct task_struct *task, struct pt_regs *regs)
-{
-	walk_stackframe(task, regs, consume_entry, cookie);
 }
