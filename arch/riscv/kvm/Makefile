@@ -15,6 +15,7 @@ kvm-y += vmid.o
 kvm-y += tlb.o
 kvm-y += mmu.o
 kvm-y += vcpu.o
+kvm-y += vcpu_debug.o
 kvm-y += vcpu_exit.o
 kvm-y += vcpu_fp.o
 kvm-y += vcpu_vector.o
