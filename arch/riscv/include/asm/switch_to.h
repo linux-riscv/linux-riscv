@@ -69,6 +69,12 @@ static __always_inline bool has_fpu(void) { return false; }
 #define __switch_to_fpu(__prev, __next) do { } while (0)
 #endif
 
+DECLARE_STATIC_KEY_FALSE(use_scontext);
+static __always_inline bool has_scontext(void)
+{
+	return static_branch_likely(&use_scontext);
+}
+
 extern struct task_struct *__switch_to(struct task_struct *,
 				       struct task_struct *);
 
