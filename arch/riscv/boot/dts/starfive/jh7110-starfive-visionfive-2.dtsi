@@ -336,6 +336,11 @@
 	status = "okay";
 };
 
+&pllclk {
+	assigned-clocks = <&pllclk JH7110_PLLCLK_PLL0_OUT>;
+	assigned-clock-rates = <1500000000>;
+};
+
 &qspi {
 	#address-cells = <1>;
 	#size-cells = <0>;

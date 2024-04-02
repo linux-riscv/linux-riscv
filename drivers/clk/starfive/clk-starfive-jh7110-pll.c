@@ -24,10 +24,13 @@
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
+#include <linux/of_address.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
 #include <dt-bindings/clock/starfive,jh7110-crg.h>
+
+#include "clk-starfive-jh7110.h"
 
 /* this driver expects a 24MHz input frequency from the oscillator */
 #define JH7110_PLL_OSC_RATE		24000000UL
@@ -71,6 +74,9 @@
 #define JH7110_PLL_POSTDIV1_MASK	GENMASK(29, 28)
 #define JH7110_PLL_PREDIV_SHIFT		0
 #define JH7110_PLL_PREDIV_MASK		GENMASK(5, 0)
+
+#define JH7110_CPU_ROOT_MUX_OSC		0
+#define JH7110_CPU_ROOT_MUX_PLL0	1
 
 enum jh7110_pll_mode {
 	JH7110_PLL_MODE_FRACTION,
@@ -140,6 +146,8 @@ struct jh7110_pll_data {
 struct jh7110_pll_priv {
 	struct device *dev;
 	struct regmap *regmap;
+	void __iomem *syscrg_base;
+	bool is_first_set;
 	struct jh7110_pll_data pll[JH7110_PLLCLK_END];
 };
 
@@ -275,6 +283,25 @@ static struct jh7110_pll_priv *jh7110_pll_priv_from(struct jh7110_pll_data *pll)
 	return container_of(pll, struct jh7110_pll_priv, pll[pll->idx]);
 }
 
+static void jh7110_pll_syscrg_update_div(void __iomem *base,
+					 unsigned int id,
+					 unsigned int div)
+{
+	unsigned int reg = readl(base + id * 4);
+
+	writel((reg & ~JH71X0_CLK_DIV_MASK) | div, (base + id * 4));
+}
+
+static void jh7110_pll_syscrg_update_mux(void __iomem *base,
+					 unsigned int id,
+					 unsigned int mux)
+{
+	unsigned int reg = readl(base + id * 4);
+
+	writel((reg & ~JH71X0_CLK_MUX_MASK) | (mux << JH71X0_CLK_MUX_SHIFT),
+	       (base + id * 4));
+}
+
 static void jh7110_pll_regvals_get(struct regmap *regmap,
 				   const struct jh7110_pll_info *info,
 				   struct jh7110_pll_regvals *ret)
@@ -352,6 +379,47 @@ static int jh7110_pll_determine_rate(struct clk_hw *hw, struct clk_rate_request 
 	return 0;
 }
 
+static bool jh7110_pll0_is_assigned_clock(struct device_node *node)
+{
+	struct of_phandle_args clkspec;
+	int ret;
+
+	ret = of_parse_phandle_with_args(node, "assigned-clocks",
+					 "#clock-cells", 0, &clkspec);
+	if (ret < 0 || clkspec.np != node)
+		return false;
+
+	if (clkspec.args[0] == JH7110_PLLCLK_PLL0_OUT)
+		return true;
+
+	return false;
+}
+
+/*
+ * In order to not affect the cpu when the PLL0 rate is changing,
+ * we need to switch the parent of cpu_root clock to osc clock first,
+ * and then switch back after setting the PLL0 rate.
+ *
+ * If cpu rate rather than 1.25GHz, PMIC need to be set higher voltage.
+ * But the PMIC is controlled by CPUfreq and I2C, which boot later than
+ * PLL driver when using assigned_clock to set PLL0 rate. So set the
+ * CPU_CORE divider to 2(default 1) first and make sure the cpu rate is
+ * lower than 1.25G when pll0 rate will be set more than 1.25G.
+ */
+static void jh7110_pll0_rate_preset(struct jh7110_pll_priv *priv,
+				    unsigned long rate)
+{
+	if (rate > 1250000000 && priv->is_first_set &&
+	    jh7110_pll0_is_assigned_clock(priv->dev->of_node))
+		jh7110_pll_syscrg_update_div(priv->syscrg_base,
+					     JH7110_SYSCLK_CPU_CORE, 2);
+
+	jh7110_pll_syscrg_update_mux(priv->syscrg_base,
+				     JH7110_SYSCLK_CPU_ROOT,
+				     JH7110_CPU_ROOT_MUX_OSC);
+	priv->is_first_set = false;
+}
+
 static int jh7110_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 			       unsigned long parent_rate)
 {
@@ -372,6 +440,9 @@ static int jh7110_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 	return -EINVAL;
 
 found:
+	if (pll->idx == JH7110_PLLCLK_PLL0_OUT)
+		jh7110_pll0_rate_preset(priv, rate);
+
 	if (val->mode == JH7110_PLL_MODE_FRACTION)
 		regmap_update_bits(priv->regmap, info->offsets.frac, JH7110_PLL_FRAC_MASK,
 				   val->frac << JH7110_PLL_FRAC_SHIFT);
@@ -386,6 +457,12 @@ found:
 			   val->fbdiv << info->shifts.fbdiv);
 	regmap_update_bits(priv->regmap, info->offsets.frac, JH7110_PLL_POSTDIV1_MASK,
 			   (u32)val->postdiv1 << JH7110_PLL_POSTDIV1_SHIFT);
+
+	/* Set parent of cpu_root back to PLL0 */
+	if (pll->idx == JH7110_PLLCLK_PLL0_OUT)
+		jh7110_pll_syscrg_update_mux(priv->syscrg_base,
+					     JH7110_SYSCLK_CPU_ROOT,
+					     JH7110_CPU_ROOT_MUX_PLL0);
 
 	return 0;
 }
@@ -458,6 +535,8 @@ static int jh7110_pll_probe(struct platform_device *pdev)
 	struct jh7110_pll_priv *priv;
 	unsigned int idx;
 	int ret;
+	struct device_node *np;
+	struct resource res;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -488,6 +567,29 @@ static int jh7110_pll_probe(struct platform_device *pdev)
 		if (ret)
 			return ret;
 	}
+
+	priv->is_first_set = true;
+	np = of_find_compatible_node(NULL, NULL, "starfive,jh7110-syscrg");
+	if (!np) {
+		ret = PTR_ERR(np);
+		dev_err(priv->dev, "failed to get syscrg node\n");
+		goto np_put;
+	}
+
+	ret = of_address_to_resource(np, 0, &res);
+	if (ret) {
+		dev_err(priv->dev, "failed to get syscrg resource\n");
+		goto np_put;
+	}
+
+	priv->syscrg_base = ioremap(res.start, resource_size(&res));
+	if (!priv->syscrg_base)
+		ret = -ENOMEM;
+
+np_put:
+	of_node_put(np);
+	if (ret)
+		return ret;
 
 	return devm_of_clk_add_hw_provider(&pdev->dev, jh7110_pll_get, priv);
 }
