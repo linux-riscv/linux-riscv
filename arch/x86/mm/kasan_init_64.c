@@ -53,7 +53,7 @@ static void __init kasan_populate_pmd(pmd_t *pmd, unsigned long addr,
 		}
 
 		p = early_alloc(PAGE_SIZE, nid, true);
-		pmd_populate_kernel(&init_mm, pmd, p);
+		pmd_populate_kernel(&init_mm, pmd, p, addr);
 	}
 
 	pte = pte_offset_kernel(pmd, addr);

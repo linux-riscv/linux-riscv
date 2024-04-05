@@ -7,7 +7,7 @@
 
 #include <asm-generic/pgalloc.h>
 
-/*      
+/*
  * Allocate and free page tables. The xxx_kernel() versions are
  * used to allocate a kernel page table - this turns on ASN bits
  * if any.
@@ -20,7 +20,8 @@ pmd_populate(struct mm_struct *mm, pmd_t *pmd, pgtable_t pte)
 }
 
 static inline void
-pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte)
+pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte,
+		    unsigned long vaddr)
 {
 	pmd_set(pmd, pte);
 }

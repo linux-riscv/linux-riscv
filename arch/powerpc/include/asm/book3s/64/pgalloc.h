@@ -156,7 +156,7 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 }
 
 static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd,
-				       pte_t *pte)
+				       pte_t *pte, unsigned long vaddr)
 {
 	*pmd = __pmd(__pgtable_ptr_val(pte) | PMD_VAL_BITS);
 }

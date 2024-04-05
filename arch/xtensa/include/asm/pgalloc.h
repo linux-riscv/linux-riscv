@@ -21,7 +21,7 @@
  * inside the pgd, so has no extra memory associated with it.
  */
 
-#define pmd_populate_kernel(mm, pmdp, ptep)				     \
+#define pmd_populate_kernel(mm, pmdp, ptep, vaddr)			     \
 	(pmd_val(*(pmdp)) = ((unsigned long)ptep))
 #define pmd_populate(mm, pmdp, page)					     \
 	(pmd_val(*(pmdp)) = ((unsigned long)page_to_virt(page)))

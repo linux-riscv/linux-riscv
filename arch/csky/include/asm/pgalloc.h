@@ -11,7 +11,7 @@
 #include <asm-generic/pgalloc.h>
 
 static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd,
-					pte_t *pte)
+					pte_t *pte, unsigned long vaddr)
 {
 	set_pmd(pmd, __pmd(__pa(pte)));
 }

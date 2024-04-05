@@ -73,7 +73,15 @@ static inline void fname##_init(struct mm_struct *mm,		\
 DEFINE_POPULATE(p4d_populate, p4d, pud, init)
 DEFINE_POPULATE(pgd_populate, pgd, p4d, init)
 DEFINE_POPULATE(pud_populate, pud, pmd, init)
-DEFINE_POPULATE(pmd_populate_kernel, pmd, pte, init)
+
+static inline void pmd_populate_kernel_init(struct mm_struct *mm,
+		pmd_t *arg1, pte_t *arg2, unsigned long arg3, bool init)
+{
+	if (init)
+		pmd_populate_kernel_safe(mm, arg1, arg2);
+	else
+		pmd_populate_kernel(mm, arg1, arg2, arg3);
+}
 
 #define DEFINE_ENTRY(type1, type2, init)			\
 static inline void set_##type1##_init(type1##_t *arg1,		\
@@ -286,7 +294,7 @@ static pte_t *fill_pte(pmd_t *pmd, unsigned long vaddr)
 {
 	if (pmd_none(*pmd)) {
 		pte_t *pte = (pte_t *) spp_getpage();
-		pmd_populate_kernel(&init_mm, pmd, pte);
+		pmd_populate_kernel(&init_mm, pmd, pte, vaddr);
 		if (pte != pte_offset_kernel(pmd, 0))
 			printk(KERN_ERR "PAGETABLE BUG #03!\n");
 	}
@@ -575,7 +583,7 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
 		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
 
 		spin_lock(&init_mm.page_table_lock);
-		pmd_populate_kernel_init(&init_mm, pmd, pte, init);
+		pmd_populate_kernel_init(&init_mm, pmd, pte, init, __va(paddr));
 		spin_unlock(&init_mm.page_table_lock);
 	}
 	update_page_count(PG_LEVEL_2M, pages);

@@ -16,7 +16,7 @@
 #include <asm-generic/pgalloc.h>
 
 static inline void pmd_populate_kernel(struct mm_struct *mm,
-	pmd_t *pmd, pte_t *pte)
+	pmd_t *pmd, pte_t *pte, unsigned long vaddr)
 {
 	unsigned long pfn = virt_to_pfn(pte);
 

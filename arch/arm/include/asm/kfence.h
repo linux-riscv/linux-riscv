@@ -19,7 +19,7 @@ static inline int split_pmd_page(pmd_t *pmd, unsigned long addr)
 
 	for (i = 0; i < PTRS_PER_PTE; i++)
 		set_pte_ext(pte + i, pfn_pte(pfn + i, PAGE_KERNEL), 0);
-	pmd_populate_kernel(&init_mm, pmd, pte);
+	pmd_populate_kernel(&init_mm, pmd, pte, addr);
 
 	flush_tlb_kernel_range(addr, addr + PMD_SIZE);
 	return 0;

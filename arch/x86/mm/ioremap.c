@@ -888,7 +888,7 @@ void __init early_ioremap_init(void)
 
 	pmd = early_ioremap_pmd(fix_to_virt(FIX_BTMAP_BEGIN));
 	memset(bm_pte, 0, sizeof(bm_pte));
-	pmd_populate_kernel(&init_mm, pmd, bm_pte);
+	pmd_populate_kernel(&init_mm, pmd, bm_pte, fix_to_virt(FIX_BTMAP_BEGIN));
 
 	/*
 	 * The boot-ioremap range spans multiple pmds, for which

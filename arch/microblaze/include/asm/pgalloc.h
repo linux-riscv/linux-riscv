@@ -35,7 +35,7 @@ extern pte_t *pte_alloc_one_kernel(struct mm_struct *mm);
 #define pmd_populate(mm, pmd, pte) \
 			(pmd_val(*(pmd)) = (unsigned long)page_address(pte))
 
-#define pmd_populate_kernel(mm, pmd, pte) \
+#define pmd_populate_kernel(mm, pmd, pte, vaddr) \
 		(pmd_val(*(pmd)) = (unsigned long) (pte))
 
 #endif /* _ASM_MICROBLAZE_PGALLOC_H */

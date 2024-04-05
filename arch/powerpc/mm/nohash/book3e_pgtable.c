@@ -107,7 +107,7 @@ int __ref map_kernel_page(unsigned long ea, phys_addr_t pa, pgprot_t prot)
 		pmdp = pmd_offset(pudp, ea);
 		if (!pmd_present(*pmdp)) {
 			ptep = early_alloc_pgtable(PTE_TABLE_SIZE);
-			pmd_populate_kernel(&init_mm, pmdp, ptep);
+			pmd_populate_kernel(&init_mm, pmdp, ptep, ea);
 		}
 		ptep = pte_offset_kernel(pmdp, ea);
 	}

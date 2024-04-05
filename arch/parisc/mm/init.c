@@ -390,7 +390,7 @@ static void __ref map_pages(unsigned long start_vaddr,
 				pg_table = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
 				if (!pg_table)
 					panic("page table allocation failed\n");
-				pmd_populate_kernel(NULL, pmd, pg_table);
+				pmd_populate_kernel(NULL, pmd, pg_table, vaddr);
 			}
 
 			pg_table = pte_offset_kernel(pmd, vaddr);
@@ -481,7 +481,7 @@ void free_initmem(void)
 	/* finally dump all the instructions which were cached, since the
 	 * pages are no-longer executable */
 	flush_icache_range(init_begin, init_end);
-	
+
 	free_initmem_default(POISON_FREE_INITMEM);
 
 	/* set up a new led state on systems shipped LED State panel */
@@ -694,7 +694,7 @@ static void __init fixmap_init(void)
 		if (!pte)
 			panic("fixmap: pte allocation failed.\n");
 
-		pmd_populate_kernel(&init_mm, pmd, pte);
+		pmd_populate_kernel(&init_mm, pmd, pte, addr);
 
 		addr += PAGE_SIZE;
 	} while (addr < end);

@@ -131,7 +131,7 @@ static inline void pmd_populate(struct mm_struct *mm,
 	set_pmd(pmd, __pmd(_SEGMENT_ENTRY | __pa(pte)));
 }
 
-#define pmd_populate_kernel(mm, pmd, pte) pmd_populate(mm, pmd, pte)
+#define pmd_populate_kernel(mm, pmd, pte, vaddr) pmd_populate(mm, pmd, pte)
 
 /*
  * page table entry allocation/free routines.

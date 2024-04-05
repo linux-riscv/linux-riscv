@@ -176,7 +176,7 @@ static int temp_pgtable_map_pte(pmd_t *dst_pmdp, pmd_t *src_pmdp, unsigned long 
 		if (!dst_ptep)
 			return -ENOMEM;
 
-		pmd_populate_kernel(NULL, dst_pmdp, dst_ptep);
+		pmd_populate_kernel(NULL, dst_pmdp, dst_ptep, 0);
 	}
 
 	dst_ptep = pte_offset_kernel(dst_pmdp, start);

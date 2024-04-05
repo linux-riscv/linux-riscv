@@ -57,7 +57,7 @@ static noinline pte_t * __init alloc_kmap_pgtable(unsigned long kvaddr)
 		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
 		      __func__, PAGE_SIZE, PAGE_SIZE);
 
-	pmd_populate_kernel(&init_mm, pmd_k, pte_k);
+	pmd_populate_kernel(&init_mm, pmd_k, pte_k, kvaddr);
 	return pte_k;
 }
 

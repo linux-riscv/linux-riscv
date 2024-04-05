@@ -54,7 +54,7 @@ static int __init kasan_map_kernel_page(unsigned long ea, unsigned long pa, pgpr
 	if (kasan_pte_table(*pmdp)) {
 		ptep = memblock_alloc(PTE_TABLE_SIZE, PTE_TABLE_SIZE);
 		memcpy(ptep, kasan_early_shadow_pte, PTE_TABLE_SIZE);
-		pmd_populate_kernel(&init_mm, pmdp, ptep);
+		pmd_populate_kernel(&init_mm, pmdp, ptep, ea);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
 
@@ -93,9 +93,12 @@ void __init kasan_early_init(void)
 		__set_pte_at(&init_mm, (unsigned long)kasan_early_shadow_page,
 			     &kasan_early_shadow_pte[i], zero_pte, 0);
 
-	for (i = 0; i < PTRS_PER_PMD; i++)
+	addr = KASAN_SHADOW_START
+	for (i = 0; i < PTRS_PER_PMD; i++) {
 		pmd_populate_kernel(&init_mm, &kasan_early_shadow_pmd[i],
-				    kasan_early_shadow_pte);
+				    kasan_early_shadow_pte, addr);
+		addr += PMD_SIZE;
+	}
 
 	for (i = 0; i < PTRS_PER_PUD; i++)
 		pud_populate(&init_mm, &kasan_early_shadow_pud[i],

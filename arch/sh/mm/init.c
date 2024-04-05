@@ -157,7 +157,7 @@ static pte_t * __init one_page_table_init(pmd_t *pmd)
 		if (!pte)
 			panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
 			      __func__, PAGE_SIZE, PAGE_SIZE);
-		pmd_populate_kernel(&init_mm, pmd, pte);
+		pmd_populate_kernel(&init_mm, pmd, pte, 0);
 		BUG_ON(pte != pte_offset_kernel(pmd, 0));
 	}
 

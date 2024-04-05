@@ -61,13 +61,14 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 #endif
 
 static inline void
-pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte)
+pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte, unsigned long vaddr)
 {
 	set_pmd(pmd, __pmd((PxD_FLAG_PRESENT | PxD_FLAG_VALID)
 		+ (__u32)(__pa((unsigned long)pte) >> PxD_VALUE_SHIFT)));
 }
 
 #define pmd_populate(mm, pmd, pte_page) \
-	pmd_populate_kernel(mm, pmd, page_address(pte_page))
+	pmd_populate_kernel(mm, pmd, page_address(pte_page), \
+			    (unsigned long)page_to_virt(pte_page))
 
 #endif

@@ -15,7 +15,7 @@
 /* #define pgd_populate(mm, pmd, pte)      BUG() */
 
 static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp,
-				       pte_t *pte)
+				       pte_t *pte, unsigned long vaddr)
 {
 	if (IS_ENABLED(CONFIG_BOOKE))
 		*pmdp = __pmd((unsigned long)pte | _PMD_PRESENT);

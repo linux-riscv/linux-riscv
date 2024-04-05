@@ -34,7 +34,8 @@
 #include <asm-generic/pgalloc.h>
 
 static inline void
-pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte)
+pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte,
+		    unsigned long vaddr)
 {
 	/*
 	 * The cast to long below is OK in 32-bit PAE40 regime with long long pte

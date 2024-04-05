@@ -111,7 +111,7 @@ static void __init kasan_pmd_populate(pud_t *pudp, unsigned long addr,
 				      __func__, addr);
 				return;
 			}
-			pmd_populate_kernel(&init_mm, pmdp, p);
+			pmd_populate_kernel(&init_mm, pmdp, p, addr);
 			flush_pmd_entry(pmdp);
 		}
 

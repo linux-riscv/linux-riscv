@@ -43,7 +43,7 @@ notrace void __init early_ioremap_init(void)
 
 	for (; (s32)(FIXADDR_TOP - addr) > 0;
 	     addr += PGDIR_SIZE, ptep += PTRS_PER_PTE, pmdp++)
-		pmd_populate_kernel(&init_mm, pmdp, ptep);
+		pmd_populate_kernel(&init_mm, pmdp, ptep, addr);
 
 	early_ioremap_setup();
 }
@@ -64,7 +64,7 @@ pte_t __init *early_pte_alloc_kernel(pmd_t *pmdp, unsigned long va)
 	if (pmd_none(*pmdp)) {
 		pte_t *ptep = early_alloc_pgtable(PTE_FRAG_SIZE);
 
-		pmd_populate_kernel(&init_mm, pmdp, ptep);
+		pmd_populate_kernel(&init_mm, pmdp, ptep, va);
 	}
 	return pte_offset_kernel(pmdp, va);
 }

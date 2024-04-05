@@ -25,7 +25,7 @@
 
 extern int mem_init_done;
 
-#define pmd_populate_kernel(mm, pmd, pte) \
+#define pmd_populate_kernel(mm, pmd, pte, vaddr) \
 	set_pmd(pmd, __pmd(_KERNPG_TABLE + __pa(pte)))
 
 static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,

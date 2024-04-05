@@ -122,7 +122,8 @@ static inline void __pmd_populate(pmd_t *pmdp, phys_addr_t pte,
  * Ensure that we always set both PMD entries.
  */
 static inline void
-pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep)
+pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep,
+		    unsigned long vaddr)
 {
 	/*
 	 * The pmd must be loaded with the physical address of the PTE table

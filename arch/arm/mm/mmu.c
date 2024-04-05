@@ -384,7 +384,7 @@ void __init early_fixmap_init(void)
 		     != FIXADDR_TOP >> PMD_SHIFT);
 
 	pmd = fixmap_pmd(FIXADDR_TOP);
-	pmd_populate_kernel(&init_mm, pmd, bm_pte);
+	pmd_populate_kernel(&init_mm, pmd, bm_pte, __fix_to_virt(FIXADDR_TOP));
 
 	pte_offset_fixmap = pte_offset_early_fixmap;
 }

@@ -62,7 +62,7 @@ static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,
  * kernel map of the active thread who's calling pmd_populate_kernel...
  */
 static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd,
-				       pte_t *pte)
+				       pte_t *pte, unsigned long vaddr)
 {
 	extern spinlock_t kmap_gen_lock;
 	pmd_t *ppmd;

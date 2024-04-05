@@ -23,7 +23,8 @@ do {								\
 	tlb_remove_page_ptdesc((tlb), page_ptdesc(pte));	\
 } while (0)
 
-static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd, pte_t *pte)
+static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd,
+				       pte_t *pte, unsigned long vaddr)
 {
 	pmd_val(*pmd) = __pa((unsigned long)pte);
 }

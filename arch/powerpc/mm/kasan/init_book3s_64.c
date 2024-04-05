@@ -55,6 +55,7 @@ void __init kasan_init(void)
 	phys_addr_t start, end;
 	u64 i;
 	pte_t zero_pte = pfn_pte(virt_to_pfn(kasan_early_shadow_page), PAGE_KERNEL);
+	void *vaddr_start = __va(start);
 
 	if (!early_radix_enabled()) {
 		pr_warn("KASAN not enabled as it requires radix!");
@@ -68,9 +69,11 @@ void __init kasan_init(void)
 		__set_pte_at(&init_mm, (unsigned long)kasan_early_shadow_page,
 			     &kasan_early_shadow_pte[i], zero_pte, 0);
 
-	for (i = 0; i < PTRS_PER_PMD; i++)
+	for (i = 0; i < PTRS_PER_PMD; i++) {
 		pmd_populate_kernel(&init_mm, &kasan_early_shadow_pmd[i],
-				    kasan_early_shadow_pte);
+				    kasan_early_shadow_pte,
+				    vaddr_start + i * PMD_SIZE);
+	}
 
 	for (i = 0; i < PTRS_PER_PUD; i++)
 		pud_populate(&init_mm, &kasan_early_shadow_pud[i],

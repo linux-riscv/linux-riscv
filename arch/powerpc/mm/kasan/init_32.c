@@ -47,7 +47,7 @@ int __init kasan_init_shadow_page_tables(unsigned long k_start, unsigned long k_
 		if (!new)
 			return -ENOMEM;
 		kasan_populate_pte(new, PAGE_KERNEL);
-		pmd_populate_kernel(&init_mm, pmd, new);
+		pmd_populate_kernel(&init_mm, pmd, new, k_cur);
 	}
 	return 0;
 }
@@ -187,6 +187,6 @@ void __init kasan_early_init(void)
 
 	do {
 		next = pgd_addr_end(addr, end);
-		pmd_populate_kernel(&init_mm, pmd, kasan_early_shadow_pte);
+		pmd_populate_kernel(&init_mm, pmd, kasan_early_shadow_pte, addr);
 	} while (pmd++, addr = next, addr != end);
 }

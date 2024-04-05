@@ -104,7 +104,7 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
-		pmd_populate_kernel(&init_mm, pmdp, ptep);
+		pmd_populate_kernel(&init_mm, pmdp, ptep, ea);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
 

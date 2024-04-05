@@ -110,7 +110,7 @@ static pte_t *__init kasan_pte_offset(pmd_t *pmdp, unsigned long addr, int node,
 				__pa_symbol(kasan_early_shadow_pte) : kasan_alloc_zeroed_page(node);
 		if (!early)
 			memcpy(__va(pte_phys), kasan_early_shadow_pte, sizeof(kasan_early_shadow_pte));
-		pmd_populate_kernel(NULL, pmdp, (pte_t *)__va(pte_phys));
+		pmd_populate_kernel(NULL, pmdp, (pte_t *)__va(pte_phys), addr);
 	}
 
 	return pte_offset_kernel(pmdp, addr);
