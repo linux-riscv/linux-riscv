@@ -119,11 +119,21 @@ static int clint_clock_next_event(unsigned long delta,
 	return 0;
 }
 
+static int clint_clock_shutdown(struct clock_event_device *evt)
+{
+	void __iomem *r = clint_timer_cmp +
+			  cpuid_to_hartid_map(smp_processor_id());
+
+	writeq_relaxed(U64_MAX, r);
+	return 0;
+}
+
 static DEFINE_PER_CPU(struct clock_event_device, clint_clock_event) = {
-	.name		= "clint_clockevent",
-	.features	= CLOCK_EVT_FEAT_ONESHOT,
-	.rating		= 100,
-	.set_next_event	= clint_clock_next_event,
+	.name				= "clint_clockevent",
+	.features			= CLOCK_EVT_FEAT_ONESHOT,
+	.rating				= 100,
+	.set_next_event			= clint_clock_next_event,
+	.set_state_shutdown		= clint_clock_shutdown,
 };
 
 static int clint_timer_starting_cpu(unsigned int cpu)
