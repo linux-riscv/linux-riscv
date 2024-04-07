@@ -21,6 +21,9 @@
 #include <linux/cacheinfo.h>
 #include <acpi/processor.h>
 
+void acpi_fill_cacheinfo(struct acpi_pptt_cache *cache, struct acpi_table_header *table,
+			 int cpu, int level, int *index);
+
 static struct acpi_subtable_header *fetch_pptt_subtable(struct acpi_table_header *table_hdr,
 							u32 pptt_ref)
 {
@@ -77,6 +80,18 @@ static inline bool acpi_pptt_match_type(int table_type, int type)
 		table_type & ACPI_PPTT_CACHE_TYPE_UNIFIED & type);
 }
 
+static inline u32 get_cache_id(struct acpi_pptt_cache *cache)
+{
+	struct acpi_pptt_cache_v1 *cache_v1;
+
+	if (cache->flags & ACPI_PPTT_CACHE_ID_VALID) {
+		cache_v1 = ACPI_ADD_PTR(struct acpi_pptt_cache_v1,
+					cache, sizeof(struct acpi_pptt_cache));
+		return cache_v1->cache_id;
+	}
+	return 0;
+}
+
 /**
  * acpi_pptt_walk_cache() - Attempt to find the requested acpi_pptt_cache
  * @table_hdr: Pointer to the head of the PPTT table
@@ -104,7 +119,7 @@ static unsigned int acpi_pptt_walk_cache(struct acpi_table_header *table_hdr,
 					 unsigned int *split_levels,
 					 struct acpi_subtable_header *res,
 					 struct acpi_pptt_cache **found,
-					 unsigned int level, int type)
+					 unsigned int level, int type, int cpu, int *index)
 {
 	struct acpi_pptt_cache *cache;
 
@@ -125,7 +140,7 @@ static unsigned int acpi_pptt_walk_cache(struct acpi_table_header *table_hdr,
 		     acpi_pptt_match_type(cache->attributes, ACPI_PPTT_CACHE_TYPE_INSTR)))
 			*split_levels = local_level;
 
-		if (local_level == level &&
+		if (level && local_level == level &&
 		    acpi_pptt_match_type(cache->attributes, type)) {
 			if (*found != NULL && cache != *found)
 				pr_warn("Found duplicate cache level/type unable to determine uniqueness\n");
@@ -137,7 +152,9 @@ static unsigned int acpi_pptt_walk_cache(struct acpi_table_header *table_hdr,
 			 * to verify that we don't find a duplicate
 			 * cache node.
 			 */
-		}
+		} else
+			acpi_fill_cacheinfo(cache, table_hdr, cpu, local_level, index);
+
 		cache = fetch_pptt_cache(table_hdr, cache->next_level_of_cache);
 	}
 	return local_level;
@@ -147,7 +164,7 @@ static struct acpi_pptt_cache *
 acpi_find_cache_level(struct acpi_table_header *table_hdr,
 		      struct acpi_pptt_processor *cpu_node,
 		      unsigned int *starting_level, unsigned int *split_levels,
-		      unsigned int level, int type)
+		      unsigned int level, int type, int cpu, int *index)
 {
 	struct acpi_subtable_header *res;
 	unsigned int number_of_levels = *starting_level;
@@ -161,7 +178,8 @@ acpi_find_cache_level(struct acpi_table_header *table_hdr,
 
 		local_level = acpi_pptt_walk_cache(table_hdr, *starting_level,
 						   split_levels, res, &ret,
-						   level, type);
+						   level, type, cpu, index);
+
 		/*
 		 * we are looking for the max depth. Since its potentially
 		 * possible for a given node to have resources with differing
@@ -197,7 +215,7 @@ static void acpi_count_levels(struct acpi_table_header *table_hdr,
 			      unsigned int *levels, unsigned int *split_levels)
 {
 	do {
-		acpi_find_cache_level(table_hdr, cpu_node, levels, split_levels, 0, 0);
+		acpi_find_cache_level(table_hdr, cpu_node, levels, split_levels, 0, 0, 0, NULL);
 		cpu_node = fetch_pptt_node(table_hdr, cpu_node->parent);
 	} while (cpu_node);
 }
@@ -316,6 +334,7 @@ static u8 acpi_cache_type(enum cache_type type)
 }
 
 static struct acpi_pptt_cache *acpi_find_cache_node(struct acpi_table_header *table_hdr,
+						    int cpu,
 						    u32 acpi_cpu_id,
 						    enum cache_type type,
 						    unsigned int level,
@@ -325,6 +344,7 @@ static struct acpi_pptt_cache *acpi_find_cache_node(struct acpi_table_header *ta
 	struct acpi_pptt_cache *found = NULL;
 	struct acpi_pptt_processor *cpu_node;
 	u8 acpi_type = acpi_cache_type(type);
+	int index = 0;
 
 	pr_debug("Looking for CPU %d's level %u cache type %d\n",
 		 acpi_cpu_id, level, acpi_type);
@@ -333,7 +353,7 @@ static struct acpi_pptt_cache *acpi_find_cache_node(struct acpi_table_header *ta
 
 	while (cpu_node && !found) {
 		found = acpi_find_cache_level(table_hdr, cpu_node,
-					      &total_levels, NULL, level, acpi_type);
+					      &total_levels, NULL, level, acpi_type, cpu, &index);
 		*node = cpu_node;
 		cpu_node = fetch_pptt_node(table_hdr, cpu_node->parent);
 	}
@@ -406,8 +426,14 @@ static void update_cache_properties(struct cacheinfo *this_leaf,
 	 * specified in PPTT.
 	 */
 	if (this_leaf->type == CACHE_TYPE_NOCACHE &&
-	    found_cache->flags & ACPI_PPTT_CACHE_TYPE_VALID)
-		this_leaf->type = CACHE_TYPE_UNIFIED;
+	    found_cache->flags & ACPI_PPTT_CACHE_TYPE_VALID) {
+		if (acpi_pptt_match_type(found_cache->attributes, ACPI_PPTT_CACHE_TYPE_DATA))
+			this_leaf->type = CACHE_TYPE_DATA;
+		if (acpi_pptt_match_type(found_cache->attributes, ACPI_PPTT_CACHE_TYPE_INSTR))
+			this_leaf->type = CACHE_TYPE_INST;
+		if (acpi_pptt_match_type(found_cache->attributes, ACPI_PPTT_CACHE_TYPE_UNIFIED))
+			this_leaf->type = CACHE_TYPE_UNIFIED;
+	}
 
 	if (revision >= 3 && (found_cache->flags & ACPI_PPTT_CACHE_ID_VALID)) {
 		found_cache_v1 = ACPI_ADD_PTR(struct acpi_pptt_cache_v1,
@@ -417,19 +443,106 @@ static void update_cache_properties(struct cacheinfo *this_leaf,
 	}
 }
 
+static bool cache_is_filled_id(struct acpi_pptt_cache *cache, int cpu)
+{
+	u32 id = get_cache_id(cache);
+	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
+	struct cacheinfo *this_leaf;
+	int index = 0;
+
+	while (index < get_cpu_cacheinfo(cpu)->num_leaves) {
+		this_leaf = this_cpu_ci->info_list + index;
+		if (this_leaf->id == id)
+			return true;
+		index++;
+	}
+	return false;
+}
+
+static bool cache_is_filled_content(struct acpi_pptt_cache *cache,
+				    struct acpi_table_header *table,
+				    int cpu, int level, u8 revision)
+{
+	struct acpi_pptt_processor *cpu_node;
+	struct cacheinfo *this_leaf, *tleaf;
+	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
+	struct cacheinfo tmp_leaf = {0};
+	int index = 0;
+
+	cpu_node = acpi_find_processor_node(table, get_acpi_id_for_cpu(cpu));
+	tleaf = &tmp_leaf;
+	tleaf->level = level;
+
+	while (index < get_cpu_cacheinfo(cpu)->num_leaves) {
+		this_leaf = this_cpu_ci->info_list + index;
+		update_cache_properties(tleaf, cache,
+					ACPI_TO_POINTER(ACPI_PTR_DIFF(cpu_node, table)),
+					revision);
+		if (!memcmp(this_leaf, tleaf, sizeof(struct cacheinfo)))
+			return true;
+		index++;
+	}
+	return false;
+}
+
+static bool cache_is_filled(struct acpi_pptt_cache *cache, struct acpi_table_header *table,
+				   int cpu, int level)
+{
+	u8 revision = table->revision;
+
+	/*
+	 * If revision >= 3, compare the cacheid directly,
+	 * otherwise compare the entire contents of the cache.
+	 */
+	if (revision >= 3)
+		return cache_is_filled_id(cache, cpu);
+	else
+		return cache_is_filled_content(cache, table, cpu, level, revision);
+}
+
+void acpi_fill_cacheinfo(struct acpi_pptt_cache *cache,
+				struct acpi_table_header *table,
+				int cpu, int level, int *index)
+{
+	struct cacheinfo *this_leaf;
+	struct acpi_pptt_processor *cpu_node;
+	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
+
+	if (!index)
+		return;
+
+	cpu_node = acpi_find_processor_node(table, get_acpi_id_for_cpu(cpu));
+	this_leaf = this_cpu_ci->info_list + *index;
+	if (this_leaf) {
+		this_leaf->level = level;
+		if (cache_is_filled(cache, table, cpu, level))
+			return;
+		update_cache_properties(this_leaf, cache,
+					ACPI_TO_POINTER(ACPI_PTR_DIFF(cpu_node,
+							table)),
+					table->revision);
+		*index += 1;
+	}
+}
+
 static void cache_setup_acpi_cpu(struct acpi_table_header *table,
 				 unsigned int cpu)
 {
 	struct acpi_pptt_cache *found_cache;
 	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
 	u32 acpi_cpu_id = get_acpi_id_for_cpu(cpu);
-	struct cacheinfo *this_leaf;
+	struct cacheinfo *this_leaf = this_cpu_ci->info_list;
 	unsigned int index = 0;
 	struct acpi_pptt_processor *cpu_node = NULL;
 
+	if (!this_leaf->type && !this_leaf->level) {
+		acpi_find_cache_node(table, acpi_cpu_id, cpu, 0, 0, &cpu_node);
+		return;
+	}
+
 	while (index < get_cpu_cacheinfo(cpu)->num_leaves) {
 		this_leaf = this_cpu_ci->info_list + index;
-		found_cache = acpi_find_cache_node(table, acpi_cpu_id,
+		found_cache = acpi_find_cache_node(table, acpi_cpu_id, cpu,
 						   this_leaf->type,
 						   this_leaf->level,
 						   &cpu_node);
