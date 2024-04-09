@@ -69,6 +69,7 @@ SYM_FUNC_START(clear_page)
 	ret
 .Lno_zicboz:
 	li	a1, 0
+	lui t2, 0x1
 	tail	__memset
 SYM_FUNC_END(clear_page)
 EXPORT_SYMBOL(clear_page)

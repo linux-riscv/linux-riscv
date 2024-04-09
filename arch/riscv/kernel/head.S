@@ -165,6 +165,7 @@ secondary_start_sbi:
 #endif
 	call .Lsetup_trap_vector
 	scs_load_current
+	lui t2, 0x1
 	tail smp_callin
 #endif /* CONFIG_SMP */
 

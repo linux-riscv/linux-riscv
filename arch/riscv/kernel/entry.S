@@ -219,6 +219,7 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
 	move a0, sp
+	lui t2,0x1
 	tail handle_bad_stack
 SYM_CODE_END(handle_kernel_stack_overflow)
 ASM_NOKPROBE(handle_kernel_stack_overflow)
@@ -258,6 +259,7 @@ SYM_FUNC_START(call_on_irq_stack)
 	load_per_cpu t0, irq_stack_ptr, t1
 	li	t1, IRQ_STACK_SIZE
 	add	sp, t0, t1
+	lui t2, 0x1
 	jalr	a1
 
 	/* Switch back to the thread shadow call stack */
