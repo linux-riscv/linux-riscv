@@ -164,6 +164,13 @@ secondary_start_sbi:
 	call relocate_enable_mmu
 #endif
 	call .Lsetup_trap_vector
+	/*
+	 * Temp hack to get menvcfg.SSE=1 and menvcfg.LPE=1 by invoking
+	 * SBI_EXT_BASE
+	 */
+	li a6, 0
+	li a7, 0x10
+	ecall
 	scs_load_current t0
 	lui t2, 0x1
 	tail smp_callin
@@ -313,6 +320,13 @@ SYM_CODE_START(_start_kernel)
 	la tp, init_task
 	la sp, init_thread_union + THREAD_SIZE
 	addi sp, sp, -PT_SIZE_ON_STACK
+	/*
+	 * Temp hack to get menvcfg.SSE=1 and menvcfg.LPE=1 by invoking
+	 * SBI_EXT_BASE
+	 */
+	li a6, 0
+	li a7, 0x10
+	ecall
 	scs_load_current t0
 
 #ifdef CONFIG_KASAN
