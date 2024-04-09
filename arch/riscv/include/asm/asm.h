@@ -109,7 +109,7 @@
 	REG_L \dst, 0(\dst)
 .endm
 
-#ifdef CONFIG_SHADOW_CALL_STACK
+#if defined(CONFIG_SHADOW_CALL_STACK) && !defined(CONFIG_DYNAMIC_SCS)
 /* gp is used as the shadow call stack pointer instead */
 .macro load_global_pointer
 .endm
