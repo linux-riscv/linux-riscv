@@ -13,7 +13,12 @@
 #include <linux/vmstat.h>
 
 #ifdef CONFIG_DYNAMIC_SCS
+/* dynamic_scs_enabled set to true if RISCV dynamic SCS */
+#ifdef CONFIG_RISCV
+DEFINE_STATIC_KEY_TRUE(dynamic_scs_enabled);
+#else
 DEFINE_STATIC_KEY_FALSE(dynamic_scs_enabled);
+#endif
 #endif
 
 static void __scs_account(void *s, int account)
@@ -32,19 +37,29 @@ static void *__scs_alloc(int node)
 {
 	int i;
 	void *s;
+	pgprot_t prot = PAGE_KERNEL;
+
+	if (scs_is_dynamic())
+		prot = PAGE_KERNEL_SHADOWSTACK;
 
 	for (i = 0; i < NR_CACHED_SCS; i++) {
 		s = this_cpu_xchg(scs_cache[i], NULL);
 		if (s) {
 			s = kasan_unpoison_vmalloc(s, SCS_SIZE,
 						   KASAN_VMALLOC_PROT_NORMAL);
-			memset(s, 0, SCS_SIZE);
+/*
+ * If either of them undefined, its safe to memset. Else memset is not
+ * possible. memset constitutes stores and stores to shadow stack memory
+ * are disallowed and will fault.
+ */
+			if (!scs_is_dynamic())
+				memset(s, 0, SCS_SIZE);
 			goto out;
 		}
 	}
 
 	s = __vmalloc_node_range(SCS_SIZE, 1, VMALLOC_START, VMALLOC_END,
-				    GFP_SCS, PAGE_KERNEL, 0, node,
+				    GFP_SCS, prot, 0, node,
 				    __builtin_return_address(0));
 
 out:
@@ -59,7 +74,7 @@ void *scs_alloc(int node)
 	if (!s)
 		return NULL;
 
-	*__scs_magic(s) = SCS_END_MAGIC;
+	__scs_store_magic(__scs_magic(s), SCS_END_MAGIC);
 
 	/*
 	 * Poison the allocation to catch unintentional accesses to
@@ -122,7 +137,12 @@ int scs_prepare(struct task_struct *tsk, int node)
 	if (!s)
 		return -ENOMEM;
 
-	task_scs(tsk) = task_scs_sp(tsk) = s;
+	task_scs(tsk) = s;
+	if (scs_is_dynamic())
+		task_scs_sp(tsk) = s + SCS_SIZE;
+	else
+		task_scs_sp(tsk) = s;
+
 	return 0;
 }
 
