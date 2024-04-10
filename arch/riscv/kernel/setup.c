@@ -36,6 +36,7 @@
 #include <asm/thread_info.h>
 #include <asm/kasan.h>
 #include <asm/efi.h>
+#include <asm/early_console.h>
 
 #include "head.h"
 
@@ -255,6 +256,7 @@ void __init setup_arch(char **cmdline_p)
 
 	early_ioremap_setup();
 	sbi_init();
+	early_console_init();
 	jump_label_init();
 	parse_early_param();
 

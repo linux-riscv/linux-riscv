@@ -48,6 +48,7 @@ obj-y	+= ptrace.o
 obj-y	+= reset.o
 obj-y	+= return_address.o
 obj-y	+= setup.o
+obj-y	+= early_console.o
 obj-y	+= signal.o
 obj-y	+= syscall_table.o
 obj-y	+= sys_riscv.o
