@@ -118,6 +118,18 @@ config HVC_RISCV_SBI
 
 	  If you don't know what do to here, say N.
 
+config RISCV_EARLY_CONSOLE_SBI
+	bool "Use SBI as the interface for RISC-V early console"
+	depends on RISCV
+	help
+	  Choose 'Y' to use the SBI interface as the early console
+	  output interface for the RISC-V platform.
+
+	  This configuration is a temporary setup for debugging
+	  purposes during the boot process to address issues as
+	  early as possible. It should not be enabled in production
+	  kernel.
+
 config HVCS
 	tristate "IBM Hypervisor Virtual Console Server support"
 	depends on PPC_PSERIES && HVC_CONSOLE

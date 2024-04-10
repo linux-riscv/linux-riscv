@@ -12,6 +12,7 @@
 #include <linux/types.h>
 
 #include <asm/sbi.h>
+#include <asm/early_console.h>
 
 #include "hvc_console.h"
 
@@ -81,3 +82,31 @@ static int __init hvc_sbi_init(void)
 	return 0;
 }
 device_initcall(hvc_sbi_init);
+
+#ifdef CONFIG_RISCV_EARLY_CONSOLE_SBI
+static ssize_t (*sbi_early_putc_common)(uint32_t vtermno, const u8 *buf, size_t count);
+
+static void sbi_early_putc(char c)
+{
+	unsigned int termno = 0;
+	int count = -1;
+
+	if (c == '\n')
+		sbi_early_putc('\r');
+
+	do {
+		count = sbi_early_putc_common(termno, &c, 1);
+	} while (count == 0 || count == -EAGAIN);
+}
+
+void __init hvc_sbi_early_init(void (**putc)(char c))
+{
+	if (sbi_debug_console_available)
+		sbi_early_putc_common = hvc_sbi_dbcn_tty_put;
+	else if (IS_ENABLED(CONFIG_RISCV_SBI_V01))
+		sbi_early_putc_common = hvc_sbi_tty_put;
+
+	if (sbi_early_putc_common)
+		*putc = sbi_early_putc;
+}
+#endif
