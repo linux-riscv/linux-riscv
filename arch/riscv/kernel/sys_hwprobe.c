@@ -69,7 +69,7 @@ static void hwprobe_isa_ext0(struct riscv_hwprobe *pair,
 	if (riscv_isa_extension_available(NULL, c))
 		pair->value |= RISCV_HWPROBE_IMA_C;
 
-	if (has_vector())
+	if (has_vector(v))
 		pair->value |= RISCV_HWPROBE_IMA_V;
 
 	/*
@@ -112,7 +112,11 @@ static void hwprobe_isa_ext0(struct riscv_hwprobe *pair,
 		EXT_KEY(ZACAS);
 		EXT_KEY(ZICOND);
 
-		if (has_vector()) {
+		/*
+		 *  Vector crypto and ZVE* extensions are supported only if
+		 *  kernel has minimum V support of ZVE32X.
+		 */
+		if (has_vector(ZVE32X)) {
 			EXT_KEY(ZVE32X);
 			EXT_KEY(ZVE32F);
 			EXT_KEY(ZVE64X);
