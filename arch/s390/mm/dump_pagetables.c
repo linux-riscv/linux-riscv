@@ -200,7 +200,8 @@ bool ptdump_check_wx(void)
 			.range = (struct ptdump_range[]) {
 				{.start = 0, .end = max_addr},
 				{.start = 0, .end = 0},
-			}
+			},
+			.note_non_leaf = false
 		},
 		.seq = NULL,
 		.level = -1,
@@ -239,7 +240,8 @@ static int ptdump_show(struct seq_file *m, void *v)
 			.range = (struct ptdump_range[]) {
 				{.start = 0, .end = max_addr},
 				{.start = 0, .end = 0},
-			}
+			},
+			.note_non_leaf = false
 		},
 		.seq = m,
 		.level = -1,

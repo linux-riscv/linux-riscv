@@ -301,7 +301,8 @@ void ptdump_walk(struct seq_file *s, struct ptdump_info *info)
 			.range = (struct ptdump_range[]){
 				{info->base_addr, end},
 				{0, 0}
-			}
+			},
+			.note_non_leaf = false
 		}
 	};
 
@@ -337,7 +338,8 @@ bool ptdump_check_wx(void)
 			.range = (struct ptdump_range[]) {
 				{_PAGE_OFFSET(vabits_actual), ~0UL},
 				{0, 0}
-			}
+			},
+			.note_non_leaf = false
 		}
 	};
 

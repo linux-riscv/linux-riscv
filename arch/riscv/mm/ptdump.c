@@ -328,7 +328,8 @@ static void ptdump_walk(struct seq_file *s, struct ptd_mm_info *pinfo)
 			.range = (struct ptdump_range[]) {
 				{pinfo->base_addr, pinfo->end},
 				{0, 0}
-			}
+			},
+			.note_non_leaf = false
 		}
 	};
 
@@ -350,7 +351,8 @@ bool ptdump_check_wx(void)
 			.range = (struct ptdump_range[]) {
 				{KERN_VIRT_START, ULONG_MAX},
 				{0, 0}
-			}
+			},
+			.note_non_leaf = false
 		}
 	};
 

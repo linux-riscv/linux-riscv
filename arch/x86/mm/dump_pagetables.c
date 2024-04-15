@@ -380,7 +380,8 @@ bool ptdump_walk_pgd_level_core(struct seq_file *m,
 		.ptdump = {
 			.note_page	= note_page,
 			.effective_prot = effective_prot,
-			.range		= ptdump_ranges
+			.range		= ptdump_ranges,
+			.note_non_leaf  = false
 		},
 		.level = -1,
 		.to_dmesg	= dmesg,

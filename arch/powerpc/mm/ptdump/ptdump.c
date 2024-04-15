@@ -307,6 +307,7 @@ static int ptdump_show(struct seq_file *m, void *v)
 		.ptdump = {
 			.note_page = note_page,
 			.range = ptdump_range,
+			.note_non_leaf = false
 		}
 	};
 
@@ -340,6 +341,7 @@ bool ptdump_check_wx(void)
 		.ptdump = {
 			.note_page = note_page,
 			.range = ptdump_range,
+			.note_non_leaf = false
 		}
 	};
 
