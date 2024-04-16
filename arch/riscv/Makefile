@@ -101,9 +101,6 @@ ifeq ($(CONFIG_CMODEL_MEDANY),y)
 	KBUILD_CFLAGS += -mcmodel=medany
 endif
 
-# Avoid generating .eh_frame sections.
-KBUILD_CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
-
 # The RISC-V attributes frequently cause compatibility issues and provide no
 # information, so just turn them off.
 KBUILD_CFLAGS += $(call cc-option,-mno-riscv-attribute)
