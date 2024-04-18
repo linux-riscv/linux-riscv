@@ -157,6 +157,21 @@ static inline void wait_for_interrupt(void)
 	__asm__ __volatile__ ("wfi");
 }
 
+static inline void wrs_nto(unsigned long *addr)
+{
+	int val;
+
+	__asm__ __volatile__(
+#ifdef CONFIG_64BIT
+			"lr.d %[p], %[v] \n\t"
+#else
+			"lr.w %[p], %[v] \n\t"
+#endif
+			".long 0x00d00073 \n\t"
+			: [p] "=&r" (val), [v] "+A" (*addr)
+			: : "memory");
+}
+
 extern phys_addr_t dma32_phys_limit;
 
 struct device_node;
@@ -182,6 +197,8 @@ extern int set_unalign_ctl(struct task_struct *tsk, unsigned int val);
 
 #define GET_UNALIGN_CTL(tsk, addr)	get_unalign_ctl((tsk), (addr))
 #define SET_UNALIGN_CTL(tsk, val)	set_unalign_ctl((tsk), (val))
+
+extern void select_idle_routine(void);
 
 #endif /* __ASSEMBLY__ */
 
