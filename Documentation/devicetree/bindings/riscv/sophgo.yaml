@@ -24,6 +24,7 @@ properties:
           - const: sophgo,cv1800b
       - items:
           - enum:
+              - milkv,duo-s
               - sophgo,huashan-pi
           - const: sophgo,cv1812h
       - items:
