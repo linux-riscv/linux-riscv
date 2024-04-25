@@ -260,4 +260,45 @@ end:									\
 	arch_cmpxchg_release((ptr), (o), (n));				\
 })
 
+#ifdef CONFIG_RISCV_ISA_ZACAS
+
+#define system_has_cmpxchg128()						\
+			riscv_has_extension_unlikely(RISCV_ISA_EXT_ZACAS)
+
+union __u128_halves {
+	u128 full;
+	struct {
+		u64 low, high;
+	};
+};
+
+#define __arch_cmpxchg128(p, o, n, prepend, append)			\
+({									\
+	__typeof__(*(p)) __o = (o);					\
+	union __u128_halves new = { .full = (n) };			\
+	union __u128_halves old = { .full = (__o) };			\
+	register unsigned long x6 asm ("x6") = new.low;			\
+	register unsigned long x7 asm ("x7") = new.high;		\
+	register unsigned long x28 asm ("x28") = old.low;		\
+	register unsigned long x29 asm ("x29") = old.high;		\
+									\
+	__asm__ __volatile__ (						\
+		prepend							\
+		"	amocas.q %0, %z2, %1\n"				\
+		append							\
+		: "+&r" (x28), "+A" (*(p))				\
+		: "rJ" (x6)						\
+		: "memory");						\
+									\
+	__o;								\
+})
+
+#define arch_cmpxchg128(ptr, o, n)					\
+	__arch_cmpxchg128((ptr), (o), (n), "", "     fence rw, rw\n")
+
+#define arch_cmpxchg128_local(ptr, o, n)				\
+	__arch_cmpxchg128((ptr), (o), (n), "", "")
+
+#endif /* CONFIG_RISCV_ISA_ZACAS */
+
 #endif /* _ASM_RISCV_CMPXCHG_H */
