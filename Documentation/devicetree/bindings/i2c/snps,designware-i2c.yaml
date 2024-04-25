@@ -33,6 +33,10 @@ properties:
           - const: snps,designware-i2c
       - description: Baikal-T1 SoC System I2C controller
         const: baikal,bt1-sys-i2c
+      - description: T-HEAD TH1520 SoCs I2C controller
+        items:
+          - const: thead,th1520-i2c
+          - const: snps,designware-i2c
 
   reg:
     minItems: 1
@@ -141,5 +145,13 @@ examples:
       pinctrl-names = "default";
       interrupts = <8>;
       clocks = <&ahb_clk>;
+    };
+  - |
+    i2c@e7f20000 {
+      compatible = "thead,th1520-i2c", "snps,designware-i2c";
+      reg = <0xe7f20000 0x4000>;
+      interrupts = <44>;
+      clocks = <&i2c_ic_clk>;
+      status = "disabled";
     };
 ...
