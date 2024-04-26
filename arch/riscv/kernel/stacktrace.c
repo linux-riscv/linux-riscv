@@ -55,7 +55,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
 		/* Unwind stack frame */
 		frame = (struct stackframe *)fp - 1;
 		sp = fp;
-		if (regs && (regs->epc == pc) && (frame->fp & 0x7)) {
+		if (regs && regs->epc == pc) {
 			fp = frame->ra;
 			pc = regs->ra;
 		} else {
