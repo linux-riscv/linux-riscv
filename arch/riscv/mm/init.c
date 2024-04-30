@@ -400,11 +400,13 @@ static void __init create_pte_mapping(pte_t *ptep,
 static pmd_t trampoline_pmd[PTRS_PER_PMD] __page_aligned_bss;
 static pmd_t fixmap_pmd[PTRS_PER_PMD] __page_aligned_bss;
 static pmd_t early_pmd[PTRS_PER_PMD] __initdata __aligned(PAGE_SIZE);
+static pmd_t early_pmd2[PTRS_PER_PMD] __initdata __aligned(PAGE_SIZE);
 
 #ifdef CONFIG_XIP_KERNEL
 #define trampoline_pmd ((pmd_t *)XIP_FIXUP(trampoline_pmd))
 #define fixmap_pmd     ((pmd_t *)XIP_FIXUP(fixmap_pmd))
 #define early_pmd      ((pmd_t *)XIP_FIXUP(early_pmd))
+#define early_pmd2      ((pmd_t *)XIP_FIXUP(early_pmd2))
 #endif /* CONFIG_XIP_KERNEL */
 
 static p4d_t trampoline_p4d[PTRS_PER_P4D] __page_aligned_bss;
@@ -446,9 +448,14 @@ static pmd_t *__init get_pmd_virt_late(phys_addr_t pa)
 
 static phys_addr_t __init alloc_pmd_early(uintptr_t va)
 {
-	BUG_ON((va - kernel_map.virt_addr) >> PUD_SHIFT);
+	uintptr_t end_pud_idx = pud_index(kernel_map.virt_addr + kernel_map.size - 1);
+	uintptr_t current_pud_idx = pud_index(va);
 
-	return (uintptr_t)early_pmd;
+	BUG_ON(current_pud_idx > end_pud_idx);
+	if (current_pud_idx == end_pud_idx)
+		return (uintptr_t)early_pmd2;
+	else
+		return (uintptr_t)early_pmd;
 }
 
 static phys_addr_t __init alloc_pmd_fixmap(uintptr_t va)
@@ -783,6 +790,18 @@ static void __init set_mmap_rnd_bits_max(void)
 	mmap_rnd_bits_max = MMAP_VA_BITS - PAGE_SHIFT - 3;
 }
 
+static pmd_t *__init select_pmd_early(uintptr_t pa)
+{
+	uintptr_t end_pud_idx = pud_index(kernel_map.phys_addr + kernel_map.size - 1);
+	uintptr_t current_pud_idx = pud_index(pa);
+
+	BUG_ON(current_pud_idx > end_pud_idx);
+	if (current_pud_idx == end_pud_idx)
+		return early_pmd2;
+	else
+		return early_pmd;
+}
+
 /*
  * There is a simple way to determine if 4-level is supported by the
  * underlying hardware: establish 1:1 mapping in 4-level page table mode
@@ -794,6 +813,7 @@ static __init void set_satp_mode(uintptr_t dtb_pa)
 	u64 identity_satp, hw_satp;
 	uintptr_t set_satp_mode_pmd = ((unsigned long)set_satp_mode) & PMD_MASK;
 	u64 satp_mode_cmdline = __pi_set_satp_mode_from_cmdline(dtb_pa);
+	pmd_t *target_pmd, *target_pmd2;
 
 	if (satp_mode_cmdline == SATP_MODE_57) {
 		disable_pgtable_l5();
@@ -803,17 +823,24 @@ static __init void set_satp_mode(uintptr_t dtb_pa)
 		return;
 	}
 
+	target_pmd = select_pmd_early(set_satp_mode_pmd);
+	target_pmd2 = select_pmd_early(set_satp_mode_pmd + PMD_SIZE);
 	create_p4d_mapping(early_p4d,
 			set_satp_mode_pmd, (uintptr_t)early_pud,
 			P4D_SIZE, PAGE_TABLE);
 	create_pud_mapping(early_pud,
-			   set_satp_mode_pmd, (uintptr_t)early_pmd,
+			   set_satp_mode_pmd, (uintptr_t)target_pmd,
+			   PUD_SIZE, PAGE_TABLE);
+	/* Handle the case where set_satp_mode straddles 2 PUDs */
+	if (target_pmd2 != target_pmd)
+		create_pud_mapping(early_pud,
+			   set_satp_mode_pmd + PMD_SIZE, (uintptr_t)target_pmd2,
 			   PUD_SIZE, PAGE_TABLE);
 	/* Handle the case where set_satp_mode straddles 2 PMDs */
-	create_pmd_mapping(early_pmd,
+	create_pmd_mapping(target_pmd,
 			   set_satp_mode_pmd, set_satp_mode_pmd,
 			   PMD_SIZE, PAGE_KERNEL_EXEC);
-	create_pmd_mapping(early_pmd,
+	create_pmd_mapping(target_pmd2,
 			   set_satp_mode_pmd + PMD_SIZE,
 			   set_satp_mode_pmd + PMD_SIZE,
 			   PMD_SIZE, PAGE_KERNEL_EXEC);
@@ -843,7 +870,9 @@ retry:
 	memset(early_pg_dir, 0, PAGE_SIZE);
 	memset(early_p4d, 0, PAGE_SIZE);
 	memset(early_pud, 0, PAGE_SIZE);
-	memset(early_pmd, 0, PAGE_SIZE);
+	memset(target_pmd, 0, PAGE_SIZE);
+	if (target_pmd2 != target_pmd)
+		memset(target_pmd2, 0, PAGE_SIZE);
 }
 #endif
 
