@@ -9,6 +9,7 @@
 #include <linux/bug.h>
 
 #include <asm/fence.h>
+#include <asm/alternative.h>
 
 #define __arch_xchg_masked(sc_sfx, prepend, append, r, p, n)		\
 ({									\
@@ -134,24 +135,53 @@
 	r = (__typeof__(*(p)))((__retx & __mask) >> __s);		\
 })
 
-#define __arch_cmpxchg(lr_sfx, sc_sfx, prepend, append, r, p, co, o, n)	\
+#ifdef CONFIG_RISCV_ISA_ZACAS
+#define __arch_cmpxchg_zacas(cas_sfx, cas_prepend, cas_append, r, p, o, n)	\
+	__label__ no_zacas, end;					\
+									\
+	asm goto(ALTERNATIVE("j %[no_zacas]", "nop", 0,			\
+			     RISCV_ISA_EXT_ZACAS, 1)			\
+		 : : : : no_zacas);					\
+									\
+	r = o;								\
+									\
+	__asm__ __volatile__ (						\
+		cas_prepend						\
+		"	amocas" cas_sfx " %0, %z2, %1\n"		\
+		cas_append						\
+		: "+&r" (r), "+A" (*(p))				\
+		: "rJ" (n)						\
+		: "memory");						\
+	goto end;							\
+no_zacas:;
+#define __arch_cmpxchg_zacas_end	end:
+#else
+#define __arch_cmpxchg_zacas(cas_sfx, cas_prepend, cas_append, r, p, o, n)
+#define __arch_cmpxchg_zacas_end
+#endif
+
+#define __arch_cmpxchg(lr_sfx, sc_cas_sfx, prepend, append, r, p, co, o, n)	\
 ({									\
+	__arch_cmpxchg_zacas(sc_cas_sfx, prepend, append, r, p, o, n)	\
+									\
 	register unsigned int __rc;					\
 									\
 	__asm__ __volatile__ (						\
 		prepend							\
 		"0:	lr" lr_sfx " %0, %2\n"				\
 		"	bne  %0, %z3, 1f\n"				\
-		"	sc" sc_sfx " %1, %z4, %2\n"			\
+		"	sc" sc_cas_sfx " %1, %z4, %2\n"			\
 		"	bnez %1, 0b\n"					\
 		append							\
 		"1:\n"							\
 		: "=&r" (r), "=&r" (__rc), "+A" (*(p))			\
 		: "rJ" (co o), "rJ" (n)					\
 		: "memory");						\
+									\
+	__arch_cmpxchg_zacas_end;					\
 })
 
-#define _arch_cmpxchg(ptr, old, new, sc_sfx, prepend, append)		\
+#define _arch_cmpxchg(ptr, old, new, sc_cas_sfx, prepend, append)	\
 ({									\
 	__typeof__(ptr) __ptr = (ptr);					\
 	__typeof__(*(__ptr)) __old = (old);				\
@@ -161,15 +191,15 @@
 	switch (sizeof(*__ptr)) {					\
 	case 1:								\
 	case 2:								\
-		__arch_cmpxchg_masked(sc_sfx, prepend, append,		\
+		__arch_cmpxchg_masked(sc_cas_sfx, prepend, append,	\
 					__ret, __ptr, __old, __new);	\
 		break;							\
 	case 4:								\
-		__arch_cmpxchg(".w", ".w" sc_sfx, prepend, append,	\
+		__arch_cmpxchg(".w", ".w" sc_cas_sfx, prepend, append,	\
 				__ret, __ptr, (long), __old, __new);	\
 		break;							\
 	case 8:								\
-		__arch_cmpxchg(".d", ".d" sc_sfx, prepend, append,	\
+		__arch_cmpxchg(".d", ".d" sc_cas_sfx, prepend, append,	\
 				__ret, __ptr, /**/, __old, __new);	\
 		break;							\
 	default:							\
