@@ -823,7 +823,7 @@ static int sppctl_dt_node_to_map(struct pinctrl_dev *pctldev, struct device_node
 	int nmG = of_property_count_strings(np_config, "groups");
 	const struct sppctl_func *f = NULL;
 	u8 pin_num, pin_type, pin_func;
-	struct device_node *parent;
+	struct device_node *parent __free(device_node) = NULL;
 	unsigned long *configs;
 	struct property *prop;
 	const char *s_f, *s_g;
@@ -964,7 +964,6 @@ static int sppctl_dt_node_to_map(struct pinctrl_dev *pctldev, struct device_node
 		}
 	}
 
-	of_node_put(parent);
 	dev_dbg(pctldev->dev, "%d pins mapped\n", *num_maps);
 	return 0;
 
@@ -973,7 +972,6 @@ sppctl_map_err:
 		if ((*map)[i].type == PIN_MAP_TYPE_CONFIGS_PIN)
 			kfree((*map)[i].data.configs.configs);
 	kfree(*map);
-	of_node_put(parent);
 	return -ENOMEM;
 }
 
