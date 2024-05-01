@@ -745,7 +745,6 @@ static int rzg2l_dt_node_to_map(struct pinctrl_dev *pctldev,
 				unsigned int *num_maps)
 {
 	struct rzg2l_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
-	struct device_node *child;
 	unsigned int index;
 	int ret;
 
@@ -753,13 +752,11 @@ static int rzg2l_dt_node_to_map(struct pinctrl_dev *pctldev,
 	*num_maps = 0;
 	index = 0;
 
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		ret = rzg2l_dt_subnode_to_map(pctldev, child, np, map,
 					      num_maps, &index);
-		if (ret < 0) {
-			of_node_put(child);
+		if (ret < 0)
 			goto done;
-		}
 	}
 
 	if (*num_maps == 0) {
@@ -2187,7 +2184,7 @@ static int rzg2l_gpio_register(struct rzg2l_pinctrl *pctrl)
 	const char *name = dev_name(pctrl->dev);
 	struct irq_domain *parent_domain;
 	struct of_phandle_args of_args;
-	struct device_node *parent_np;
+	struct device_node *parent_np __free(device_node) = of_irq_find_parent(np);
 	struct gpio_irq_chip *girq;
 	int ret;
 
@@ -2196,7 +2193,6 @@ static int rzg2l_gpio_register(struct rzg2l_pinctrl *pctrl)
 		return -ENXIO;
 
 	parent_domain = irq_find_host(parent_np);
-	of_node_put(parent_np);
 	if (!parent_domain)
 		return -EPROBE_DEFER;
 
