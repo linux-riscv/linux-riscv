@@ -2629,14 +2629,13 @@ static struct regmap *aspeed_g5_acquire_regmap(struct aspeed_pinmux_data *ctx,
 		return ctx->maps[ip];
 
 	if (ip == ASPEED_IP_GFX) {
-		struct device_node *node;
+		struct device_node *node __free(device_node) = NULL;
 		struct regmap *map;
 
 		node = of_parse_phandle(ctx->dev->of_node,
 					"aspeed,external-nodes", 0);
 		if (node) {
 			map = syscon_node_to_regmap(node);
-			of_node_put(node);
 			if (IS_ERR(map))
 				return map;
 		} else
@@ -2648,7 +2647,7 @@ static struct regmap *aspeed_g5_acquire_regmap(struct aspeed_pinmux_data *ctx,
 	}
 
 	if (ip == ASPEED_IP_LPC) {
-		struct device_node *np;
+		struct device_node *np __free(device_node) = NULL;
 		struct regmap *map;
 
 		np = of_parse_phandle(ctx->dev->of_node,
@@ -2660,7 +2659,6 @@ static struct regmap *aspeed_g5_acquire_regmap(struct aspeed_pinmux_data *ctx,
 				return ERR_PTR(-ENODEV);
 
 			map = syscon_node_to_regmap(np->parent);
-			of_node_put(np);
 			if (IS_ERR(map))
 				return map;
 		} else
