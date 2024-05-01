@@ -56,7 +56,7 @@ s5pv210_retention_init(struct samsung_pinctrl_drv_data *drvdata,
 		       const struct samsung_retention_data *data)
 {
 	struct samsung_retention_ctrl *ctrl;
-	struct device_node *np;
+	struct device_node *np __free(device_node) = NULL;
 	void __iomem *clk_base;
 
 	ctrl = devm_kzalloc(drvdata->dev, sizeof(*ctrl), GFP_KERNEL);
@@ -71,7 +71,6 @@ s5pv210_retention_init(struct samsung_pinctrl_drv_data *drvdata,
 	}
 
 	clk_base = of_iomap(np, 0);
-	of_node_put(np);
 	if (!clk_base) {
 		pr_err("%s: failed to map clock registers\n", __func__);
 		return ERR_PTR(-EINVAL);
