@@ -296,6 +296,7 @@ static inline unsigned long pte_napot(pte_t pte)
 {
 	return pte_val(pte) & _PAGE_NAPOT;
 }
+#define pte_cont	pte_napot
 
 #define pte_valid_napot(pte)	(pte_present(pte) && pte_napot(pte))
 
@@ -560,7 +561,7 @@ static inline int arch_contpte_get_num_contig(pte_t *ptep, unsigned long size,
 }
 #endif
 
-static inline pte_t ptep_get(pte_t *ptep)
+static inline pte_t __ptep_get(pte_t *ptep)
 {
 	pte_t pte = READ_ONCE(*ptep);
 
@@ -584,7 +585,6 @@ static inline pte_t ptep_get(pte_t *ptep)
 
 	return pte;
 }
-#define ptep_get	ptep_get
 
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pteval, unsigned int nr)
@@ -685,6 +685,8 @@ static inline int ptep_clear_flush_young(struct vm_area_struct *vma,
 	 */
 	return ptep_test_and_clear_young(vma, address, ptep);
 }
+
+#define ptep_get		__ptep_get
 
 #define pgprot_nx pgprot_nx
 static inline pgprot_t pgprot_nx(pgprot_t _prot)
