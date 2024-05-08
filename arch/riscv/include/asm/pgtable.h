@@ -535,29 +535,39 @@ static inline void __set_pte_at(struct mm_struct *mm, pte_t *ptep, pte_t pteval)
 static inline int arch_contpte_get_num_contig(pte_t *ptep, unsigned long size,
 					      size_t *pgsize)
 {
+	unsigned long hugepage_shift;
 	pte_t __pte;
 
 	/* We must read the raw value of the pte to get the size of the mapping */
 	__pte = READ_ONCE(*ptep);
 
-	if (pgsize) {
-		if (size >= PGDIR_SIZE)
+	if (size >= PGDIR_SIZE) {
+		if (pgsize)
 			*pgsize = PGDIR_SIZE;
-		else if (size >= P4D_SIZE)
+		hugepage_shift = PGDIR_SHIFT;
+	} else if (size >= P4D_SIZE) {
+		if (pgsize)
 			*pgsize = P4D_SIZE;
-		else if (size >= PUD_SIZE)
+		hugepage_shift = P4D_SHIFT;
+	} else if (size >= PUD_SIZE) {
+		if (pgsize)
 			*pgsize = PUD_SIZE;
-		else if (size >= PMD_SIZE)
+		hugepage_shift = PUD_SHIFT;
+	} else if (size >= PMD_SIZE) {
+		if (pgsize)
 			*pgsize = PMD_SIZE;
-		else
+		hugepage_shift = PMD_SHIFT;
+	} else {
+		if (pgsize)
 			*pgsize = PAGE_SIZE;
+		hugepage_shift = PAGE_SHIFT;
 	}
 
 	/* Make sure __pte is not a swap entry */
 	if (pte_valid_napot(__pte))
 		return napot_pte_num(napot_cont_order(__pte));
 
-	return 1;
+	return size >> hugepage_shift;
 }
 #endif
 
@@ -586,8 +596,8 @@ static inline pte_t __ptep_get(pte_t *ptep)
 	return pte;
 }
 
-static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
-		pte_t *ptep, pte_t pteval, unsigned int nr)
+static inline void __set_ptes(struct mm_struct *mm, unsigned long addr,
+			      pte_t *ptep, pte_t pteval, unsigned int nr)
 {
 #ifdef CONFIG_RISCV_ISA_SVNAPOT
 	if (unlikely(pte_valid_napot(pteval))) {
@@ -631,7 +641,8 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_val(pteval) += 1 << _PAGE_PFN_SHIFT;
 	}
 }
-#define set_ptes set_ptes
+#define set_contptes(mm, addr, ptep, pte, nr, pgsize)			\
+			__set_ptes(mm, addr, ptep, pte, nr)
 
 static inline void pte_clear(struct mm_struct *mm,
 	unsigned long addr, pte_t *ptep)
@@ -646,9 +657,8 @@ extern int ptep_set_access_flags(struct vm_area_struct *vma, unsigned long addre
 extern int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long address,
 				     pte_t *ptep);
 
-#define __HAVE_ARCH_PTEP_GET_AND_CLEAR
-static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
-				       unsigned long address, pte_t *ptep)
+static inline pte_t __ptep_get_and_clear(struct mm_struct *mm,
+					 unsigned long address, pte_t *ptep)
 {
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
 
@@ -687,6 +697,9 @@ static inline int ptep_clear_flush_young(struct vm_area_struct *vma,
 }
 
 #define ptep_get		__ptep_get
+#define set_ptes		__set_ptes
+#define __HAVE_ARCH_PTEP_GET_AND_CLEAR
+#define ptep_get_and_clear	__ptep_get_and_clear
 
 #define pgprot_nx pgprot_nx
 static inline pgprot_t pgprot_nx(pgprot_t _prot)
