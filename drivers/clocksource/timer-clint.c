@@ -229,7 +229,7 @@ static int __init clint_timer_init_dt(struct device_node *np)
 
 	rc = clocksource_register_hz(&clint_clocksource, clint_timer_freq);
 	if (rc) {
-		pr_err("%pOFP: clocksource register failed [%d]\n", np, rc);
+		pr_err("%pOFP: clocksource register failed: %pe\n", np, ERR_PTR(rc));
 		goto fail_iounmap;
 	}
 
@@ -238,7 +238,7 @@ static int __init clint_timer_init_dt(struct device_node *np)
 	rc = request_percpu_irq(clint_timer_irq, clint_timer_interrupt,
 				 "clint-timer", &clint_clock_event);
 	if (rc) {
-		pr_err("registering percpu irq failed [%d]\n", rc);
+		pr_err("registering percpu irq failed: %pe\n", ERR_PTR(rc));
 		goto fail_iounmap;
 	}
 
@@ -260,7 +260,7 @@ static int __init clint_timer_init_dt(struct device_node *np)
 				clint_timer_starting_cpu,
 				clint_timer_dying_cpu);
 	if (rc) {
-		pr_err("%pOFP: cpuhp setup state failed [%d]\n", np, rc);
+		pr_err("%pOFP: cpuhp setup state failed: %pe\n", np, ERR_PTR(rc));
 		goto fail_free_irq;
 	}
 

@@ -150,7 +150,7 @@ static int gic_clockevent_init(void)
 
 	ret = setup_percpu_irq(gic_timer_irq, &gic_compare_irqaction);
 	if (ret < 0) {
-		pr_err("IRQ %d setup failed (%d)\n", gic_timer_irq, ret);
+		pr_err("IRQ %d setup failed: %pe\n", gic_timer_irq, ERR_PTR(ret));
 		return ret;
 	}
 

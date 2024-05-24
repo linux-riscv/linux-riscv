@@ -86,13 +86,13 @@ static int __init gxp_timer_init(struct device_node *node)
 	clk = of_clk_get(node, 0);
 	if (IS_ERR(clk)) {
 		ret = (int)PTR_ERR(clk);
-		pr_err("%pOFn clock not found: %d\n", node, ret);
+		pr_err("%pOFn clock not found: %pe\n", node, clk);
 		goto err_free;
 	}
 
 	ret = clk_prepare_enable(clk);
 	if (ret) {
-		pr_err("%pOFn clock enable failed: %d\n", node, ret);
+		pr_err("%pOFn clock enable failed: %pe\n", node, ERR_PTR(ret));
 		goto err_clk_enable;
 	}
 
@@ -126,7 +126,7 @@ static int __init gxp_timer_init(struct device_node *node)
 	ret = clocksource_mmio_init(system_clock, node->name, freq,
 				    300, 32, clocksource_mmio_readl_up);
 	if (ret) {
-		pr_err("%pOFn init clocksource failed: %d", node, ret);
+		pr_err("%pOFn init clocksource failed: %pe", node, ERR_PTR(ret));
 		goto err_exit;
 	}
 
@@ -145,7 +145,7 @@ static int __init gxp_timer_init(struct device_node *node)
 	ret = request_irq(irq, gxp_timer_interrupt, IRQF_TIMER | IRQF_SHARED,
 			  node->name, gxp_timer);
 	if (ret) {
-		pr_err("%pOFn request_irq() failed: %d", node, ret);
+		pr_err("%pOFn request_irq() failed: %pe", node, ERR_PTR(ret));
 		goto err_exit;
 	}
 

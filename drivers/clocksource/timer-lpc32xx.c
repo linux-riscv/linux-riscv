@@ -161,13 +161,13 @@ static int __init lpc32xx_clocksource_init(struct device_node *np)
 
 	clk = of_clk_get_by_name(np, "timerclk");
 	if (IS_ERR(clk)) {
-		pr_err("clock get failed (%ld)\n", PTR_ERR(clk));
+		pr_err("clock get failed: %pe\n", clk);
 		return PTR_ERR(clk);
 	}
 
 	ret = clk_prepare_enable(clk);
 	if (ret) {
-		pr_err("clock enable failed (%d)\n", ret);
+		pr_err("clock enable failed: %pe\n", ERR_PTR(ret));
 		goto err_clk_enable;
 	}
 
@@ -193,7 +193,7 @@ static int __init lpc32xx_clocksource_init(struct device_node *np)
 	ret = clocksource_mmio_init(base + LPC32XX_TIMER_TC, "lpc3220 timer",
 				    rate, 300, 32, clocksource_mmio_readl_up);
 	if (ret) {
-		pr_err("failed to init clocksource (%d)\n", ret);
+		pr_err("failed to init clocksource: %pe\n", ERR_PTR(ret));
 		goto err_clocksource_init;
 	}
 
@@ -222,13 +222,13 @@ static int __init lpc32xx_clockevent_init(struct device_node *np)
 
 	clk = of_clk_get_by_name(np, "timerclk");
 	if (IS_ERR(clk)) {
-		pr_err("clock get failed (%ld)\n", PTR_ERR(clk));
+		pr_err("clock get failed: %pe\n", clk);
 		return PTR_ERR(clk);
 	}
 
 	ret = clk_prepare_enable(clk);
 	if (ret) {
-		pr_err("clock enable failed (%d)\n", ret);
+		pr_err("clock enable failed: %pe\n", ERR_PTR(ret));
 		goto err_clk_enable;
 	}
 

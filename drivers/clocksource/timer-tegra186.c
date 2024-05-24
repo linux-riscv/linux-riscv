@@ -279,13 +279,13 @@ static struct tegra186_wdt *tegra186_wdt_create(struct tegra186_timer *tegra,
 
 	err = watchdog_init_timeout(&wdt->base, 5, tegra->dev);
 	if (err < 0) {
-		dev_err(tegra->dev, "failed to initialize timeout: %d\n", err);
+		dev_err(tegra->dev, "failed to initialize timeout: %pe\n", ERR_PTR(err));
 		return ERR_PTR(err);
 	}
 
 	err = devm_watchdog_register_device(tegra->dev, &wdt->base);
 	if (err < 0) {
-		dev_err(tegra->dev, "failed to register WDT: %d\n", err);
+		dev_err(tegra->dev, "failed to register WDT: %pe\n", ERR_PTR(err));
 		return ERR_PTR(err);
 	}
 
@@ -406,32 +406,32 @@ static int tegra186_timer_probe(struct platform_device *pdev)
 	tegra->wdt = tegra186_wdt_create(tegra, 0);
 	if (IS_ERR(tegra->wdt)) {
 		err = PTR_ERR(tegra->wdt);
-		dev_err(dev, "failed to create WDT: %d\n", err);
+		dev_err(dev, "failed to create WDT: %pe\n", tegra->wdt);
 		return err;
 	}
 
 	err = tegra186_timer_tsc_init(tegra);
 	if (err < 0) {
-		dev_err(dev, "failed to register TSC counter: %d\n", err);
+		dev_err(dev, "failed to register TSC counter: %pe\n", ERR_PTR(err));
 		return err;
 	}
 
 	err = tegra186_timer_osc_init(tegra);
 	if (err < 0) {
-		dev_err(dev, "failed to register OSC counter: %d\n", err);
+		dev_err(dev, "failed to register OSC counter: %pe\n", ERR_PTR(err));
 		goto unregister_tsc;
 	}
 
 	err = tegra186_timer_usec_init(tegra);
 	if (err < 0) {
-		dev_err(dev, "failed to register USEC counter: %d\n", err);
+		dev_err(dev, "failed to register USEC counter: %pe\n", ERR_PTR(err));
 		goto unregister_osc;
 	}
 
 	err = devm_request_irq(dev, irq, tegra186_timer_irq, 0,
 			       "tegra186-timer", tegra);
 	if (err < 0) {
-		dev_err(dev, "failed to request IRQ#%u: %d\n", irq, err);
+		dev_err(dev, "failed to request IRQ#%u: %pe\n", irq, ERR_PTR(err));
 		goto unregister_usec;
 	}
 

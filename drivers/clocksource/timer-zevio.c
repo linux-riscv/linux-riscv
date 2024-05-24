@@ -134,7 +134,7 @@ static int __init zevio_timer_add(struct device_node *node)
 	timer->clk = of_clk_get(node, 0);
 	if (IS_ERR(timer->clk)) {
 		ret = PTR_ERR(timer->clk);
-		pr_err("Timer clock not found! (error %d)\n", ret);
+		pr_err("Timer clock not found! error: %pe\n", timer->clk);
 		goto error_unmap;
 	}
 

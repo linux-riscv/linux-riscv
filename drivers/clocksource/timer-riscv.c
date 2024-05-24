@@ -169,7 +169,7 @@ static int __init riscv_timer_init_common(void)
 
 	error = clocksource_register_hz(&riscv_clocksource, riscv_timebase);
 	if (error) {
-		pr_err("RISCV timer registration failed [%d]\n", error);
+		pr_err("RISCV timer registration failed: %pe\n", ERR_PTR(error));
 		return error;
 	}
 
@@ -179,7 +179,7 @@ static int __init riscv_timer_init_common(void)
 				    riscv_timer_interrupt,
 				    "riscv-timer", &riscv_clock_event);
 	if (error) {
-		pr_err("registering percpu irq failed [%d]\n", error);
+		pr_err("registering percpu irq failed: %pe\n", ERR_PTR(error));
 		return error;
 	}
 
@@ -192,8 +192,8 @@ static int __init riscv_timer_init_common(void)
 			 "clockevents/riscv/timer:starting",
 			 riscv_timer_starting_cpu, riscv_timer_dying_cpu);
 	if (error)
-		pr_err("cpu hp setup state failed for RISCV timer [%d]\n",
-		       error);
+		pr_err("cpu hp setup state failed for RISCV timer: %pe\n",
+		       ERR_PTR(error));
 
 	return error;
 }

@@ -66,13 +66,13 @@ static long __init sp804_get_clock_rate(struct clk *clk, const char *name)
 	if (!clk)
 		clk = clk_get_sys("sp804", name);
 	if (IS_ERR(clk)) {
-		pr_err("%s clock not found: %ld\n", name, PTR_ERR(clk));
+		pr_err("%s clock not found: %pe\n", name, clk);
 		return PTR_ERR(clk);
 	}
 
 	err = clk_prepare_enable(clk);
 	if (err) {
-		pr_err("clock failed to enable: %d\n", err);
+		pr_err("clock failed to enable: %pe\n", ERR_PTR(err));
 		clk_put(clk);
 		return err;
 	}

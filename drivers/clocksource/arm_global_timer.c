@@ -399,8 +399,8 @@ static int __init global_timer_of_register(struct device_node *np)
 	err = request_percpu_irq(gt_ppi, gt_clockevent_interrupt,
 				 "gt", gt_evt);
 	if (err) {
-		pr_warn("global-timer: can't register interrupt %d (%d)\n",
-			gt_ppi, err);
+		pr_warn("global-timer: can't register interrupt %d: %pe\n",
+			gt_ppi, ERR_PTR(err));
 		goto out_free;
 	}
 

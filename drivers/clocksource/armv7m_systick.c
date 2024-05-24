@@ -60,7 +60,7 @@ static int __init system_timer_of_register(struct device_node *np)
 	ret = clocksource_mmio_init(base + SYST_CVR, "arm_system_timer", rate,
 			200, 24, clocksource_mmio_readl_down);
 	if (ret) {
-		pr_err("failed to init clocksource (%d)\n", ret);
+		pr_err("failed to init clocksource: %pe\n", ERR_PTR(ret));
 		if (clk)
 			goto out_clk_disable;
 		else
@@ -77,7 +77,7 @@ out_clk_put:
 	clk_put(clk);
 out_unmap:
 	iounmap(base);
-	pr_warn("ARM System timer register failed (%d)\n", ret);
+	pr_warn("ARM System timer register failed: %pe\n", ERR_PTR(ret));
 
 	return ret;
 }

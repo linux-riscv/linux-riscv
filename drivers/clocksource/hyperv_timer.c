@@ -205,7 +205,7 @@ static int hv_setup_stimer0_irq(void)
 	ret = acpi_register_gsi(NULL, HYPERV_STIMER0_VECTOR,
 			ACPI_EDGE_SENSITIVE, ACPI_ACTIVE_HIGH);
 	if (ret < 0) {
-		pr_err("Can't register Hyper-V stimer0 GSI. Error %d", ret);
+		pr_err("Can't register Hyper-V stimer0 GSI. Error: %pe", ERR_PTR(ret));
 		return ret;
 	}
 	stimer0_irq = ret;
@@ -213,8 +213,8 @@ static int hv_setup_stimer0_irq(void)
 	ret = request_percpu_irq(stimer0_irq, hv_stimer0_percpu_isr,
 		"Hyper-V stimer0", &stimer0_evt);
 	if (ret) {
-		pr_err("Can't request Hyper-V stimer0 IRQ %d. Error %d",
-			stimer0_irq, ret);
+		pr_err("Can't request Hyper-V stimer0 IRQ %d. Error: %pe",
+			stimer0_irq, ERR_PTR(ret));
 		acpi_unregister_gsi(stimer0_irq);
 		stimer0_irq = -1;
 	}

@@ -185,7 +185,7 @@ static int __init tpm_timer_init(struct device_node *np)
 	/* enable clk before accessing registers */
 	ret = clk_prepare_enable(ipg);
 	if (ret) {
-		pr_err("tpm: ipg clock enable failed (%d)\n", ret);
+		pr_err("tpm: ipg clock enable failed: %pe\n", ERR_PTR(ret));
 		clk_put(ipg);
 		return ret;
 	}

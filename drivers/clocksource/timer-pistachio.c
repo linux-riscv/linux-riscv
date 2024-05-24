@@ -174,25 +174,25 @@ static int __init pistachio_clksrc_of_init(struct device_node *node)
 
 	sys_clk = of_clk_get_by_name(node, "sys");
 	if (IS_ERR(sys_clk)) {
-		pr_err("clock get failed (%ld)\n", PTR_ERR(sys_clk));
+		pr_err("clock get failed: %pe\n", sys_clk);
 		return PTR_ERR(sys_clk);
 	}
 
 	fast_clk = of_clk_get_by_name(node, "fast");
 	if (IS_ERR(fast_clk)) {
-		pr_err("clock get failed (%lu)\n", PTR_ERR(fast_clk));
+		pr_err("clock get failed: %pe\n", fast_clk);
 		return PTR_ERR(fast_clk);
 	}
 
 	ret = clk_prepare_enable(sys_clk);
 	if (ret < 0) {
-		pr_err("failed to enable clock (%d)\n", ret);
+		pr_err("failed to enable clock: %pe\n", ERR_PTR(ret));
 		return ret;
 	}
 
 	ret = clk_prepare_enable(fast_clk);
 	if (ret < 0) {
-		pr_err("failed to enable clock (%d)\n", ret);
+		pr_err("failed to enable clock: %pe\n", ERR_PTR(ret));
 		clk_disable_unprepare(sys_clk);
 		return ret;
 	}

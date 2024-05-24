@@ -189,7 +189,7 @@ static int __init digicolor_timer_init(struct device_node *node)
 			  IRQF_TIMER | IRQF_IRQPOLL, "digicolor_timerC",
 			  &dc_timer_dev.ce);
 	if (ret) {
-		pr_warn("request of timer irq %d failed (%d)\n", irq, ret);
+		pr_warn("request of timer irq %d failed: %pe\n", irq, ERR_PTR(ret));
 		return ret;
 	}
 

@@ -324,8 +324,8 @@ static int __init tegra_init_timer(struct device_node *np, bool tegra20,
 		ret = request_irq(cpu_to->clkevt.irq, tegra_timer_isr, flags,
 				  cpu_to->clkevt.name, &cpu_to->clkevt);
 		if (ret) {
-			pr_err("failed to set up irq for cpu%d: %d\n",
-			       cpu, ret);
+			pr_err("failed to set up irq for cpu%d: %pe\n",
+			       cpu, ERR_PTR(ret));
 			irq_dispose_mapping(cpu_to->clkevt.irq);
 			cpu_to->clkevt.irq = 0;
 			goto out_irq;
@@ -338,7 +338,7 @@ static int __init tegra_init_timer(struct device_node *np, bool tegra20,
 				    "timer_us", TIMER_1MHz, 300, 32,
 				    clocksource_mmio_readl_up);
 	if (ret)
-		pr_err("failed to register clocksource: %d\n", ret);
+		pr_err("failed to register clocksource: %pe\n", ERR_PTR(ret));
 
 #ifdef CONFIG_ARM
 	register_current_timer_delay(&tegra_delay_timer);
@@ -348,7 +348,7 @@ static int __init tegra_init_timer(struct device_node *np, bool tegra20,
 				"AP_TEGRA_TIMER_STARTING", tegra_timer_setup,
 				tegra_timer_stop);
 	if (ret)
-		pr_err("failed to set up cpu hp state: %d\n", ret);
+		pr_err("failed to set up cpu hp state: %pe\n", ERR_PTR(ret));
 
 	return ret;
 

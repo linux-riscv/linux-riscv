@@ -156,7 +156,7 @@ static int __init jcore_pit_init(struct device_node *node)
 				    NSEC_PER_SEC, 400, 32,
 				    jcore_clocksource_read);
 	if (err) {
-		pr_err("Error registering clocksource device: %d\n", err);
+		pr_err("Error registering clocksource device: %pe\n", ERR_PTR(err));
 		return err;
 	}
 
@@ -172,7 +172,7 @@ static int __init jcore_pit_init(struct device_node *node)
 			  IRQF_TIMER | IRQF_PERCPU,
 			  "jcore_pit", jcore_pit_percpu);
 	if (err) {
-		pr_err("pit irq request failed: %d\n", err);
+		pr_err("pit irq request failed: %pe\n", ERR_PTR(err));
 		free_percpu(jcore_pit_percpu);
 		return err;
 	}

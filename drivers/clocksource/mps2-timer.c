@@ -109,13 +109,13 @@ static int __init mps2_clockevent_init(struct device_node *np)
 		clk = of_clk_get(np, 0);
 		if (IS_ERR(clk)) {
 			ret = PTR_ERR(clk);
-			pr_err("failed to get clock for clockevent: %d\n", ret);
+			pr_err("failed to get clock for clockevent: %pe\n", clk);
 			goto out;
 		}
 
 		ret = clk_prepare_enable(clk);
 		if (ret) {
-			pr_err("failed to enable clock for clockevent: %d\n", ret);
+			pr_err("failed to enable clock for clockevent: %pe\n", ERR_PTR(ret));
 			goto out_clk_put;
 		}
 
@@ -125,14 +125,14 @@ static int __init mps2_clockevent_init(struct device_node *np)
 	base = of_iomap(np, 0);
 	if (!base) {
 		ret = -EADDRNOTAVAIL;
-		pr_err("failed to map register for clockevent: %d\n", ret);
+		pr_err("failed to map register for clockevent: %pe\n", ERR_PTR(ret));
 		goto out_clk_disable;
 	}
 
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
 		ret = -ENOENT;
-		pr_err("failed to get irq for clockevent: %d\n", ret);
+		pr_err("failed to get irq for clockevent: %pe\n", ERR_PTR(ret));
 		goto out_iounmap;
 	}
 
@@ -159,7 +159,7 @@ static int __init mps2_clockevent_init(struct device_node *np)
 
 	ret = request_irq(irq, mps2_timer_interrupt, IRQF_TIMER, name, ce);
 	if (ret) {
-		pr_err("failed to request irq for clockevent: %d\n", ret);
+		pr_err("failed to request irq for clockevent: %pe\n", ERR_PTR(ret));
 		goto out_kfree;
 	}
 
@@ -193,13 +193,13 @@ static int __init mps2_clocksource_init(struct device_node *np)
 		clk = of_clk_get(np, 0);
 		if (IS_ERR(clk)) {
 			ret = PTR_ERR(clk);
-			pr_err("failed to get clock for clocksource: %d\n", ret);
+			pr_err("failed to get clock for clocksource: %pe\n", clk);
 			goto out;
 		}
 
 		ret = clk_prepare_enable(clk);
 		if (ret) {
-			pr_err("failed to enable clock for clocksource: %d\n", ret);
+			pr_err("failed to enable clock for clocksource: %pe\n", ERR_PTR(ret));
 			goto out_clk_put;
 		}
 
@@ -209,7 +209,7 @@ static int __init mps2_clocksource_init(struct device_node *np)
 	base = of_iomap(np, 0);
 	if (!base) {
 		ret = -EADDRNOTAVAIL;
-		pr_err("failed to map register for clocksource: %d\n", ret);
+		pr_err("failed to map register for clocksource: %pe\n", ERR_PTR(ret));
 		goto out_clk_disable;
 	}
 
@@ -226,7 +226,7 @@ static int __init mps2_clocksource_init(struct device_node *np)
 				    rate, 200, 32,
 				    clocksource_mmio_readl_down);
 	if (ret) {
-		pr_err("failed to init clocksource: %d\n", ret);
+		pr_err("failed to init clocksource: %pe\n", ERR_PTR(ret));
 		goto out_iounmap;
 	}
 

@@ -188,7 +188,7 @@ static int __init ftm_clockevent_init(unsigned long freq, int irq)
 	err = request_irq(irq, ftm_evt_interrupt, IRQF_TIMER | IRQF_IRQPOLL,
 			  "Freescale ftm timer", &ftm_clockevent);
 	if (err) {
-		pr_err("ftm: setup irq failed: %d\n", err);
+		pr_err("ftm: setup irq failed: %pe\n", ERR_PTR(err));
 		return err;
 	}
 
@@ -218,7 +218,7 @@ static int __init ftm_clocksource_init(unsigned long freq)
 				    freq / (1 << priv->ps), 300, 16,
 				    clocksource_mmio_readl_up);
 	if (err) {
-		pr_err("ftm: init clock source mmio failed: %d\n", err);
+		pr_err("ftm: init clock source mmio failed: %pe\n", ERR_PTR(err));
 		return err;
 	}
 
@@ -235,25 +235,25 @@ static int __init __ftm_clk_init(struct device_node *np, char *cnt_name,
 
 	clk = of_clk_get_by_name(np, cnt_name);
 	if (IS_ERR(clk)) {
-		pr_err("ftm: Cannot get \"%s\": %ld\n", cnt_name, PTR_ERR(clk));
+		pr_err("ftm: Cannot get \"%s\": %pe\n", cnt_name, clk);
 		return PTR_ERR(clk);
 	}
 	err = clk_prepare_enable(clk);
 	if (err) {
-		pr_err("ftm: clock failed to prepare+enable \"%s\": %d\n",
-			cnt_name, err);
+		pr_err("ftm: clock failed to prepare+enable \"%s\": %pe\n",
+			cnt_name, ERR_PTR(err));
 		return err;
 	}
 
 	clk = of_clk_get_by_name(np, ftm_name);
 	if (IS_ERR(clk)) {
-		pr_err("ftm: Cannot get \"%s\": %ld\n", ftm_name, PTR_ERR(clk));
+		pr_err("ftm: Cannot get \"%s\": %pe\n", ftm_name, clk);
 		return PTR_ERR(clk);
 	}
 	err = clk_prepare_enable(clk);
 	if (err)
-		pr_err("ftm: clock failed to prepare+enable \"%s\": %d\n",
-			ftm_name, err);
+		pr_err("ftm: clock failed to prepare+enable \"%s\": %pe\n",
+			ftm_name, ERR_PTR(err));
 
 	return clk_get_rate(clk);
 }

@@ -1273,7 +1273,7 @@ static int __init arch_timer_register(void)
 	}
 
 	if (err) {
-		pr_err("can't register interrupt %d (%d)\n", ppi, err);
+		pr_err("can't register interrupt %d: %pe\n", ppi, ERR_PTR(err));
 		goto out_free;
 	}
 
