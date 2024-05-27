@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2023 Rivos Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: linux-riscv-ci-series
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+on: pull_request
+
+jobs:
+  build-series:
+    if:  ${{ endsWith(github.head_ref, '_test') }}
+    runs-on: rise-arc-runner-set-kernel
+    timeout-minutes: 50400 # 35 days
+    container:
+      image: ghcr.io/linux-riscv/pw-builder-multi:latest
+    steps:
+      - name: Configure git
+        run: |
+          git config --global --add safe.directory '*'
+      - name: Checkout git
+        run: |
+          mkdir -p /build/my-linux
+          cd /build/my-linux
+          git init
+          git remote add origin https://github.com/${{ github.repository }}
+          git fetch origin --depth=5 ${{ github.event.pull_request.head.sha }}
+          git reset --hard ${{ github.event.pull_request.head.sha }}
+          git log -1
+      - name: Run checks
+        run: |
+          cd /build/my-linux && bash .github/scripts/series.sh
+      - name: Collect build logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-logs
+          path: /build/kernels/logs/*
+      - name: Collect run logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-logs
+          path: /build/tests/*
+
