@@ -58,13 +58,13 @@ SYM_CODE_START(handle_exception)
 	 */
 	li t0, SR_SUM | SR_FS_VS
 
-	REG_L s0, TASK_TI_USER_SP(tp)
+	REG_L a2, TASK_TI_USER_SP(tp)
 	csrrc s1, CSR_STATUS, t0
 	csrr s2, CSR_EPC
 	csrr s3, CSR_TVAL
 	csrr s4, CSR_CAUSE
 	csrr s5, CSR_SCRATCH
-	REG_S s0, PT_SP(sp)
+	REG_S a2, PT_SP(sp)
 	REG_S s1, PT_STATUS(sp)
 	REG_S s2, PT_EPC(sp)
 	REG_S s3, PT_BADADDR(sp)
@@ -125,19 +125,19 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	call riscv_v_context_nesting_end
 #endif
 
-	REG_L s0, PT_STATUS(sp)
+	REG_L s1, PT_STATUS(sp)
 #ifdef CONFIG_RISCV_M_MODE
 	/* the MPP value is too large to be used as an immediate arg for addi */
 	li t0, SR_MPP
-	and s0, s0, t0
+	and t0, s1, t0
 #else
-	andi s0, s0, SR_SPP
+	andi t0, s1, SR_SPP
 #endif
-	bnez s0, 1f
+	bnez t0, 1f
 
 	/* Save unwound kernel stack pointer in thread_info */
-	addi s0, sp, PT_SIZE_ON_STACK
-	REG_S s0, TASK_TI_KERNEL_SP(tp)
+	addi t0, sp, PT_SIZE_ON_STACK
+	REG_S t0, TASK_TI_KERNEL_SP(tp)
 
 	/* Save the kernel shadow call stack pointer */
 	scs_save_current
@@ -148,7 +148,6 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	 */
 	csrw CSR_SCRATCH, tp
 1:
-	REG_L a0, PT_STATUS(sp)
 	/*
 	 * The current load reservation is effectively part of the processor's
 	 * state, in the sense that load reservations cannot be shared between
@@ -169,7 +168,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	REG_L  a2, PT_EPC(sp)
 	REG_SC x0, a2, PT_EPC(sp)
 
-	csrw CSR_STATUS, a0
+	csrw CSR_STATUS, s1
 	csrw CSR_EPC, a2
 
 	REG_L x1,  PT_RA(sp)
@@ -207,13 +206,13 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	REG_S x5,  PT_T0(sp)
 	save_from_x6_to_x31
 
-	REG_L s0, TASK_TI_KERNEL_SP(tp)
+	REG_L a2, TASK_TI_KERNEL_SP(tp)
 	csrr s1, CSR_STATUS
 	csrr s2, CSR_EPC
 	csrr s3, CSR_TVAL
 	csrr s4, CSR_CAUSE
 	csrr s5, CSR_SCRATCH
-	REG_S s0, PT_SP(sp)
+	REG_S a2, PT_SP(sp)
 	REG_S s1, PT_STATUS(sp)
 	REG_S s2, PT_EPC(sp)
 	REG_S s3, PT_BADADDR(sp)
@@ -227,10 +226,10 @@ ASM_NOKPROBE(handle_kernel_stack_overflow)
 
 SYM_CODE_START(ret_from_fork)
 	call schedule_tail
-	beqz s0, 1f	/* not from kernel thread */
+	beqz s1, 1f	/* not from kernel thread */
 	/* Call fn(arg) */
-	move a0, s1
-	jalr s0
+	move a0, s2
+	jalr s1
 1:
 	move a0, sp /* pt_regs */
 	la ra, ret_from_exception
