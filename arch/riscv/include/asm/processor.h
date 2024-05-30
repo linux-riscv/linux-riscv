@@ -144,9 +144,14 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 	.align_ctl = PR_UNALIGN_NOPRINT,		\
 }
 
+#ifdef CONFIG_FRAME_POINTER
+#define EXCEPTION_FRAME_SIZE ALIGN(sizeof(struct pt_regs) + sizeof(struct stackframe), STACK_ALIGN)
+#else
+#define EXCEPTION_FRAME_SIZE ALIGN(sizeof(struct pt_regs), STACK_ALIGN)
+#endif
+
 #define task_pt_regs(tsk)						\
-	((struct pt_regs *)(task_stack_page(tsk) + THREAD_SIZE		\
-			    - ALIGN(sizeof(struct pt_regs), STACK_ALIGN)))
+	((struct pt_regs *)(task_stack_page(tsk) + THREAD_SIZE - EXCEPTION_FRAME_SIZE))
 
 #define KSTK_EIP(tsk)		(task_pt_regs(tsk)->epc)
 #define KSTK_ESP(tsk)		(task_pt_regs(tsk)->sp)
