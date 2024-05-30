@@ -208,8 +208,8 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		/* Supervisor/Machine, irqs on: */
 		childregs->status = SR_PP | SR_PIE;
 
-		p->thread.s[0] = (unsigned long)args->fn;
-		p->thread.s[1] = (unsigned long)args->fn_arg;
+		p->thread.s[1] = (unsigned long)args->fn;
+		p->thread.s[2] = (unsigned long)args->fn_arg;
 	} else {
 		*childregs = *(current_pt_regs());
 		/* Turn off status.VS */
@@ -219,7 +219,6 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		if (clone_flags & CLONE_SETTLS)
 			childregs->tp = tls;
 		childregs->a0 = 0; /* Return value of fork() */
-		p->thread.s[0] = 0;
 	}
 	p->thread.riscv_v_flags = 0;
 	if (has_vector())
