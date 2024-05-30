@@ -33,7 +33,7 @@ SYM_CODE_START(handle_exception)
 	REG_S sp, TASK_TI_KERNEL_SP(tp)
 
 #ifdef CONFIG_VMAP_STACK
-	addi sp, sp, -(PT_SIZE_ON_STACK)
+	addi sp, sp, -EXCEPTION_FRAME_SIZE
 	srli sp, sp, THREAD_SHIFT
 	andi sp, sp, 0x1
 	bnez sp, handle_kernel_stack_overflow
@@ -43,7 +43,7 @@ SYM_CODE_START(handle_exception)
 .Lsave_context:
 	REG_S sp, TASK_TI_USER_SP(tp)
 	REG_L sp, TASK_TI_KERNEL_SP(tp)
-	addi sp, sp, -(PT_SIZE_ON_STACK)
+	addi sp, sp, -EXCEPTION_FRAME_SIZE
 	REG_S x1,  PT_RA(sp)
 	REG_S x3,  PT_GP(sp)
 	REG_S x5,  PT_T0(sp)
@@ -82,6 +82,12 @@ SYM_CODE_START(handle_exception)
 
 	/* Load the kernel shadow call stack pointer if coming from userspace */
 	scs_load_current_if_task_changed s5
+
+#ifdef CONFIG_FRAME_POINTER
+	REG_S	ra, (EXCEPTION_FRAME_SIZE + STACKFRAME_RA)(sp)
+	REG_S	s0, (EXCEPTION_FRAME_SIZE + STACKFRAME_FP)(sp)
+	addi	s0, sp, EXCEPTION_FRAME_SIZE
+#endif
 
 #ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
 	move a0, sp
@@ -136,7 +142,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	bnez t0, 1f
 
 	/* Save unwound kernel stack pointer in thread_info */
-	addi t0, sp, PT_SIZE_ON_STACK
+	addi t0, sp, EXCEPTION_FRAME_SIZE
 	REG_S t0, TASK_TI_KERNEL_SP(tp)
 
 	/* Save the kernel shadow call stack pointer */
@@ -192,13 +198,11 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	/* we reach here from kernel context, sscratch must be 0 */
 	csrrw x31, CSR_SCRATCH, x31
 	asm_per_cpu sp, overflow_stack, x31
-	li x31, OVERFLOW_STACK_SIZE
+	li x31, OVERFLOW_STACK_SIZE - EXCEPTION_FRAME_SIZE
 	add sp, sp, x31
 	/* zero out x31 again and restore x31 */
 	xor x31, x31, x31
 	csrrw x31, CSR_SCRATCH, x31
-
-	addi sp, sp, -(PT_SIZE_ON_STACK)
 
 	//save context to overflow stack
 	REG_S x1,  PT_RA(sp)

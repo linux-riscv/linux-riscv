@@ -290,9 +290,8 @@ SYM_CODE_START(_start_kernel)
 
 	/* Initialize page tables and relocate to virtual addresses */
 	la tp, init_task
-	la sp, init_thread_union + THREAD_SIZE
+	la sp, init_thread_union + THREAD_SIZE - EXCEPTION_FRAME_SIZE
 	XIP_FIXUP_OFFSET sp
-	addi sp, sp, -PT_SIZE_ON_STACK
 	scs_load_init_stack
 #ifdef CONFIG_BUILTIN_DTB
 	la a0, __dtb_start
@@ -310,8 +309,7 @@ SYM_CODE_START(_start_kernel)
 	call .Lsetup_trap_vector
 	/* Restore C environment */
 	la tp, init_task
-	la sp, init_thread_union + THREAD_SIZE
-	addi sp, sp, -PT_SIZE_ON_STACK
+	la sp, init_thread_union + THREAD_SIZE - EXCEPTION_FRAME_SIZE
 	scs_load_current
 
 #ifdef CONFIG_KASAN

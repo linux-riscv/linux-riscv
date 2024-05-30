@@ -477,10 +477,10 @@ void asm_offsets(void)
 	);
 
 	/*
-	 * We allocate a pt_regs on the stack when entering the kernel.  This
-	 * ensures the alignment is sane.
+	 * We allocate a pt_regs and possibly a stackframe on the stack when
+	 * entering the kernel. This ensures the alignment is sane.
 	 */
-	DEFINE(PT_SIZE_ON_STACK, ALIGN(sizeof(struct pt_regs), STACK_ALIGN));
+	DEFINE(EXCEPTION_FRAME_SIZE, EXCEPTION_FRAME_SIZE);
 
 	OFFSET(KERNEL_MAP_VIRT_ADDR, kernel_mapping, virt_addr);
 	OFFSET(SBI_HART_BOOT_TASK_PTR_OFFSET, sbi_hart_boot_data, task_ptr);

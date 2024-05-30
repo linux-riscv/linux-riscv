@@ -12,6 +12,11 @@
 
 #ifndef __ASSEMBLY__
 
+struct stackframe {
+	unsigned long fp;
+	unsigned long ra;
+};
+
 struct pt_regs {
 	unsigned long epc;
 	unsigned long ra;
