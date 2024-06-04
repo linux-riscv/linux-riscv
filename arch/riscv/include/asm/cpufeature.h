@@ -35,9 +35,12 @@ void riscv_user_isa_enable(void);
 
 #if defined(CONFIG_RISCV_MISALIGNED)
 bool check_unaligned_access_emulated_all_cpus(void);
+bool check_vector_unaligned_access_all_cpus(void);
+
 void unaligned_emulation_finish(void);
 bool unaligned_ctl_available(void);
 DECLARE_PER_CPU(long, misaligned_access_speed);
+DECLARE_PER_CPU(long, vector_misaligned_access);
 #else
 static inline bool unaligned_ctl_available(void)
 {

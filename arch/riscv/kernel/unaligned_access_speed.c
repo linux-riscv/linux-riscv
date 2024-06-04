@@ -20,6 +20,7 @@
 #define MISALIGNED_COPY_SIZE ((MISALIGNED_BUFFER_SIZE / 2) - 0x80)
 
 DEFINE_PER_CPU(long, misaligned_access_speed);
+DEFINE_PER_CPU(long, vector_misaligned_access) = RISCV_HWPROBE_VEC_MISALIGNED_UNKNOWN;
 
 #ifdef CONFIG_RISCV_PROBE_UNALIGNED_ACCESS
 static cpumask_t fast_misaligned_access;
@@ -264,6 +265,8 @@ static int check_unaligned_access_all_cpus(void)
 {
 	bool all_cpus_emulated = check_unaligned_access_emulated_all_cpus();
 
+	check_vector_unaligned_access_all_cpus();
+
 	if (!all_cpus_emulated)
 		return check_unaligned_access_speed_all_cpus();
 
@@ -273,6 +276,7 @@ static int check_unaligned_access_all_cpus(void)
 static int check_unaligned_access_all_cpus(void)
 {
 	check_unaligned_access_emulated_all_cpus();
+	check_vector_unaligned_access_all_cpus();
 
 	return 0;
 }

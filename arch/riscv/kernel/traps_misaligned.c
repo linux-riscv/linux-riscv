@@ -16,6 +16,7 @@
 #include <asm/entry-common.h>
 #include <asm/hwprobe.h>
 #include <asm/cpufeature.h>
+#include <asm/vector.h>
 
 #define INSN_MATCH_LB			0x3
 #define INSN_MASK_LB			0x707f
@@ -350,6 +351,14 @@ int handle_misaligned_load(struct pt_regs *regs)
 	if (get_insn(regs, epc, &insn))
 		return -1;
 
+#ifdef CONFIG_RISCV_PROBE_UNALIGNED_ACCESS
+	if (*this_cpu_ptr(&vector_misaligned_access) == RISCV_HWPROBE_VEC_MISALIGNED_UNKNOWN) {
+		*this_cpu_ptr(&vector_misaligned_access) = RISCV_HWPROBE_VEC_MISALIGNED_UNSUPPORTED;
+		regs->epc = epc + INSN_LEN(insn);
+		return 0;
+	}
+#endif
+
 	regs->epc = 0;
 
 	if ((insn & INSN_MASK_LW) == INSN_MATCH_LW) {
@@ -551,6 +560,57 @@ static bool check_unaligned_access_emulated(int cpu)
 	}
 
 	return misaligned_emu_detected;
+}
+
+#ifdef CONFIG_RISCV_ISA_V
+static bool check_vector_unaligned_access(int cpu)
+{
+	long *mas_ptr = per_cpu_ptr(&vector_misaligned_access, cpu);
+	struct riscv_isainfo *isainfo = &hart_isa[cpu];
+	unsigned long tmp_var;
+	bool misaligned_vec_suported;
+
+	if (!riscv_isa_extension_available(isainfo->isa, v))
+		return false;
+
+	/* This case will only happen if a unaligned vector load
+	 * was called by the kernel before this check
+	 */
+	if (*mas_ptr != RISCV_HWPROBE_VEC_MISALIGNED_UNKNOWN)
+		return false;
+
+	kernel_vector_begin();
+	__asm__ __volatile__ (
+		".option push\n\t"
+		".option arch, +v\n\t"
+		"	li t1, 0x1\n"				//size
+		"       vsetvli t0, t1, e16, m2, ta, ma\n\t"	// Vectors of 16b
+		"       addi t0, %[ptr], 1\n\t"			// Misalign address
+		"	vle16.v v0, (t0)\n\t"			// Load bytes
+		".option pop\n\t"
+		: : [ptr] "r" (&tmp_var) : "v0", "t0", "t1", "memory");
+	kernel_vector_end();
+
+	misaligned_vec_suported = (*mas_ptr == RISCV_HWPROBE_VEC_MISALIGNED_UNKNOWN);
+
+	return misaligned_vec_suported;
+}
+#else
+static bool check_vector_unaligned_access(int cpu)
+{
+	return false;
+}
+#endif
+
+bool check_vector_unaligned_access_all_cpus(void)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		if (!check_vector_unaligned_access(cpu))
+			return false;
+
+	return true;
 }
 
 bool check_unaligned_access_emulated_all_cpus(void)
