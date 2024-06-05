@@ -153,6 +153,36 @@ properties:
             ratified at commit 3f9ed34 ("Add ability to manually trigger
             workflow. (#2)") of riscv-time-compare.
 
+        - const: svade
+          description: |
+            The standard Svade supervisor-level extension for raising page-fault
+            exceptions when PTE A/D bits need be set as ratified in the 20240213
+            version of the privileged ISA specification.
+
+            Both Svade and Svadu extensions control the hardware behavior when
+            the PTE A/D bits need to be set. The default behavior for the four
+            possible combinations of these extensions in the device tree are:
+            1. Neither svade nor svadu in DT: default to svade.
+            2. Only svade in DT: use svade.
+            3. Only svadu in DT: use svadu.
+            4. Both svade and svadu in DT: default to svade (Linux can switch to
+               svadu once the SBI FWFT extension is available).
+
+        - const: svadu
+          description: |
+            The standard Svadu supervisor-level extension for hardware updating
+            of PTE A/D bits as ratified at commit c1abccf ("Merge pull request
+            #25 from ved-rivos/ratified") of riscv-svadu.
+
+            Both Svade and Svadu extensions control the hardware behavior when
+            the PTE A/D bits need to be set. The default behavior for the four
+            possible combinations of these extensions in the device tree are:
+            1. Neither svade nor svadu in DT: default to svade.
+            2. Only svade in DT: use svade.
+            3. Only svadu in DT: use svadu.
+            4. Both svade and svadu in DT: default to svade (Linux can switch to
+               svadu once the SBI FWFT extension is available).
+
         - const: svinval
           description:
             The standard Svinval supervisor-level extension for fine-grained
