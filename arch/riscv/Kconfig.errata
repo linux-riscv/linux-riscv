@@ -21,6 +21,25 @@ config ERRATA_ANDES_CMO
 
 	  If you don't know what to do here, say "Y".
 
+config ERRATA_MICROCHIP
+	bool "Microchip errata"
+	depends on ARCH_MICROCHIP
+	help
+	  All Microchip errata Kconfig options depend on this option. Disabling
+	  this option will disable all Microchip errata.
+
+config ERRATA_POLARFIRE_SOC_DMA_NON_COHERENT
+	bool "Non-coherent DMA support for PolarFire SoC"
+	depends on NONPORTABLE
+	depends on ERRATA_MICROCHIP
+	select DMA_GLOBAL_POOL
+	select RISCV_NONSTANDARD_CACHE_OPS
+	help
+	  Enable support for non-coherent DMA on PolarFire SoC.
+	  This support is not required for any peripherals in the MSS, but may
+	  be required for peripherals in the FPGA fabric and is required for
+	  the PCI root port to operate correctly, due to addressing limitations.
+
 config ERRATA_SIFIVE
 	bool "SiFive errata"
 	depends on RISCV_ALTERNATIVE
