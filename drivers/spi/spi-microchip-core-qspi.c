@@ -763,6 +763,7 @@ static int mchp_coreqspi_probe(struct platform_device *pdev)
 	ctlr->transfer_one_message = mchp_coreqspi_transfer_one_message;
 	ctlr->num_chipselect = 2;
 	ctlr->use_gpio_descriptors = true;
+	ctlr->min_speed_hz = clk_get_rate(qspi->clk) / 30;
 
 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
 	if (ret)
