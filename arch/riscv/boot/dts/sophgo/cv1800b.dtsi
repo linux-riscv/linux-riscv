@@ -25,3 +25,7 @@
 &clk {
 	compatible = "sophgo,cv1800-clk";
 };
+
+&sdhci0 {
+	compatible = "sophgo,cv1800b-dwcmshc";
+};
