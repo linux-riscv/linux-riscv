@@ -27,6 +27,8 @@
 
 #define NUM_ALPHA_EXTS ('z' - 'a' + 1)
 
+static bool any_cpu_has_zicboz __initdata;
+
 unsigned long elf_hwcap __read_mostly;
 
 /* Host ISA bitmap */
@@ -72,7 +74,7 @@ bool __riscv_isa_extension_available(const unsigned long *isa_bitmap, unsigned i
 }
 EXPORT_SYMBOL_GPL(__riscv_isa_extension_available);
 
-static bool riscv_isa_extension_check(int id)
+static bool __init riscv_isa_extension_check(int id)
 {
 	switch (id) {
 	case RISCV_ISA_EXT_ZICBOM:
@@ -92,6 +94,7 @@ static bool riscv_isa_extension_check(int id)
 			pr_err("Zicboz disabled as cboz-block-size present, but is not a power-of-2\n");
 			return false;
 		}
+		any_cpu_has_zicboz = true;
 		return true;
 	case RISCV_ISA_EXT_INVALID:
 		return false;
@@ -766,10 +769,12 @@ unsigned long riscv_get_elf_hwcap(void)
 	return hwcap;
 }
 
-void riscv_user_isa_enable(void)
+void __init riscv_user_isa_enable(void)
 {
-	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_ZICBOZ))
-		csr_set(CSR_ENVCFG, ENVCFG_CBZE);
+	if (riscv_has_extension_unlikely(RISCV_ISA_EXT_ZICBOZ))
+		current->thread.envcfg |= ENVCFG_CBZE;
+	else if (any_cpu_has_zicboz)
+		pr_warn("Zicboz disabled as it is unavailable on some harts\n");
 }
 
 #ifdef CONFIG_RISCV_ALTERNATIVE
