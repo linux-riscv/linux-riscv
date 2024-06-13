@@ -206,6 +206,7 @@ struct rk35xx_priv {
 	u8 txclk_tapnum;
 };
 
+struct dwcmshc_ops;
 struct dwcmshc_priv {
 	struct clk	*bus_clk;
 	int vendor_specific_area1; /* P_VENDOR_SPECIFIC_AREA1 reg */
@@ -214,6 +215,20 @@ struct dwcmshc_priv {
 	void *priv; /* pointer to SoC private stuff */
 	u16 delay_line;
 	u16 flags;
+
+	const struct dwcmshc_ops *ops;
+};
+
+struct dwcmshc_ops {
+	int (*init)(struct device *dev, struct sdhci_host *host, struct dwcmshc_priv *dwc_priv);
+	void (*postinit)(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv);
+	int  (*clks_enable)(struct dwcmshc_priv *dwc_priv);
+	void (*clks_disable)(struct dwcmshc_priv *dwc_priv);
+};
+
+struct dwcmshc_data {
+	const struct sdhci_pltfm_data *pdata;
+	const struct dwcmshc_ops *ops;
 };
 
 /*******************************************************************************
@@ -815,6 +830,25 @@ static void rk35xx_postinit(struct sdhci_host *host, struct dwcmshc_priv *dwc_pr
 	}
 }
 
+static int rk35xx_clks_enable(struct dwcmshc_priv *dwc_priv)
+{
+	struct rk35xx_priv *priv = dwc_priv->priv;
+	int ret = 0;
+
+	if (priv)
+		ret = clk_bulk_prepare_enable(RK35xx_MAX_CLKS, priv->rockchip_clks);
+	return ret;
+}
+
+static void rk35xx_clks_disable(struct dwcmshc_priv *dwc_priv)
+{
+	struct rk35xx_priv *priv = dwc_priv->priv;
+
+	if (priv)
+		clk_bulk_disable_unprepare(RK35xx_MAX_CLKS,
+					   priv->rockchip_clks);
+}
+
 static void th1520_sdhci_set_phy(struct sdhci_host *host)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -1166,30 +1200,65 @@ static const struct sdhci_pltfm_data sdhci_dwcmshc_cv18xx_pdata = {
 	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
 };
 
+static const struct dwcmshc_ops dwcmshc_rk35xx_ops = {
+	.init = rk35xx_init,
+	.postinit = rk35xx_postinit,
+	.clks_enable = rk35xx_clks_enable,
+	.clks_disable = rk35xx_clks_disable,
+};
+
+static const struct dwcmshc_ops dwcmshc_th1520_ops = {
+	.init = th1520_init,
+};
+
+static const struct dwcmshc_data dwcmshc_cv18xx_data = {
+	.pdata = &sdhci_dwcmshc_cv18xx_pdata,
+};
+
+static const struct dwcmshc_data dwcmshc_generic_data = {
+	.pdata = &sdhci_dwcmshc_pdata,
+};
+
+static const struct dwcmshc_data dwcmshc_rk35xx_data = {
+	.pdata = &sdhci_dwcmshc_rk35xx_pdata,
+	.ops = &dwcmshc_rk35xx_ops,
+};
+
+static const struct dwcmshc_data dwcmshc_th1520_data = {
+	.pdata = &sdhci_dwcmshc_th1520_pdata,
+	.ops = &dwcmshc_th1520_ops,
+};
+
+#ifdef CONFIG_ACPI
+static const struct dwcmshc_data dwcmshc_bf3_data = {
+	.pdata = &sdhci_dwcmshc_bf3_pdata,
+};
+#endif
+
 static const struct of_device_id sdhci_dwcmshc_dt_ids[] = {
 	{
 		.compatible = "rockchip,rk3588-dwcmshc",
-		.data = &sdhci_dwcmshc_rk35xx_pdata,
+		.data = &dwcmshc_rk35xx_data,
 	},
 	{
 		.compatible = "rockchip,rk3568-dwcmshc",
-		.data = &sdhci_dwcmshc_rk35xx_pdata,
+		.data = &dwcmshc_rk35xx_data,
 	},
 	{
 		.compatible = "snps,dwcmshc-sdhci",
-		.data = &sdhci_dwcmshc_pdata,
+		.data = &dwcmshc_generic_data,
 	},
 	{
 		.compatible = "sophgo,cv1800b-dwcmshc",
-		.data = &sdhci_dwcmshc_cv18xx_pdata,
+		.data = &dwcmshc_cv18xx_data,
 	},
 	{
 		.compatible = "sophgo,sg2002-dwcmshc",
-		.data = &sdhci_dwcmshc_cv18xx_pdata,
+		.data = &dwcmshc_cv18xx_data,
 	},
 	{
 		.compatible = "thead,th1520-dwcmshc",
-		.data = &sdhci_dwcmshc_th1520_pdata,
+		.data = &dwcmshc_th1520_data,
 	},
 	{},
 };
@@ -1199,7 +1268,7 @@ MODULE_DEVICE_TABLE(of, sdhci_dwcmshc_dt_ids);
 static const struct acpi_device_id sdhci_dwcmshc_acpi_ids[] = {
 	{
 		.id = "MLNXBF30",
-		.driver_data = (kernel_ulong_t)&sdhci_dwcmshc_bf3_pdata,
+		.driver_data = (kernel_ulong_t)&dwcmshc_bf3_data,
 	},
 	{}
 };
@@ -1212,18 +1281,17 @@ static int dwcmshc_probe(struct platform_device *pdev)
 	struct sdhci_pltfm_host *pltfm_host;
 	struct sdhci_host *host;
 	struct dwcmshc_priv *priv;
-	struct rk35xx_priv *rk_priv = NULL;
-	const struct sdhci_pltfm_data *pltfm_data;
+	const struct dwcmshc_data *data;
 	int err;
 	u32 extra, caps;
 
-	pltfm_data = device_get_match_data(&pdev->dev);
-	if (!pltfm_data) {
+	data = device_get_match_data(&pdev->dev);
+	if (!data) {
 		dev_err(&pdev->dev, "Error: No device match data found\n");
 		return -ENODEV;
 	}
 
-	host = sdhci_pltfm_init(pdev, pltfm_data,
+	host = sdhci_pltfm_init(pdev, data->pdata,
 				sizeof(struct dwcmshc_priv));
 	if (IS_ERR(host))
 		return PTR_ERR(host);
@@ -1238,6 +1306,7 @@ static int dwcmshc_probe(struct platform_device *pdev)
 
 	pltfm_host = sdhci_priv(host);
 	priv = sdhci_pltfm_priv(pltfm_host);
+	priv->ops = data->ops;
 
 	if (dev->of_node) {
 		pltfm_host->clk = devm_clk_get(dev, "core");
@@ -1268,20 +1337,14 @@ static int dwcmshc_probe(struct platform_device *pdev)
 	host->mmc_host_ops.hs400_enhanced_strobe = dwcmshc_hs400_enhanced_strobe;
 	host->mmc_host_ops.execute_tuning = dwcmshc_execute_tuning;
 
-	if (pltfm_data == &sdhci_dwcmshc_rk35xx_pdata) {
-		err = rk35xx_init(&pdev->dev, host, priv);
-		if (err)
-			goto err_clk;
-	}
-
-	if (pltfm_data == &sdhci_dwcmshc_th1520_pdata) {
-		err = th1520_init(&pdev->dev, host, priv);
+	if (data->ops && data->ops->init) {
+		err = data->ops->init(&pdev->dev, host, priv);
 		if (err)
 			goto err_clk;
 	}
 
 #ifdef CONFIG_ACPI
-	if (pltfm_data == &sdhci_dwcmshc_bf3_pdata)
+	if (data == &dwcmshc_bf3_data)
 		sdhci_enable_v4_mode(host);
 #endif
 
@@ -1307,8 +1370,8 @@ static int dwcmshc_probe(struct platform_device *pdev)
 		dwcmshc_cqhci_init(host, pdev);
 	}
 
-	if (rk_priv)
-		rk35xx_postinit(host, priv);
+	if (data->ops && data->ops->postinit)
+		data->ops->postinit(host, priv);
 
 	err = __sdhci_add_host(host);
 	if (err)
@@ -1326,9 +1389,8 @@ err_rpm:
 err_clk:
 	clk_disable_unprepare(pltfm_host->clk);
 	clk_disable_unprepare(priv->bus_clk);
-	if (rk_priv)
-		clk_bulk_disable_unprepare(RK35xx_MAX_CLKS,
-					   rk_priv->rockchip_clks);
+	if (data->ops && data->ops->clks_disable)
+		data->ops->clks_disable(priv);
 free_pltfm:
 	sdhci_pltfm_free(pdev);
 	return err;
@@ -1339,7 +1401,6 @@ static void dwcmshc_remove(struct platform_device *pdev)
 	struct sdhci_host *host = platform_get_drvdata(pdev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *priv = sdhci_pltfm_priv(pltfm_host);
-	struct rk35xx_priv *rk_priv = priv->priv;
 
 	pm_runtime_get_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
@@ -1351,9 +1412,8 @@ static void dwcmshc_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(pltfm_host->clk);
 	clk_disable_unprepare(priv->bus_clk);
-	if (rk_priv)
-		clk_bulk_disable_unprepare(RK35xx_MAX_CLKS,
-					   rk_priv->rockchip_clks);
+	if (priv->ops && priv->ops->clks_disable)
+		priv->ops->clks_disable(priv);
 	sdhci_pltfm_free(pdev);
 }
 
@@ -1363,7 +1423,6 @@ static int dwcmshc_suspend(struct device *dev)
 	struct sdhci_host *host = dev_get_drvdata(dev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *priv = sdhci_pltfm_priv(pltfm_host);
-	struct rk35xx_priv *rk_priv = priv->priv;
 	int ret;
 
 	pm_runtime_resume(dev);
@@ -1382,9 +1441,8 @@ static int dwcmshc_suspend(struct device *dev)
 	if (!IS_ERR(priv->bus_clk))
 		clk_disable_unprepare(priv->bus_clk);
 
-	if (rk_priv)
-		clk_bulk_disable_unprepare(RK35xx_MAX_CLKS,
-					   rk_priv->rockchip_clks);
+	if (priv->ops && priv->ops->clks_disable)
+		priv->ops->clks_disable(priv);
 
 	return ret;
 }
@@ -1394,7 +1452,6 @@ static int dwcmshc_resume(struct device *dev)
 	struct sdhci_host *host = dev_get_drvdata(dev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *priv = sdhci_pltfm_priv(pltfm_host);
-	struct rk35xx_priv *rk_priv = priv->priv;
 	int ret;
 
 	ret = clk_prepare_enable(pltfm_host->clk);
@@ -1407,29 +1464,27 @@ static int dwcmshc_resume(struct device *dev)
 			goto disable_clk;
 	}
 
-	if (rk_priv) {
-		ret = clk_bulk_prepare_enable(RK35xx_MAX_CLKS,
-					      rk_priv->rockchip_clks);
+	if (priv->ops && priv->ops->clks_enable) {
+		ret = priv->ops->clks_enable(priv);
 		if (ret)
 			goto disable_bus_clk;
 	}
 
 	ret = sdhci_resume_host(host);
 	if (ret)
-		goto disable_rockchip_clks;
+		goto disable_soc_clks;
 
 	if (host->mmc->caps2 & MMC_CAP2_CQE) {
 		ret = cqhci_resume(host->mmc);
 		if (ret)
-			goto disable_rockchip_clks;
+			goto disable_soc_clks;
 	}
 
 	return 0;
 
-disable_rockchip_clks:
-	if (rk_priv)
-		clk_bulk_disable_unprepare(RK35xx_MAX_CLKS,
-					   rk_priv->rockchip_clks);
+disable_soc_clks:
+	if (priv->ops && priv->ops->clks_disable)
+		priv->ops->clks_disable(priv);
 disable_bus_clk:
 	if (!IS_ERR(priv->bus_clk))
 		clk_disable_unprepare(priv->bus_clk);
