@@ -193,7 +193,7 @@
 					 SDHCI_TRNS_BLK_CNT_EN | \
 					 SDHCI_TRNS_DMA)
 
-enum dwcmshc_rk_type {
+enum rk35xx_type {
 	DWCMSHC_RK3568,
 	DWCMSHC_RK3588,
 };
@@ -202,7 +202,7 @@ struct rk35xx_priv {
 	/* Rockchip specified optional clocks */
 	struct clk_bulk_data rockchip_clks[RK35xx_MAX_CLKS];
 	struct reset_control *reset;
-	enum dwcmshc_rk_type devtype;
+	enum rk35xx_type devtype;
 	u8 txclk_tapnum;
 };
 
@@ -621,7 +621,7 @@ static unsigned int rk35xx_get_max_clock(struct sdhci_host *host)
 	return clk_round_rate(pltfm_host->clk, ULONG_MAX);
 }
 
-static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock)
+static void rk3568_set_clock(struct sdhci_host *host, unsigned int clock)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
@@ -749,7 +749,7 @@ static void rk35xx_sdhci_reset(struct sdhci_host *host, u8 mask)
 	sdhci_reset(host, mask);
 }
 
-static int dwcmshc_rk35xx_init(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv)
+static int rk35xx_init(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv)
 {
 	int err;
 	struct rk35xx_priv *priv = dwc_priv->priv;
@@ -790,7 +790,7 @@ static int dwcmshc_rk35xx_init(struct sdhci_host *host, struct dwcmshc_priv *dwc
 	return 0;
 }
 
-static void dwcmshc_rk35xx_postinit(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv)
+static void rk35xx_postinit(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv)
 {
 	/*
 	 * Don't support highspeed bus mode with low clk speed as we
@@ -1062,7 +1062,7 @@ static const struct sdhci_ops sdhci_dwcmshc_ops = {
 };
 
 static const struct sdhci_ops sdhci_dwcmshc_rk35xx_ops = {
-	.set_clock		= dwcmshc_rk3568_set_clock,
+	.set_clock		= rk3568_set_clock,
 	.set_bus_width		= sdhci_set_bus_width,
 	.set_uhs_signaling	= dwcmshc_set_uhs_signaling,
 	.get_max_clock		= rk35xx_get_max_clock,
@@ -1242,7 +1242,7 @@ static int dwcmshc_probe(struct platform_device *pdev)
 
 		priv->priv = rk_priv;
 
-		err = dwcmshc_rk35xx_init(host, priv);
+		err = rk35xx_init(host, priv);
 		if (err)
 			goto err_clk;
 	}
@@ -1299,7 +1299,7 @@ static int dwcmshc_probe(struct platform_device *pdev)
 	}
 
 	if (rk_priv)
-		dwcmshc_rk35xx_postinit(host, priv);
+		rk35xx_postinit(host, priv);
 
 	err = __sdhci_add_host(host);
 	if (err)
