@@ -74,7 +74,7 @@ int notrace core_kernel_text(unsigned long addr)
 	return 0;
 }
 
-int __kernel_text_address(unsigned long addr)
+int notrace __kernel_text_address(unsigned long addr)
 {
 	if (kernel_text_address(addr))
 		return 1;
@@ -91,7 +91,7 @@ int __kernel_text_address(unsigned long addr)
 	return 0;
 }
 
-int kernel_text_address(unsigned long addr)
+int notrace kernel_text_address(unsigned long addr)
 {
 	bool no_rcu;
 	int ret = 1;
