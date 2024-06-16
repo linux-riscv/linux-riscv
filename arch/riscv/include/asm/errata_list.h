@@ -27,21 +27,7 @@
 #define	ERRATA_THEAD_NUMBER 2
 #endif
 
-#ifdef __ASSEMBLY__
-
-#define ALT_INSN_FAULT(x)						\
-ALTERNATIVE(__stringify(RISCV_PTR do_trap_insn_fault),			\
-	    __stringify(RISCV_PTR sifive_cip_453_insn_fault_trp),	\
-	    SIFIVE_VENDOR_ID, ERRATA_SIFIVE_CIP_453,			\
-	    CONFIG_ERRATA_SIFIVE_CIP_453)
-
-#define ALT_PAGE_FAULT(x)						\
-ALTERNATIVE(__stringify(RISCV_PTR do_page_fault),			\
-	    __stringify(RISCV_PTR sifive_cip_453_page_fault_trp),	\
-	    SIFIVE_VENDOR_ID, ERRATA_SIFIVE_CIP_453,			\
-	    CONFIG_ERRATA_SIFIVE_CIP_453)
-#else /* !__ASSEMBLY__ */
-
+#ifndef __ASSEMBLY__
 #define ALT_SFENCE_VMA_ASID(asid)					\
 asm(ALTERNATIVE("sfence.vma x0, %0", "sfence.vma", SIFIVE_VENDOR_ID,	\
 		ERRATA_SIFIVE_CIP_1200, CONFIG_ERRATA_SIFIVE_CIP_1200)	\
