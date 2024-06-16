@@ -390,6 +390,47 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 	irqentry_exit(regs, state);
 }
 
+void (*excp_vect_table[])(struct pt_regs *regs) __ro_after_init = {
+	do_trap_insn_misaligned,	/*  0 Instruction address misaligned */
+	do_trap_insn_fault,		/*  1 Instruction access fault */
+	do_trap_insn_illegal,		/*  2 Illegal instruction */
+	do_trap_break,			/*  3 Breakpoint */
+	do_trap_load_misaligned,	/*  4 Load address misaligned */
+	do_trap_load_fault,		/*  5 Load access fault */
+	do_trap_store_misaligned,	/*  6 Store/AMO address misaligned */
+	do_trap_store_fault,		/*  7 Store/AMO access fault */
+	do_trap_ecall_u,		/*  8 Environment call from U-mode */
+	do_trap_ecall_s,		/*  9 Environment call from S-mode */
+	do_trap_unknown,		/* 10 Reserved */
+	do_trap_ecall_m,		/* 11 Environment call from M-mode */
+#ifdef CONFIG_MMU
+	do_page_fault,			/* 12 Instruciton page fault */
+	do_page_fault,			/* 13 Load page fault */
+	do_trap_unknown,		/* 14 Reserved */
+	do_page_fault,			/* 15 Store/AMO page fault */
+#endif
+};
+
+asmlinkage void noinstr do_traps(struct pt_regs *regs)
+{
+	unsigned long cause = csr_read(CSR_CAUSE);
+
+	regs->cause = cause;
+
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	riscv_v_context_nesting_start(regs);
+#endif
+	if (cause & CAUSE_IRQ_FLAG) {
+		do_irq(regs);
+	} else {
+		if (cause >= ARRAY_SIZE(excp_vect_table)) {
+			do_trap_unknown(regs);
+			return;
+		}
+		excp_vect_table[cause](regs);
+	}
+}
+
 #ifdef CONFIG_GENERIC_BUG
 int is_valid_bugaddr(unsigned long pc)
 {
