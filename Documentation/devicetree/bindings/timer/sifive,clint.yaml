@@ -43,7 +43,9 @@ properties:
               - thead,th1520-clint
           - const: thead,c900-clint
       - items:
-          - const: sifive,clint0
+          - enum:
+              - sifive,clint0
+              - spacemit,k1-clint
           - const: riscv,clint0
         deprecated: true
         description: For the QEMU virt machine only
