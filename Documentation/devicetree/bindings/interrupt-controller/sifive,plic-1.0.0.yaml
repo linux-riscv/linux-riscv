@@ -59,6 +59,7 @@ properties:
           - enum:
               - canaan,k210-plic
               - sifive,fu540-c000-plic
+              - spacemit,k1-plic
               - starfive,jh7100-plic
               - starfive,jh7110-plic
           - const: sifive,plic-1.0.0
@@ -71,7 +72,9 @@ properties:
               - thead,th1520-plic
           - const: thead,c900-plic
       - items:
-          - const: sifive,plic-1.0.0
+          - enum:
+              - sifive,plic-1.0.0
+              - spacemit,k1-plic
           - const: riscv,plic0
         deprecated: true
         description: For the QEMU virt machine only
