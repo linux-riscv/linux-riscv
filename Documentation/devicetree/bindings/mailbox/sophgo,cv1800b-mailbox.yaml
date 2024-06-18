@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mailbox/sophgo,cv1800b-mailbox.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Sophgo cv1800b mailbox controller
+
+maintainers:
+  - Yuntao Dai <d1581209858@live.com>
+
+description:
+  The Sophgo cv18x SoCs mailbox has 8 channels and 8 bytes per channel for
+  different processors. Any processer can write data in a channel, and
+  set co-responding register to raise interrupt to notice another processor,
+  and it is allowed to send data to itself.
+  Sophgo cv18x SoCs has 3 processors and numbered as
+  <1> C906L
+  <2> C906B
+  <3> 8051
+
+properties:
+  compatible:
+    enum:
+      - sophgo,cv1800b-mailbox
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  interrupt-names:
+    const: mailbox
+
+  recvid:
+    maxItems: 1
+    description:
+      This cell indicates the mailbox controller is running on which processor
+
+  sendto:
+    maxItems: 1
+    description:
+      This cell indicates the message sends to which processor
+
+
+  "#mbox-cells":
+    const: 1
+    description:
+      This cell indicates which channel is used
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - recvid
+  - sendto
+  - "#mbox-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    mailbox: mailbox@1900000 {
+        compatible = "sophgo,cv1800b-mailbox";
+        reg = <0x01900000 0x1000>;
+        interrupts = <101 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "mailbox";
+        interrupt-parent = <&plic>;
+        recvid = <1>;
+        sendto = <2>;
+        #mbox-cells = <1>;
+    };
