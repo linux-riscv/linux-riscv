@@ -310,5 +310,16 @@
 			reg = <0x74000000 0x10000>;
 			interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
 		};
+
+		mailbox: mailbox@1900000 {
+			compatible = "sophgo,cv1800b-mailbox";
+			reg = <0x01900000 0x1000>;
+			interrupts = <101 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "mailbox";
+			interrupt-parent = <&plic>;
+			recvid = <1>;
+			sendto = <2>;
+			#mbox-cells = <1>;
+		};
 	};
 };
