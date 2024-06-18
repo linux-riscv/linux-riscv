@@ -21,6 +21,7 @@ properties:
       - snps,dwcmshc-sdhci
       - sophgo,cv1800b-dwcmshc
       - sophgo,sg2002-dwcmshc
+      - sophgo,sg2042-dwcmshc
       - thead,th1520-dwcmshc
 
   reg:
@@ -28,25 +29,6 @@ properties:
 
   interrupts:
     maxItems: 1
-
-  clocks:
-    minItems: 1
-    items:
-      - description: core clock
-      - description: bus clock for optional
-      - description: axi clock for rockchip specified
-      - description: block clock for rockchip specified
-      - description: timer clock for rockchip specified
-
-
-  clock-names:
-    minItems: 1
-    items:
-      - const: core
-      - const: bus
-      - const: axi
-      - const: block
-      - const: timer
 
   resets:
     maxItems: 5
@@ -63,6 +45,43 @@ properties:
     description: Specify the number of delay for tx sampling.
     $ref: /schemas/types.yaml#/definitions/uint8
 
+if:
+  properties:
+    compatible:
+      contains:
+        const: sophgo,sg2042-dwcmshc
+then:
+  properties:
+    clocks:
+      items:
+        - description: core clock
+        - description: timer clock
+        - description: card clock
+
+    clock-names:
+      items:
+        - const: core
+        - const: timer
+        - const: card
+else:
+  properties:
+    clocks:
+      minItems: 1
+      items:
+        - description: core clock
+        - description: bus clock for optional
+        - description: axi clock for rockchip specified
+        - description: block clock for rockchip specified
+        - description: timer clock for rockchip specified
+
+    clock-names:
+      minItems: 1
+      items:
+        - const: core
+        - const: bus
+        - const: axi
+        - const: block
+        - const: timer
 
 required:
   - compatible
@@ -96,5 +115,15 @@ examples:
       #address-cells = <1>;
       #size-cells = <0>;
     };
-
+  - |
+    mmc@bb0000 {
+      compatible = "sophgo,sg2042-dwcmshc";
+      reg = <0xcc000 0x1000>;
+      interrupts = <0 25 0x4>;
+      clocks = <&cru 17>, <&cru 18>, <&cru 19>;
+      clock-names = "core", "timer", "card";
+      bus-width = <8>;
+      #address-cells = <1>;
+      #size-cells = <0>;
+    };
 ...
