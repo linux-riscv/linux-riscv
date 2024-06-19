@@ -171,11 +171,23 @@ properties:
             memory types as ratified in the 20191213 version of the privileged
             ISA specification.
 
+        - const: zaamo
+          description: |
+            The standard Zaamo extension for atomic memory operations as
+            ratified at commit e87412e621f1 ("integrate Zaamo and Zalrsc text
+            (#1304)") of the unprivileged ISA specification.
+
         - const: zacas
           description: |
             The Zacas extension for Atomic Compare-and-Swap (CAS) instructions
             is supported as ratified at commit 5059e0ca641c ("update to
             ratified") of the riscv-zacas.
+
+        - const: zalrsc
+          description: |
+            The standard Zalrsc extension for load-reserved/store-conditional as
+            ratified at commit e87412e621f1 ("integrate Zaamo and Zalrsc text
+            (#1304)") of the unprivileged ISA specification.
 
         - const: zba
           description: |
@@ -591,6 +603,13 @@ properties:
         then:
           contains:
             const: zca
+      # Zacas depends on Zaamo
+      - if:
+          contains:
+            const: zacas
+        then:
+          contains:
+            const: zaamo
 
 allOf:
   # Zcf extension does not exist on rv64
