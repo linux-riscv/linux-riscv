@@ -316,7 +316,7 @@ static void fsl_qdma_free_chan_resources(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
-	vchan_get_all_descriptors(&fsl_chan->vchan, &head);
+	vchan_get_all_allocated_descs(&fsl_chan->vchan, &head);
 	spin_unlock_irqrestore(&fsl_chan->vchan.lock, flags);
 
 	vchan_dma_desc_free_list(&fsl_chan->vchan, &head);

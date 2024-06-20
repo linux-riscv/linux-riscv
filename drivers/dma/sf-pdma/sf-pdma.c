@@ -147,7 +147,7 @@ static void sf_pdma_free_chan_resources(struct dma_chan *dchan)
 	sf_pdma_disable_request(chan);
 	kfree(chan->desc);
 	chan->desc = NULL;
-	vchan_get_all_descriptors(&chan->vchan, &head);
+	vchan_get_all_allocated_descs(&chan->vchan, &head);
 	sf_pdma_disclaim_chan(chan);
 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
 	vchan_dma_desc_free_list(&chan->vchan, &head);

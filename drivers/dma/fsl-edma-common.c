@@ -828,7 +828,7 @@ void fsl_edma_free_chan_resources(struct dma_chan *chan)
 	if (edma->drvdata->dmamuxs)
 		fsl_edma_chan_mux(fsl_chan, 0, false);
 	fsl_chan->edesc = NULL;
-	vchan_get_all_descriptors(&fsl_chan->vchan, &head);
+	vchan_get_all_allocated_descs(&fsl_chan->vchan, &head);
 	fsl_edma_unprep_slave_dma(fsl_chan);
 	spin_unlock_irqrestore(&fsl_chan->vchan.lock, flags);
 

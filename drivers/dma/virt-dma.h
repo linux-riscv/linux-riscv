@@ -187,11 +187,27 @@ static inline void vchan_get_all_descriptors(struct virt_dma_chan *vc,
 {
 	lockdep_assert_held(&vc->lock);
 
-	list_splice_tail_init(&vc->desc_allocated, head);
 	list_splice_tail_init(&vc->desc_submitted, head);
 	list_splice_tail_init(&vc->desc_issued, head);
 	list_splice_tail_init(&vc->desc_completed, head);
 	list_splice_tail_init(&vc->desc_terminated, head);
+}
+
+/**
+ * vchan_get_all_allocated_descs - obtain all descriptors
+ * @vc: virtual channel to get descriptors from
+ * @head: list of descriptors found
+ *
+ * vc.lock must be held by caller
+ *
+ * Removes all descriptors from internal lists, and provides a list of all
+ * descriptors found
+ */
+static inline void vchan_get_all_allocated_descs(struct virt_dma_chan *vc,
+	struct list_head *head)
+{
+	list_splice_tail_init(&vc->desc_allocated, head);
+	vchan_get_all_descriptors(vc, head);
 }
 
 static inline void vchan_free_chan_resources(struct virt_dma_chan *vc)
@@ -201,7 +217,7 @@ static inline void vchan_free_chan_resources(struct virt_dma_chan *vc)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&vc->lock, flags);
-	vchan_get_all_descriptors(vc, &head);
+	vchan_get_all_allocated_descs(vc, &head);
 	list_for_each_entry(vd, &head, node)
 		dmaengine_desc_clear_reuse(&vd->tx);
 	spin_unlock_irqrestore(&vc->lock, flags);

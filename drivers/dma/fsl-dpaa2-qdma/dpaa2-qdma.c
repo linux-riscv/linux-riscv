@@ -71,7 +71,7 @@ static void dpaa2_qdma_free_chan_resources(struct dma_chan *chan)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&dpaa2_chan->vchan.lock, flags);
-	vchan_get_all_descriptors(&dpaa2_chan->vchan, &head);
+	vchan_get_all_allocated_descs(&dpaa2_chan->vchan, &head);
 	spin_unlock_irqrestore(&dpaa2_chan->vchan.lock, flags);
 
 	vchan_dma_desc_free_list(&dpaa2_chan->vchan, &head);
