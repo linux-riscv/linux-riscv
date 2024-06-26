@@ -4,6 +4,8 @@
 
 #include <linux/types.h>
 
+bool early_isa_str(const void *fdt, const char *ext_name);
+
 /*
  * The folowing functions are exported (but prefixed) declare them here so
  * that LLVM does not complain it lacks the 'static' keyword (which, if
@@ -11,6 +13,7 @@
  */
 
 u64 get_kaslr_seed(uintptr_t dtb_pa);
+u64 get_kaslr_seed_zkr(const uintptr_t dtb_pa);
 bool set_nokaslr_from_cmdline(uintptr_t dtb_pa);
 u64 set_satp_mode_from_cmdline(uintptr_t dtb_pa);
 
