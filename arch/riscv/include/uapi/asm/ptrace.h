@@ -54,6 +54,8 @@ struct user_regs_struct {
 	unsigned long t4;
 	unsigned long t5;
 	unsigned long t6;
+	/* a0 value before the syscall */
+	unsigned long orig_a0;
 };
 
 struct __riscv_f_ext_state {
