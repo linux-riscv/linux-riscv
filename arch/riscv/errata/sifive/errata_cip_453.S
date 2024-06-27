@@ -23,11 +23,7 @@
 
 ENTRY(sifive_cip_453_page_fault_trp)
 	ADD_SIGN_EXT a0, t0, t1
-#ifdef CONFIG_MMU
 	la t0, do_page_fault
-#else
-	la t0, do_trap_unknown
-#endif
 	jr t0
 END(sifive_cip_453_page_fault_trp)
 
