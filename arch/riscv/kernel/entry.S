@@ -33,7 +33,7 @@ SYM_CODE_START(handle_exception)
 	REG_S sp, TASK_TI_KERNEL_SP(tp)
 
 #ifdef CONFIG_VMAP_STACK
-	addi sp, sp, -(PT_SIZE_ON_STACK)
+	addi sp, sp, -EXCEPTION_FRAME_SIZE
 	srli sp, sp, THREAD_SHIFT
 	andi sp, sp, 0x1
 	bnez sp, handle_kernel_stack_overflow
@@ -43,7 +43,7 @@ SYM_CODE_START(handle_exception)
 .Lsave_context:
 	REG_S sp, TASK_TI_USER_SP(tp)
 	REG_L sp, TASK_TI_KERNEL_SP(tp)
-	addi sp, sp, -(PT_SIZE_ON_STACK)
+	addi sp, sp, -EXCEPTION_FRAME_SIZE
 	REG_S x1,  PT_RA(sp)
 	REG_S x3,  PT_GP(sp)
 	REG_S x5,  PT_T0(sp)
@@ -58,13 +58,13 @@ SYM_CODE_START(handle_exception)
 	 */
 	li t0, SR_SUM | SR_FS_VS
 
-	REG_L s0, TASK_TI_USER_SP(tp)
+	REG_L a2, TASK_TI_USER_SP(tp)
 	csrrc s1, CSR_STATUS, t0
 	csrr s2, CSR_EPC
 	csrr s3, CSR_TVAL
 	csrr s4, CSR_CAUSE
 	csrr s5, CSR_SCRATCH
-	REG_S s0, PT_SP(sp)
+	REG_S a2, PT_SP(sp)
 	REG_S s1, PT_STATUS(sp)
 	REG_S s2, PT_EPC(sp)
 	REG_S s3, PT_BADADDR(sp)
@@ -82,6 +82,12 @@ SYM_CODE_START(handle_exception)
 
 	/* Load the kernel shadow call stack pointer if coming from userspace */
 	scs_load_current_if_task_changed s5
+
+#ifdef CONFIG_FRAME_POINTER
+	REG_S	ra, (EXCEPTION_FRAME_SIZE + STACKFRAME_RA)(sp)
+	REG_S	s0, (EXCEPTION_FRAME_SIZE + STACKFRAME_FP)(sp)
+	addi	s0, sp, EXCEPTION_FRAME_SIZE
+#endif
 
 #ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
 	move a0, sp
@@ -120,19 +126,24 @@ ASM_NOKPROBE(handle_exception)
  *  - ret_from_fork
  */
 SYM_CODE_START_NOALIGN(ret_from_exception)
-	REG_L s0, PT_STATUS(sp)
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	move a0, sp
+	call riscv_v_context_nesting_end
+#endif
+
+	REG_L s1, PT_STATUS(sp)
 #ifdef CONFIG_RISCV_M_MODE
 	/* the MPP value is too large to be used as an immediate arg for addi */
 	li t0, SR_MPP
-	and s0, s0, t0
+	and t0, s1, t0
 #else
-	andi s0, s0, SR_SPP
+	andi t0, s1, SR_SPP
 #endif
-	bnez s0, 1f
+	bnez t0, 1f
 
 	/* Save unwound kernel stack pointer in thread_info */
-	addi s0, sp, PT_SIZE_ON_STACK
-	REG_S s0, TASK_TI_KERNEL_SP(tp)
+	addi t0, sp, EXCEPTION_FRAME_SIZE
+	REG_S t0, TASK_TI_KERNEL_SP(tp)
 
 	/* Save the kernel shadow call stack pointer */
 	scs_save_current
@@ -143,11 +154,6 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	 */
 	csrw CSR_SCRATCH, tp
 1:
-#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
-	move a0, sp
-	call riscv_v_context_nesting_end
-#endif
-	REG_L a0, PT_STATUS(sp)
 	/*
 	 * The current load reservation is effectively part of the processor's
 	 * state, in the sense that load reservations cannot be shared between
@@ -168,7 +174,7 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
 	REG_L  a2, PT_EPC(sp)
 	REG_SC x0, a2, PT_EPC(sp)
 
-	csrw CSR_STATUS, a0
+	csrw CSR_STATUS, s1
 	csrw CSR_EPC, a2
 
 	REG_L x1,  PT_RA(sp)
@@ -192,13 +198,11 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	/* we reach here from kernel context, sscratch must be 0 */
 	csrrw x31, CSR_SCRATCH, x31
 	asm_per_cpu sp, overflow_stack, x31
-	li x31, OVERFLOW_STACK_SIZE
+	li x31, OVERFLOW_STACK_SIZE - EXCEPTION_FRAME_SIZE
 	add sp, sp, x31
 	/* zero out x31 again and restore x31 */
 	xor x31, x31, x31
 	csrrw x31, CSR_SCRATCH, x31
-
-	addi sp, sp, -(PT_SIZE_ON_STACK)
 
 	//save context to overflow stack
 	REG_S x1,  PT_RA(sp)
@@ -206,13 +210,13 @@ SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
 	REG_S x5,  PT_T0(sp)
 	save_from_x6_to_x31
 
-	REG_L s0, TASK_TI_KERNEL_SP(tp)
+	REG_L a2, TASK_TI_KERNEL_SP(tp)
 	csrr s1, CSR_STATUS
 	csrr s2, CSR_EPC
 	csrr s3, CSR_TVAL
 	csrr s4, CSR_CAUSE
 	csrr s5, CSR_SCRATCH
-	REG_S s0, PT_SP(sp)
+	REG_S a2, PT_SP(sp)
 	REG_S s1, PT_STATUS(sp)
 	REG_S s2, PT_EPC(sp)
 	REG_S s3, PT_BADADDR(sp)
@@ -226,10 +230,10 @@ ASM_NOKPROBE(handle_kernel_stack_overflow)
 
 SYM_CODE_START(ret_from_fork)
 	call schedule_tail
-	beqz s0, 1f	/* not from kernel thread */
+	beqz s1, 1f	/* not from kernel thread */
 	/* Call fn(arg) */
-	move a0, s1
-	jalr s0
+	move a0, s2
+	jalr s1
 1:
 	move a0, sp /* pt_regs */
 	la ra, ret_from_exception
@@ -246,8 +250,8 @@ SYM_CODE_END(ret_from_fork)
 SYM_FUNC_START(call_on_irq_stack)
 	/* Create a frame record to save ra and s0 (fp) */
 	addi	sp, sp, -STACKFRAME_SIZE_ON_STACK
-	REG_S	ra, STACKFRAME_RA(sp)
-	REG_S	s0, STACKFRAME_FP(sp)
+	REG_S	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
+	REG_S	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
 	addi	s0, sp, STACKFRAME_SIZE_ON_STACK
 
 	/* Switch to the per-CPU shadow call stack */
@@ -265,8 +269,8 @@ SYM_FUNC_START(call_on_irq_stack)
 
 	/* Switch back to the thread stack and restore ra and s0 */
 	addi	sp, s0, -STACKFRAME_SIZE_ON_STACK
-	REG_L	ra, STACKFRAME_RA(sp)
-	REG_L	s0, STACKFRAME_FP(sp)
+	REG_L	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
+	REG_L	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
 	addi	sp, sp, STACKFRAME_SIZE_ON_STACK
 
 	ret
