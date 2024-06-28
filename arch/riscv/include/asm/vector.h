@@ -170,8 +170,8 @@ static inline void riscv_v_vstate_discard(struct pt_regs *regs)
 	if ((regs->status & SR_VS) == SR_VS_OFF)
 		return;
 
-	__riscv_v_vstate_discard();
-	__riscv_v_vstate_dirty(regs);
+	set_tsk_thread_flag(current, TIF_RISCV_V_DEFER_RESTORE);
+	riscv_v_vstate_on(regs);
 }
 
 static inline void riscv_v_vstate_save(struct __riscv_v_ext_state *vstate,
@@ -186,7 +186,9 @@ static inline void riscv_v_vstate_save(struct __riscv_v_ext_state *vstate,
 static inline void riscv_v_vstate_restore(struct __riscv_v_ext_state *vstate,
 					  struct pt_regs *regs)
 {
-	if ((regs->status & SR_VS) != SR_VS_OFF) {
+	if ((regs->status & SR_VS) == SR_VS_INITIAL) {
+		__riscv_v_vstate_discard();
+	} else if ((regs->status & SR_VS) != SR_VS_OFF) {
 		__riscv_v_vstate_restore(vstate, vstate->datap);
 		__riscv_v_vstate_clean(regs);
 	}
@@ -197,7 +199,7 @@ static inline void riscv_v_vstate_set_restore(struct task_struct *task,
 {
 	if ((regs->status & SR_VS) != SR_VS_OFF) {
 		set_tsk_thread_flag(task, TIF_RISCV_V_DEFER_RESTORE);
-		riscv_v_vstate_on(regs);
+		__riscv_v_vstate_clean(regs);
 	}
 }
 
