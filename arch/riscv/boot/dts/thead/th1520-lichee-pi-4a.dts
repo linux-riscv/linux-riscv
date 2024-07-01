@@ -14,6 +14,7 @@
 		gpio1 = &gpio1;
 		gpio2 = &gpio2;
 		gpio3 = &gpio3;
+		spi0 = &spi0;
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
@@ -28,5 +29,9 @@
 };
 
 &uart0 {
+	status = "okay";
+};
+
+&spi0 {
 	status = "okay";
 };
