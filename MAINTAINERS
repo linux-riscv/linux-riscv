@@ -20907,6 +20907,7 @@ SOPHGO SARADC DEVICE DRIVER
 M:	Thomas Bonnefille <thomas.bonnefille@bootlin.com>
 S:	Maintained
 F:	Documentation/devicetree/bindings/iio/adc/sophgo,cv18xx-saradc.yaml
+F:	drivers/iio/adc/sophgo-adc.c
 
 SOUND
 M:	Jaroslav Kysela <perex@perex.cz>
