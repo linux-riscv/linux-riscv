@@ -310,5 +310,19 @@
 			reg = <0x74000000 0x10000>;
 			interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
 		};
+
+		saradc_active: adc@30f0000 {
+			compatible = "sophgo,cv18xx-saradc";
+			clocks = <&clk CLK_SARADC>;
+			interrupts = <100 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x030F0000 0x1000>;
+			status = "disabled";
+		};
+
+		saradc_nodie: adc@502c000 {
+			compatible = "sophgo,cv18xx-saradc";
+			reg = <0x0502C000 0x1000>;
+			status = "disabled";
+		};
 	};
 };
