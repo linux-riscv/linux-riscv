@@ -570,6 +570,7 @@ ForEachMacros:
   - 'of_for_each_phandle'
   - 'of_property_for_each_string'
   - 'of_property_for_each_u32'
+  - 'of_property_for_each_u32_new'
   - 'pci_bus_for_each_resource'
   - 'pci_dev_for_each_resource'
   - 'pcl_for_each_chunk'
