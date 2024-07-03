@@ -163,20 +163,19 @@ static void plic_irq_eoi(struct irq_data *d)
 static int plic_set_affinity(struct irq_data *d,
 			     const struct cpumask *mask_val, bool force)
 {
-	unsigned int cpu;
 	struct plic_priv *priv = irq_data_get_irq_chip_data(d);
+	struct cpumask new_mask;
 
-	if (force)
-		cpu = cpumask_first_and(&priv->lmask, mask_val);
-	else
-		cpu = cpumask_first_and_and(&priv->lmask, mask_val, cpu_online_mask);
+	cpumask_and(&new_mask, mask_val, &priv->lmask);
+	if (!force)
+		cpumask_and(&new_mask, &new_mask, cpu_online_mask);
 
-	if (cpu >= nr_cpu_ids)
+	if (cpumask_empty(&new_mask))
 		return -EINVAL;
 
 	plic_irq_disable(d);
 
-	irq_data_update_effective_affinity(d, cpumask_of(cpu));
+	irq_data_update_effective_affinity(d, &new_mask);
 
 	if (!irqd_irq_disabled(d))
 		plic_irq_enable(d);
