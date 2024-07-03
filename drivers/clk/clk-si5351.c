@@ -1191,7 +1191,7 @@ static int si5351_dt_parse(struct i2c_client *client,
 	 * property silabs,pll-source : <num src>, [<..>]
 	 * allow to selectively set pll source
 	 */
-	of_property_for_each_u32(np, "silabs,pll-source", prop, p, num) {
+	of_property_for_each_u32_old(np, "silabs,pll-source", prop, p, num) {
 		if (num >= 2) {
 			dev_err(&client->dev,
 				"invalid pll %d on pll-source prop\n", num);
@@ -1232,7 +1232,7 @@ static int si5351_dt_parse(struct i2c_client *client,
 	pdata->pll_reset[0] = true;
 	pdata->pll_reset[1] = true;
 
-	of_property_for_each_u32(np, "silabs,pll-reset-mode", prop, p, num) {
+	of_property_for_each_u32_old(np, "silabs,pll-reset-mode", prop, p, num) {
 		if (num >= 2) {
 			dev_err(&client->dev,
 				"invalid pll %d on pll-reset-mode prop\n", num);
