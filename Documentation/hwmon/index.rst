@@ -203,6 +203,7 @@ Hardware Monitoring Kernel Drivers
    sch5636
    scpi-hwmon
    sfctemp
+   sgmcu
    sht15
    sht21
    sht3x
