@@ -25,3 +25,11 @@
 &clk {
 	compatible = "sophgo,cv1800-clk";
 };
+
+&saradc_active {
+	compatible = "sophgo,cv1800b-saradc", "sophgo,cv18xx-saradc";
+};
+
+&saradc_nodie {
+	compatible = "sophgo,cv1800b-saradc", "sophgo,cv18xx-saradc";
+};

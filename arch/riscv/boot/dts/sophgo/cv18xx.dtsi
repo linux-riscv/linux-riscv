@@ -133,6 +133,14 @@
 			};
 		};
 
+		saradc_active: adc@30f0000 {
+			compatible = "sophgo,cv18xx-saradc";
+			clocks = <&clk CLK_SARADC>;
+			interrupts = <100 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x030F0000 0x1000>;
+			status = "disabled";
+		};
+
 		i2c0: i2c@4000000 {
 			compatible = "snps,designware-i2c";
 			reg = <0x04000000 0x10000>;
@@ -294,6 +302,12 @@
 			clocks = <&clk CLK_AXI4_SD0>,
 				 <&clk CLK_SD0>;
 			clock-names = "core", "bus";
+			status = "disabled";
+		};
+
+		saradc_nodie: adc@502c000 {
+			compatible = "sophgo,cv18xx-saradc";
+			reg = <0x0502C000 0x1000>;
 			status = "disabled";
 		};
 
