@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/iio/adc/sophgo,cv18xx-saradc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title:
+  Sophgo CV18XX SoC series 3 channels Successive Approximation Analog to
+  Digital Converters
+
+maintainers:
+  - Thomas Bonnefille <thomas.bonnefille@bootlin.com>
+
+description:
+  Datasheet at https://github.com/sophgo/sophgo-doc/releases
+
+properties:
+  compatible:
+    oneOf:
+      - items:
+          - enum:
+              - sophgo,cv1800b-saradc
+          - const: sophgo,cv18xx-saradc
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    description:
+      SARADC will use the presence of this clock to determine if the controller
+      needs to be explicitly clocked by it (Active domain) or if it is part of
+      the No-Die Domain, along with the RTC, which does not require explicit
+      clocking.
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/sophgo,cv1800.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    /* ADC in the Active domain */
+    adc@30f0000 {
+        compatible = "sophgo,cv1800b-saradc", "sophgo,cv18xx-saradc";
+        clocks = <&clk CLK_SARADC>;
+        interrupts = <100 IRQ_TYPE_LEVEL_HIGH>;
+        reg = <0x030F0000 0x1000>;
+    };
+  - |
+    #include <dt-bindings/clock/sophgo,cv1800.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    /* ADC in the No-Die domain */
+    adc@502c000 {
+        compatible = "sophgo,cv1800b-saradc", "sophgo,cv18xx-saradc";
+        reg = <0x0502C000 0x1000>;
+    };
