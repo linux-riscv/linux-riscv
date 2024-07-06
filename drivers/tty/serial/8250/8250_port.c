@@ -3245,8 +3245,7 @@ void serial8250_set_defaults(struct uart_8250_port *up)
 			up->port.fifosize = uart_config[type].fifo_size;
 		if (!up->tx_loadsz)
 			up->tx_loadsz = uart_config[type].tx_loadsz;
-		if (!up->capabilities)
-			up->capabilities = uart_config[type].flags;
+		up->capabilities |= uart_config[type].flags;
 	}
 
 	set_io_from_upio(port);
