@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config PHY_SOPHGO_CV1800_USB
+	tristate "SOPHGO CV1800 USB 2.0 PHY driver"
+	depends on OF && (ARCH_SOPHGO || COMPILE_TEST)
+	select GENERIC_PHY
+	help
+	  Enable this to support the USB 2.0 PHY on Sophgo CV1800
+	  and SG200x SoCs.
+	  If unsure, say N.
