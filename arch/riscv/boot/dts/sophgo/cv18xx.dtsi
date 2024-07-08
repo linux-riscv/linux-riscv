@@ -61,6 +61,18 @@
 			#clock-cells = <1>;
 		};
 
+		usb_phy: usb-phy@3006000 {
+			compatible = "sophgo,cv1800-usb-phy";
+			reg = <0x3006000 0x60>, <0x3000048 0x4>;
+			reg-names = "phy", "pin";
+			clocks = <&clk CLK_APB_USB>,
+				 <&clk CLK_USB_125M>,
+				 <&clk CLK_USB_33K>,
+				 <&clk CLK_USB_12M>;
+			clock-names = "apb", "125m", "33k", "12m";
+			#phy-cells = <0>;
+		};
+
 		gpio0: gpio@3020000 {
 			compatible = "snps,dw-apb-gpio";
 			reg = <0x3020000 0x1000>;
@@ -295,6 +307,17 @@
 				 <&clk CLK_SD0>;
 			clock-names = "core", "bus";
 			status = "disabled";
+		};
+
+		usb_otg: usb@4340000 {
+			compatible = "sophgo,cv1800-usb";
+			reg = <0x4340000 0x10000>;
+			clocks = <&clk CLK_AXI4_USB>;
+			clock-names = "otg";
+			dr_mode = "otg";
+			interrupts = <30 IRQ_TYPE_LEVEL_HIGH>;
+			phys = <&usb_phy>;
+			phy-names = "usb2-phy";
 		};
 
 		plic: interrupt-controller@70000000 {
