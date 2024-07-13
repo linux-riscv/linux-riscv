@@ -294,6 +294,10 @@ static inline void pud_clear(pud_t *pudp)
 {
 	pud_val(*pudp) = ((unsigned long) invalid_pmd_table);
 }
+
+#ifdef _PAGE_HUGE
+#define pud_leaf(pud)	((pud_val(pud) & _PAGE_HUGE) != 0)
+#endif
 #endif
 
 #define pte_page(x)		pfn_to_page(pte_pfn(x))
