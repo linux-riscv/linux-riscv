@@ -207,6 +207,7 @@ static inline pmd_t *pud_pgtable(pud_t pud)
 
 #define pud_phys(pud)		PHYSADDR(pud_val(pud))
 #define pud_page(pud)		(pfn_to_page(pud_phys(pud) >> PAGE_SHIFT))
+#define pud_leaf(pud)		((pud_val(pud) & _PAGE_HUGE) != 0)
 
 #endif
 
@@ -625,7 +626,6 @@ static inline long pmd_protnone(pmd_t pmd)
 #endif /* CONFIG_NUMA_BALANCING */
 
 #define pmd_leaf(pmd)		((pmd_val(pmd) & _PAGE_HUGE) != 0)
-#define pud_leaf(pud)		((pud_val(pud) & _PAGE_HUGE) != 0)
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 #define pud_devmap(pud)		(0)
