@@ -226,7 +226,7 @@ void *bpf_arch_text_copy(void *dst, void *src, size_t len)
 	int ret;
 
 	mutex_lock(&text_mutex);
-	ret = patch_text_nosync(dst, src, len);
+	ret = patch_insn_write(dst, src, len);
 	mutex_unlock(&text_mutex);
 
 	if (ret)
@@ -240,7 +240,7 @@ int bpf_arch_text_invalidate(void *dst, size_t len)
 	int ret;
 
 	mutex_lock(&text_mutex);
-	ret = patch_text_set_nosync(dst, 0, len);
+	ret = patch_insn_set(dst, 0, len);
 	mutex_unlock(&text_mutex);
 
 	return ret;
