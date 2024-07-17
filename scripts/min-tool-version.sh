@@ -28,6 +28,8 @@ llvm)
 		echo 15.0.0
 	elif [ "$SRCARCH" = loongarch ]; then
 		echo 18.0.0
+	elif [ "$SRCARCH" = riscv ]; then
+		echo 17.0.0
 	else
 		echo 13.0.1
 	fi
