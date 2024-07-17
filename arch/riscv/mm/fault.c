@@ -22,6 +22,10 @@
 
 #include "../kernel/head.h"
 
+
+#define CREATE_TRACE_POINTS
+#include <asm/trace/exceptions.h>
+
 static void die_kernel_fault(const char *msg, unsigned long addr,
 		struct pt_regs *regs)
 {
@@ -215,6 +219,15 @@ static inline bool access_error(unsigned long cause, struct vm_area_struct *vma)
 	return false;
 }
 
+
+static inline void trace_page_fault(struct pt_regs *regs)
+{
+	if (user_mode(regs))
+		trace_page_fault_user(regs);
+	else
+		trace_page_fault_kernel(regs);
+}
+
 /*
  * This routine handles page faults.  It determines the address and the
  * problem, and then passes it off to one of the appropriate routines.
@@ -234,6 +247,8 @@ void handle_page_fault(struct pt_regs *regs)
 
 	tsk = current;
 	mm = tsk->mm;
+
+	trace_page_fault(regs);
 
 	if (kprobe_page_fault(regs, cause))
 		return;
