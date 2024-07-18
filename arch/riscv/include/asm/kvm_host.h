@@ -286,6 +286,12 @@ struct kvm_vcpu_arch {
 	} sta;
 };
 
+/* TODO: A more explicit approach might be needed here than this simple one */
+static inline bool kvm_arch_pmi_in_guest(struct kvm_vcpu *vcpu)
+{
+	return IS_ENABLED(CONFIG_GUEST_PERF_EVENTS) && !!vcpu;
+}
+
 static inline void kvm_arch_sync_events(struct kvm *kvm) {}
 
 #define KVM_RISCV_GSTAGE_TLB_MIN_ORDER		12
