@@ -270,7 +270,7 @@ static bool probe_breakpoint_handler(struct pt_regs *regs)
 	return user ? uprobe_breakpoint_handler(regs) : kprobe_breakpoint_handler(regs);
 }
 
-void handle_break(struct pt_regs *regs)
+static void handle_break(struct pt_regs *regs)
 {
 	if (probe_single_step_handler(regs))
 		return;
