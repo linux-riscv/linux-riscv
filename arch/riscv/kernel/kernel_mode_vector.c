@@ -152,7 +152,7 @@ static int riscv_v_start_kernel_context(bool *is_nested)
 }
 
 /* low-level V context handling code, called with irq disabled */
-asmlinkage void riscv_v_context_nesting_start(struct pt_regs *regs)
+void riscv_v_context_nesting_start(struct pt_regs *regs)
 {
 	int depth;
 
