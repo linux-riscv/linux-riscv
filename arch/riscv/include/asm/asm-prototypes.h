@@ -55,5 +55,6 @@ DECLARE_DO_ERROR_INFO(do_trap_break);
 asmlinkage void handle_bad_stack(struct pt_regs *regs);
 asmlinkage void do_page_fault(struct pt_regs *regs);
 asmlinkage void do_irq(struct pt_regs *regs);
+asmlinkage void do_traps(struct pt_regs *regs, unsigned long cause);
 
 #endif /* _ASM_RISCV_PROTOTYPES_H */

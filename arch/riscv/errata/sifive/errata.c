@@ -10,9 +10,14 @@
 #include <linux/bug.h>
 #include <asm/patch.h>
 #include <asm/alternative.h>
+#include <asm/csr.h>
 #include <asm/vendorid_list.h>
 #include <asm/errata_list.h>
 #include <asm/vendor_extensions.h>
+
+extern void (*excp_vect_table[])(struct pt_regs *regs);
+extern void sifive_cip_453_insn_fault_trp(struct pt_regs *regs);
+extern void sifive_cip_453_page_fault_trp(struct pt_regs *regs);
 
 struct errata_info_t {
 	char name[32];
@@ -21,6 +26,9 @@ struct errata_info_t {
 
 static bool errata_cip_453_check_func(unsigned long  arch_id, unsigned long impid)
 {
+	if (!IS_ENABLED(CONFIG_ERRATA_SIFIVE_CIP_453))
+		return false;
+
 	/*
 	 * Affected cores:
 	 * Architecture ID: 0x8000000000000007
@@ -53,20 +61,25 @@ static bool errata_cip_1200_check_func(unsigned long  arch_id, unsigned long imp
 
 static struct errata_info_t errata_list[ERRATA_SIFIVE_NUMBER] = {
 	{
-		.name = "cip-453",
-		.check_func = errata_cip_453_check_func
-	},
-	{
 		.name = "cip-1200",
 		.check_func = errata_cip_1200_check_func
 	},
 };
 
 static u32 __init_or_module sifive_errata_probe(unsigned long archid,
-						unsigned long impid)
+						unsigned long impid,
+						unsigned int stage)
 {
 	int idx;
 	u32 cpu_req_errata = 0;
+
+	if (stage == RISCV_ALTERNATIVES_BOOT) {
+		if (IS_ENABLED(CONFIG_MMU) &&
+		    errata_cip_453_check_func(archid, impid)) {
+			excp_vect_table[EXC_INST_ACCESS] = sifive_cip_453_insn_fault_trp;
+			excp_vect_table[EXC_INST_PAGE_FAULT] = sifive_cip_453_page_fault_trp;
+		}
+	}
 
 	for (idx = 0; idx < ERRATA_SIFIVE_NUMBER; idx++)
 		if (errata_list[idx].check_func(archid, impid))
@@ -102,7 +115,7 @@ void sifive_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
 	if (stage == RISCV_ALTERNATIVES_EARLY_BOOT)
 		return;
 
-	cpu_req_errata = sifive_errata_probe(archid, impid);
+	cpu_req_errata = sifive_errata_probe(archid, impid, stage);
 
 	for (alt = begin; alt < end; alt++) {
 		if (alt->vendor_id != SIFIVE_VENDOR_ID)

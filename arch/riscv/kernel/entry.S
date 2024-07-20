@@ -83,36 +83,10 @@ SYM_CODE_START(handle_exception)
 	/* Load the kernel shadow call stack pointer if coming from userspace */
 	scs_load_current_if_task_changed s5
 
-#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
-	move a0, sp
-	call riscv_v_context_nesting_start
-#endif
 	move a0, sp /* pt_regs */
-
-	/*
-	 * MSB of cause differentiates between
-	 * interrupts and exceptions
-	 */
-	bge s4, zero, 1f
-
-	/* Handle interrupts */
-	call do_irq
+	move a1, s4 /* cause */
+	call do_traps
 	j ret_from_exception
-1:
-	/* Handle other exceptions */
-	slli t0, s4, RISCV_LGPTR
-	la t1, excp_vect_table
-	la t2, excp_vect_table_end
-	add t0, t1, t0
-	/* Check if exception code lies within bounds */
-	bgeu t0, t2, 3f
-	REG_L t1, 0(t0)
-2:	jalr t1
-	j ret_from_exception
-3:
-
-	la t1, do_trap_unknown
-	j 2b
 SYM_CODE_END(handle_exception)
 ASM_NOKPROBE(handle_exception)
 
@@ -332,33 +306,6 @@ SYM_FUNC_START(__switch_to)
 	scs_load_current
 	ret
 SYM_FUNC_END(__switch_to)
-
-#ifndef CONFIG_MMU
-#define do_page_fault do_trap_unknown
-#endif
-
-	.section ".rodata"
-	.align LGREG
-	/* Exception vector table */
-SYM_DATA_START_LOCAL(excp_vect_table)
-	RISCV_PTR do_trap_insn_misaligned
-	ALT_INSN_FAULT(RISCV_PTR do_trap_insn_fault)
-	RISCV_PTR do_trap_insn_illegal
-	RISCV_PTR do_trap_break
-	RISCV_PTR do_trap_load_misaligned
-	RISCV_PTR do_trap_load_fault
-	RISCV_PTR do_trap_store_misaligned
-	RISCV_PTR do_trap_store_fault
-	RISCV_PTR do_trap_ecall_u /* system call */
-	RISCV_PTR do_trap_ecall_s
-	RISCV_PTR do_trap_unknown
-	RISCV_PTR do_trap_ecall_m
-	/* instruciton page fault */
-	ALT_PAGE_FAULT(RISCV_PTR do_page_fault)
-	RISCV_PTR do_page_fault   /* load page fault */
-	RISCV_PTR do_trap_unknown
-	RISCV_PTR do_page_fault   /* store page fault */
-SYM_DATA_END_LABEL(excp_vect_table, SYM_L_LOCAL, excp_vect_table_end)
 
 #ifndef CONFIG_MMU
 SYM_DATA_START(__user_rt_sigreturn)
