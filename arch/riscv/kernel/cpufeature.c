@@ -925,7 +925,7 @@ void __init riscv_fill_hwcap(void)
 		elf_hwcap &= ~COMPAT_HWCAP_ISA_F;
 	}
 
-	if (__riscv_isa_extension_available(NULL, RISCV_ISA_EXT_ZVE32X)) {
+	if (__riscv_isa_extension_available(NULL, RISCV_ISA_EXT_ZVE32X) || has_xtheadvector_no_alternatives()) {
 		/*
 		 * This cannot fail when called on the boot hart
 		 */
