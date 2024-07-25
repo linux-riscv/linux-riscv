@@ -1393,6 +1393,36 @@ static void __init arch_reserve_crashkernel(void)
 				    low_size, high);
 }
 
+static void __init phymem_addr_overflow(void)
+{
+	phys_addr_t end = memblock_end_of_DRAM();
+
+	if (pgtable_l5_enabled) {
+		if (end > MAX_PFN_MEM_ADDR_L5) {
+			memblock_reserve(MAX_PFN_MEM_ADDR_L5, end - MAX_PFN_MEM_ADDR_L5);
+			WARN(true, "Phymem addr 0x%llx overflowed, reserve [0x%llx-0x%llx] directly.",
+			     end, MAX_PFN_MEM_ADDR_L5, end);
+		}
+	}
+	if (pgtable_l4_enabled) {
+		if (end > MAX_PFN_MEM_ADDR_L4) {
+			memblock_reserve(MAX_PFN_MEM_ADDR_L4, end - MAX_PFN_MEM_ADDR_L4);
+			WARN(true, "Phymem addr 0x%llx overflowed, reserve [0x%llx-0x%llx] directly.",
+			     end, MAX_PFN_MEM_ADDR_L4, end);
+		}
+	}
+	if (end > MAX_PFN_MEM_ADDR_L3) {
+		memblock_reserve(MAX_PFN_MEM_ADDR_L3, end - MAX_PFN_MEM_ADDR_L3);
+		WARN(true, "Phymem addr 0x%llx overflowed, reserve [0x%llx-0x%llx] directly.",
+		     end, MAX_PFN_MEM_ADDR_L3, end);
+	}
+}
+
+void __init paging_check(void)
+{
+	phymem_addr_overflow();
+}
+
 void __init paging_init(void)
 {
 	setup_bootmem();

@@ -38,6 +38,15 @@
  */
 #define PAGE_OFFSET_L4		_AC(0xffffaf8000000000, UL)
 #define PAGE_OFFSET_L3		_AC(0xffffffd800000000, UL)
+
+/*
+ * See vm-layout.rst, the size of L3 direct mapping of all physical
+ * memory 124GB, L4 is 64TB, L5 is 32PB.
+ */
+#define MAX_PFN_MEM_ADDR_L5	(0x80000000000000ULL)
+#define MAX_PFN_MEM_ADDR_L4	(0x400000000000ULL)
+#define MAX_PFN_MEM_ADDR_L3	(0x1F00000000ULL)
+
 #else
 #define PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
 #endif /* CONFIG_64BIT */

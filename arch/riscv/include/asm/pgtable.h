@@ -917,6 +917,7 @@ extern uintptr_t _dtb_early_pa;
 #endif /* CONFIG_XIP_KERNEL */
 extern u64 satp_mode;
 
+void paging_check(void);
 void paging_init(void);
 void misc_mem_init(void);
 

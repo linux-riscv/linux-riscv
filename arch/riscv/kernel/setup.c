@@ -259,6 +259,7 @@ void __init setup_arch(char **cmdline_p)
 	parse_early_param();
 
 	efi_init();
+	paging_check();
 	paging_init();
 
 	/* Parse the ACPI tables for possible boot-time configuration */
