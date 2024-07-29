@@ -49,14 +49,14 @@ int main(void)
 	ksft_print_msg("vl = %lu\n", vl);
 
 	if (datap[0] != 0x00 && datap[0] != 0xff) {
-		ksft_test_result_fail("v-regesters are not properly initialized\n");
+		ksft_test_result_fail("v-registers are not properly initialized\n");
 		dump(datap, vl * 4);
 		exit(-1);
 	}
 
 	for (i = 1; i < vl * 4; i++) {
 		if (datap[i] != datap[0]) {
-			ksft_test_result_fail("detect stale values on v-regesters\n");
+			ksft_test_result_fail("detect stale values on v-registers\n");
 			dump(datap, vl * 4);
 			exit(-2);
 		}
