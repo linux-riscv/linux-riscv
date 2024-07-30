@@ -55,7 +55,7 @@ static inline void free_pmd_fast(pmd_t * pmd)
 void pmd_set(pmd_t *pmdp, pte_t *ptep);
 #define pmd_populate_kernel		pmd_populate
 
-pgtable_t pte_alloc_one(struct mm_struct *mm);
+struct ptdesc *pte_alloc_one(struct mm_struct *mm);
 
 static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
 {

@@ -964,7 +964,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	}
 	folio_throttle_swaprate(folio, gfp);
 
-	ptdesc = page_ptdesc(pte_alloc_one(vma->vm_mm));
+	ptdesc = pte_alloc_one(vma->vm_mm);
 	if (unlikely(!ptdesc)) {
 		ret = VM_FAULT_OOM;
 		goto release;
@@ -1096,7 +1096,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 		struct folio *zero_folio;
 		vm_fault_t ret;
 
-		ptdesc = page_ptdesc(pte_alloc_one(vma->vm_mm));
+		ptdesc = pte_alloc_one(vma->vm_mm);
 		if (unlikely(!ptdesc))
 			return VM_FAULT_OOM;
 		zero_folio = mm_get_huge_zero_folio(vma->vm_mm);
@@ -1218,7 +1218,7 @@ vm_fault_t vmf_insert_pfn_pmd(struct vm_fault *vmf, pfn_t pfn, bool write)
 		return VM_FAULT_SIGBUS;
 
 	if (arch_needs_pgtable_deposit()) {
-		ptdesc = page_ptdesc(pte_alloc_one(vma->vm_mm));
+		ptdesc = pte_alloc_one(vma->vm_mm);
 		if (!ptdesc)
 			return VM_FAULT_OOM;
 	}
@@ -1381,7 +1381,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	if (!vma_is_anonymous(dst_vma))
 		return 0;
 
-	ptdesc = page_ptdesc(pte_alloc_one(dst_mm));
+	ptdesc = pte_alloc_one(dst_mm);
 	if (unlikely(!ptdesc))
 		goto out;
 

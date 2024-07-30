@@ -27,9 +27,9 @@ static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
 	return (pte_t *)pte_fragment_alloc(mm, 1);
 }
 
-static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
+static inline struct ptdesc *pte_alloc_one(struct mm_struct *mm)
 {
-	return (pgtable_t)pte_fragment_alloc(mm, 0);
+	return (struct ptdesc *)pte_fragment_alloc(mm, 0);
 }
 
 void pte_frag_destroy(void *pte_frag);

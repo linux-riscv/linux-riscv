@@ -51,7 +51,7 @@ extern gfp_t __userpte_alloc_gfp;
 extern pgd_t *pgd_alloc(struct mm_struct *);
 extern void pgd_free(struct mm_struct *mm, pgd_t *pgd);
 
-extern pgtable_t pte_alloc_one(struct mm_struct *);
+extern struct ptdesc *pte_alloc_one(struct mm_struct *);
 
 extern void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte);
 

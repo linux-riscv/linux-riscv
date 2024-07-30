@@ -63,7 +63,7 @@ static inline void pte_free_kernel(struct mm_struct *mm, pte_t *pte)
  *
  * Return: `struct page` referencing the ptdesc or %NULL on error
  */
-static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
+static inline struct ptdesc *__pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 {
 	struct ptdesc *ptdesc;
 
@@ -75,7 +75,7 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 		return NULL;
 	}
 
-	return ptdesc_page(ptdesc);
+	return ptdesc;
 }
 #define __pte_alloc_one(...)	alloc_hooks(__pte_alloc_one_noprof(__VA_ARGS__))
 
@@ -88,7 +88,7 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
  *
  * Return: `struct page` referencing the ptdesc or %NULL on error
  */
-static inline pgtable_t pte_alloc_one_noprof(struct mm_struct *mm)
+static inline struct ptdesc *pte_alloc_one_noprof(struct mm_struct *mm)
 {
 	return __pte_alloc_one_noprof(mm, GFP_PGTABLE_USER);
 }

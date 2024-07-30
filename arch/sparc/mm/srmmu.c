@@ -346,7 +346,7 @@ pgd_t *get_pgd_fast(void)
  * Alignments up to the page size are the same for physical and virtual
  * addresses of the nocache area.
  */
-pgtable_t pte_alloc_one(struct mm_struct *mm)
+struct ptdesc *pte_alloc_one(struct mm_struct *mm)
 {
 	pte_t *ptep;
 	struct page *page;
@@ -362,7 +362,7 @@ pgtable_t pte_alloc_one(struct mm_struct *mm)
 	}
 	spin_unlock(&mm->page_table_lock);
 
-	return ptep;
+	return (struct ptdesc *)ptep;
 }
 
 void pte_free(struct mm_struct *mm, pgtable_t ptep)

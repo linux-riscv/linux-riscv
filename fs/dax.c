@@ -1222,7 +1222,7 @@ static vm_fault_t dax_pmd_load_hole(struct xa_state *xas, struct vm_fault *vmf,
 				  DAX_PMD | DAX_ZERO_PAGE);
 
 	if (arch_needs_pgtable_deposit()) {
-		ptdesc = page_ptdesc(pte_alloc_one(vma->vm_mm));
+		ptdesc = pte_alloc_one(vma->vm_mm);
 		if (!ptdesc)
 			return VM_FAULT_OOM;
 	}

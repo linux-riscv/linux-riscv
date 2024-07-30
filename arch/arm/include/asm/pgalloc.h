@@ -91,16 +91,15 @@ pte_alloc_one_kernel(struct mm_struct *mm)
 #define PGTABLE_HIGHMEM 0
 #endif
 
-static inline pgtable_t
-pte_alloc_one(struct mm_struct *mm)
+static inline struct ptdesc *pte_alloc_one(struct mm_struct *mm)
 {
-	struct page *pte;
+	struct ptdesc *pte;
 
 	pte = __pte_alloc_one(mm, GFP_PGTABLE_USER | PGTABLE_HIGHMEM);
 	if (!pte)
 		return NULL;
-	if (!PageHighMem(pte))
-		clean_pte_table(page_address(pte));
+	if (!PageHighMem(ptdesc_page(pte)))
+		clean_pte_table(ptdesc_address(pte));
 	return pte;
 }
 

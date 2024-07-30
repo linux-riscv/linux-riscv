@@ -445,7 +445,7 @@ void pmd_install(struct mm_struct *mm, pmd_t *pmd, pgtable_t *pte)
 
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
-	struct ptdesc *ptdesc = page_ptdesc(pte_alloc_one(mm));
+	struct ptdesc *ptdesc = pte_alloc_one(mm);
 	if (!ptdesc)
 		return -ENOMEM;
 
@@ -4647,7 +4647,7 @@ static vm_fault_t __do_fault(struct vm_fault *vmf)
 	 *				# flush A, B to clear the writeback
 	 */
 	if (pmd_none(*vmf->pmd) && !vmf->prealloc_pte) {
-		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm);
+		vmf->prealloc_pte = ptdesc_page(pte_alloc_one(vma->vm_mm));
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}
@@ -4725,7 +4725,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
 	 * related to pte entry. Use the preallocated table for that.
 	 */
 	if (arch_needs_pgtable_deposit() && !vmf->prealloc_pte) {
-		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm);
+		vmf->prealloc_pte = ptdesc_page(pte_alloc_one(vma->vm_mm));
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}
@@ -5010,7 +5010,7 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 		      pte_off + vma_pages(vmf->vma) - vma_off) - 1;
 
 	if (pmd_none(*vmf->pmd)) {
-		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm);
+		vmf->prealloc_pte = ptdesc_page(pte_alloc_one(vmf->vma->vm_mm));
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}

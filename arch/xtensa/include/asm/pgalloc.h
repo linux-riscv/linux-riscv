@@ -51,15 +51,15 @@ static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
 	return ptep;
 }
 
-static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
+static inline struct ptdesc *pte_alloc_one(struct mm_struct *mm)
 {
-	struct page *page;
+	struct ptdesc *ptdesc;
 
-	page = __pte_alloc_one(mm, GFP_PGTABLE_USER);
-	if (!page)
+	ptdesc = __pte_alloc_one(mm, GFP_PGTABLE_USER);
+	if (!ptdesc)
 		return NULL;
-	ptes_clear(page_address(page));
-	return page;
+	ptes_clear(ptdesc_address(ptdesc));
+	return ptdesc;
 }
 
 #endif /* CONFIG_MMU */
