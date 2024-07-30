@@ -1141,7 +1141,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 
 static void insert_pfn_pmd(struct vm_area_struct *vma, unsigned long addr,
 		pmd_t *pmd, pfn_t pfn, pgprot_t prot, bool write,
-		pgtable_t pgtable)
+		struct ptdesc *ptdesc)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pmd_t entry;
@@ -1171,10 +1171,10 @@ static void insert_pfn_pmd(struct vm_area_struct *vma, unsigned long addr,
 		entry = maybe_pmd_mkwrite(entry, vma);
 	}
 
-	if (pgtable) {
-		pgtable_trans_huge_deposit(mm, pmd, pgtable);
+	if (ptdesc) {
+		pgtable_trans_huge_deposit(mm, pmd, ptdesc_page(ptdesc));
 		mm_inc_nr_ptes(mm);
-		pgtable = NULL;
+		ptdesc = NULL;
 	}
 
 	set_pmd_at(mm, addr, pmd, entry);
@@ -1182,8 +1182,8 @@ static void insert_pfn_pmd(struct vm_area_struct *vma, unsigned long addr,
 
 out_unlock:
 	spin_unlock(ptl);
-	if (pgtable)
-		pte_free(mm, pgtable);
+	if (ptdesc)
+		pte_free(mm, ptdesc_page(ptdesc));
 }
 
 /**
@@ -1201,7 +1201,7 @@ vm_fault_t vmf_insert_pfn_pmd(struct vm_fault *vmf, pfn_t pfn, bool write)
 	unsigned long addr = vmf->address & PMD_MASK;
 	struct vm_area_struct *vma = vmf->vma;
 	pgprot_t pgprot = vma->vm_page_prot;
-	pgtable_t pgtable = NULL;
+	struct ptdesc *ptdesc = NULL;
 
 	/*
 	 * If we had pmd_special, we could avoid all these restrictions,
@@ -1218,14 +1218,14 @@ vm_fault_t vmf_insert_pfn_pmd(struct vm_fault *vmf, pfn_t pfn, bool write)
 		return VM_FAULT_SIGBUS;
 
 	if (arch_needs_pgtable_deposit()) {
-		pgtable = pte_alloc_one(vma->vm_mm);
-		if (!pgtable)
+		ptdesc = page_ptdesc(pte_alloc_one(vma->vm_mm));
+		if (!ptdesc)
 			return VM_FAULT_OOM;
 	}
 
 	track_pfn_insert(vma, &pgprot, pfn);
 
-	insert_pfn_pmd(vma, addr, vmf->pmd, pfn, pgprot, write, pgtable);
+	insert_pfn_pmd(vma, addr, vmf->pmd, pfn, pgprot, write, ptdesc);
 	return VM_FAULT_NOPAGE;
 }
 EXPORT_SYMBOL_GPL(vmf_insert_pfn_pmd);
