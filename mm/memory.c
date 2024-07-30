@@ -445,13 +445,13 @@ void pmd_install(struct mm_struct *mm, pmd_t *pmd, pgtable_t *pte)
 
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
-	pgtable_t new = pte_alloc_one(mm);
-	if (!new)
+	struct ptdesc *ptdesc = page_ptdesc(pte_alloc_one(mm));
+	if (!ptdesc)
 		return -ENOMEM;
 
-	pmd_install(mm, pmd, &new);
-	if (new)
-		pte_free(mm, new);
+	pmd_install(mm, pmd, (pgtable_t *)&ptdesc);
+	if (ptdesc)
+		pte_free(mm, ptdesc_page(ptdesc));
 	return 0;
 }
 
