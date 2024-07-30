@@ -1049,7 +1049,7 @@ static void __init destroy_args(struct pgtable_debug_args *args)
 
 	/* Free page table entries */
 	if (args->start_ptep) {
-		pte_free(args->mm, args->start_ptep);
+		pte_free(args->mm, page_ptdesc(args->start_ptep));
 		mm_dec_nr_ptes(args->mm);
 	}
 

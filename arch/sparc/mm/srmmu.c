@@ -365,7 +365,7 @@ struct ptdesc *pte_alloc_one(struct mm_struct *mm)
 	return (struct ptdesc *)ptep;
 }
 
-void pte_free(struct mm_struct *mm, pgtable_t ptep)
+void pte_free(struct mm_struct *mm, struct ptdesc *ptep)
 {
 	struct page *page;
 

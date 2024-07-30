@@ -992,7 +992,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		if (userfaultfd_missing(vma)) {
 			spin_unlock(vmf->ptl);
 			folio_put(folio);
-			pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+			pte_free(vma->vm_mm, ptdesc);
 			ret = handle_userfault(vmf, VM_UFFD_MISSING);
 			VM_BUG_ON(ret & VM_FAULT_FALLBACK);
 			return ret;
@@ -1018,7 +1018,7 @@ unlock_release:
 	spin_unlock(vmf->ptl);
 release:
 	if (ptdesc)
-		pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+		pte_free(vma->vm_mm, ptdesc);
 	folio_put(folio);
 	return ret;
 
@@ -1101,7 +1101,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 			return VM_FAULT_OOM;
 		zero_folio = mm_get_huge_zero_folio(vma->vm_mm);
 		if (unlikely(!zero_folio)) {
-			pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+			pte_free(vma->vm_mm, ptdesc);
 			count_vm_event(THP_FAULT_FALLBACK);
 			return VM_FAULT_FALLBACK;
 		}
@@ -1111,10 +1111,10 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 			ret = check_stable_address_space(vma->vm_mm);
 			if (ret) {
 				spin_unlock(vmf->ptl);
-				pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+				pte_free(vma->vm_mm, ptdesc);
 			} else if (userfaultfd_missing(vma)) {
 				spin_unlock(vmf->ptl);
-				pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+				pte_free(vma->vm_mm, ptdesc);
 				ret = handle_userfault(vmf, VM_UFFD_MISSING);
 				VM_BUG_ON(ret & VM_FAULT_FALLBACK);
 			} else {
@@ -1125,7 +1125,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 			}
 		} else {
 			spin_unlock(vmf->ptl);
-			pte_free(vma->vm_mm, ptdesc_page(ptdesc));
+			pte_free(vma->vm_mm, ptdesc);
 		}
 		return ret;
 	}
@@ -1183,7 +1183,7 @@ static void insert_pfn_pmd(struct vm_area_struct *vma, unsigned long addr,
 out_unlock:
 	spin_unlock(ptl);
 	if (ptdesc)
-		pte_free(mm, ptdesc_page(ptdesc));
+		pte_free(mm, ptdesc);
 }
 
 /**
@@ -1419,7 +1419,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 #endif
 
 	if (unlikely(!pmd_trans_huge(pmd))) {
-		pte_free(dst_mm, ptdesc_page(ptdesc));
+		pte_free(dst_mm, ptdesc);
 		goto out_unlock;
 	}
 	/*
@@ -1445,7 +1445,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	if (unlikely(folio_try_dup_anon_rmap_pmd(src_folio, src_page, src_vma))) {
 		/* Page maybe pinned: split and retry the fault on PTEs. */
 		folio_put(src_folio);
-		pte_free(dst_mm, ptdesc_page(ptdesc));
+		pte_free(dst_mm, ptdesc);
 		spin_unlock(src_ptl);
 		spin_unlock(dst_ptl);
 		__split_huge_pmd(src_vma, src_pmd, addr, false, NULL);
@@ -1835,7 +1835,7 @@ static inline void zap_deposited_table(struct mm_struct *mm, pmd_t *pmd)
 	pgtable_t pgtable;
 
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
-	pte_free(mm, pgtable);
+	pte_free(mm, page_ptdesc(pgtable));
 	mm_dec_nr_ptes(mm);
 }
 

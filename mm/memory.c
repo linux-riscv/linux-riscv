@@ -451,7 +451,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 
 	pmd_install(mm, pmd, (pgtable_t *)&ptdesc);
 	if (ptdesc)
-		pte_free(mm, ptdesc_page(ptdesc));
+		pte_free(mm, ptdesc);
 	return 0;
 }
 
@@ -5196,7 +5196,7 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
 
 	/* preallocated pagetable is unused: free it */
 	if (vmf->prealloc_pte) {
-		pte_free(vm_mm, vmf->prealloc_pte);
+		pte_free(vm_mm, page_ptdesc(vmf->prealloc_pte));
 		vmf->prealloc_pte = NULL;
 	}
 	return ret;

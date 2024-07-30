@@ -105,10 +105,8 @@ static inline struct ptdesc *pte_alloc_one_noprof(struct mm_struct *mm)
  * @mm: the mm_struct of the current context
  * @pte_page: the `struct page` referencing the ptdesc
  */
-static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
+static inline void pte_free(struct mm_struct *mm, struct ptdesc *ptdesc)
 {
-	struct ptdesc *ptdesc = page_ptdesc(pte_page);
-
 	pagetable_pte_dtor(ptdesc);
 	pagetable_free(ptdesc);
 }

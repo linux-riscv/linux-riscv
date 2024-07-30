@@ -162,7 +162,7 @@ static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmd,
 }
 
 static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,
-				pgtable_t pte_page)
+				struct ptdesc *pte_page)
 {
 	*pmd = __pmd(__pgtable_ptr_val(pte_page) | PMD_VAL_BITS);
 }

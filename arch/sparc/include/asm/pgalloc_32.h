@@ -71,7 +71,7 @@ static inline void free_pte_fast(pte_t *pte)
 
 #define pte_free_kernel(mm, pte)	free_pte_fast(pte)
 
-void pte_free(struct mm_struct * mm, pgtable_t pte);
+void pte_free(struct mm_struct *mm, struct ptdesc *pte);
 #define __pte_free_tlb(tlb, pte, addr)	pte_free((tlb)->mm, pte)
 
 #endif /* _SPARC_PGALLOC_H */

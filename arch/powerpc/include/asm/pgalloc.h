@@ -40,7 +40,7 @@ static inline void pte_free_kernel(struct mm_struct *mm, pte_t *pte)
 	pte_fragment_free((unsigned long *)pte, 1);
 }
 
-static inline void pte_free(struct mm_struct *mm, pgtable_t ptepage)
+static inline void pte_free(struct mm_struct *mm, struct ptdesc *ptepage)
 {
 	pte_fragment_free((unsigned long *)ptepage, 0);
 }
