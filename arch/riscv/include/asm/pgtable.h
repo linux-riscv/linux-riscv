@@ -300,6 +300,8 @@ static inline unsigned long pte_napot(pte_t pte)
 	return pte_val(pte) & _PAGE_NAPOT;
 }
 
+#define pte_cont		pte_napot
+
 #define pte_valid_napot(pte)	(pte_present(pte) && pte_napot(pte))
 
 static inline pte_t pte_mknapot(pte_t pte, unsigned int order)
@@ -581,6 +583,38 @@ static inline void __set_ptes(struct mm_struct *mm, unsigned long addr,
 	}
 }
 
+#ifdef CONFIG_RISCV_ISA_SVNAPOT
+static inline int arch_contpte_get_num_contig(pte_t *ptep, unsigned long size,
+					      size_t *pgsize)
+{
+	unsigned long hugepage_shift;
+	pte_t __pte;
+
+	if (size >= PGDIR_SIZE)
+		hugepage_shift = PGDIR_SHIFT;
+	else if (size >= P4D_SIZE)
+		hugepage_shift = P4D_SHIFT;
+	else if (size >= PUD_SIZE)
+		hugepage_shift = PUD_SHIFT;
+	else if (size >= PMD_SIZE)
+		hugepage_shift = PMD_SHIFT;
+	else
+		hugepage_shift = PAGE_SHIFT;
+
+	if (pgsize)
+		*pgsize = BIT(hugepage_shift);
+
+	/* We must read the raw value of the pte to get the size of the mapping */
+	__pte = __ptep_get(ptep);
+
+	/* Make sure __pte is not a swap entry */
+	if (pte_valid_napot(__pte))
+		return napot_pte_num(napot_cont_order(__pte));
+
+	return size >> hugepage_shift;
+}
+#endif
+
 static inline void pte_clear(struct mm_struct *mm,
 	unsigned long addr, pte_t *ptep)
 {
@@ -665,6 +699,8 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 	__set_ptes(mm, addr, ptep, pteval, nr);
 }
 #define set_ptes			set_ptes
+#define set_contptes(mm, addr, ptep, pte, nr, pgsize)			\
+			set_ptes(mm, addr, ptep, pte, nr)
 
 static inline pte_t ptep_get(pte_t *ptep)
 {
