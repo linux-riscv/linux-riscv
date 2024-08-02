@@ -67,7 +67,7 @@
 				};
 
 				soc_hot: soc-hot {
-					temperature = <85000>;
+					temperature = <80000>;
 					hysteresis = <5000>;
 					type = "hot";
 				};
