@@ -34,6 +34,7 @@ struct aplic_priv {
 
 void aplic_irq_unmask(struct irq_data *d);
 void aplic_irq_mask(struct irq_data *d);
+void aplic_retrigger_asserting_irq(struct irq_data *d);
 int aplic_irq_set_type(struct irq_data *d, unsigned int type);
 int aplic_irqdomain_translate(struct irq_fwspec *fwspec, u32 gsi_base,
 			      unsigned long *hwirq, unsigned int *type);

@@ -32,14 +32,9 @@ static void aplic_msi_irq_unmask(struct irq_data *d)
 	aplic_irq_unmask(d);
 }
 
-static void aplic_msi_irq_eoi(struct irq_data *d)
+void aplic_retrigger_asserting_irq(struct irq_data *d)
 {
 	struct aplic_priv *priv = irq_data_get_irq_chip_data(d);
-
-	/*
-	 * EOI handling is required only for level-triggered interrupts
-	 * when APLIC is in MSI mode.
-	 */
 
 	switch (irqd_get_trigger_type(d)) {
 	case IRQ_TYPE_LEVEL_LOW:
@@ -57,6 +52,16 @@ static void aplic_msi_irq_eoi(struct irq_data *d)
 		writel(d->hwirq, priv->regs + APLIC_SETIPNUM_LE);
 		break;
 	}
+}
+
+static void aplic_msi_irq_eoi(struct irq_data *d)
+{
+	/*
+	 * EOI handling is required only for level-triggered interrupts
+	 * when APLIC is in MSI mode.
+	 */
+
+	aplic_retrigger_asserting_irq(d);
 }
 
 static void aplic_msi_write_msg(struct irq_data *d, struct msi_msg *msg)

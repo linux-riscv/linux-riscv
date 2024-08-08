@@ -58,6 +58,10 @@ int aplic_irq_set_type(struct irq_data *d, unsigned int type)
 	sourcecfg += (d->hwirq - 1) * sizeof(u32);
 	writel(val, sourcecfg);
 
+	/* manually set pending for the asserting interrupts */
+	if (!priv->nr_idcs)
+		aplic_retrigger_asserting_irq(d);
+
 	return 0;
 }
 
