@@ -27,7 +27,7 @@ const size_t riscv_isa_vendor_ext_list_size = ARRAY_SIZE(riscv_isa_vendor_ext_li
  * @bit: bit position of the desired extension
  * Return: true or false
  *
- * NOTE: When cpu is -1, will check if extension is available on all cpus
+ * NOTE: When cpu is VENDOR_EXT_ALL_CPUS, will check if extension is available on all cpus
  */
 bool __riscv_isa_vendor_extension_available(int cpu, unsigned long vendor, unsigned int bit)
 {
@@ -38,14 +38,15 @@ bool __riscv_isa_vendor_extension_available(int cpu, unsigned long vendor, unsig
 	#ifdef CONFIG_RISCV_ISA_VENDOR_EXT_ANDES
 	case ANDES_VENDOR_ID:
 		bmap = &riscv_isa_vendor_ext_list_andes.all_harts_isa_bitmap;
-		cpu_bmap = &riscv_isa_vendor_ext_list_andes.per_hart_isa_bitmap[cpu];
+		if (cpu != VENDOR_EXT_ALL_CPUS)
+			cpu_bmap = &riscv_isa_vendor_ext_list_andes.per_hart_isa_bitmap[cpu];
 		break;
 	#endif
 	default:
 		return false;
 	}
 
-	if (cpu != -1)
+	if (cpu != VENDOR_EXT_ALL_CPUS)
 		bmap = &cpu_bmap[cpu];
 
 	if (bit >= RISCV_ISA_VENDOR_EXT_MAX)
