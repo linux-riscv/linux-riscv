@@ -76,11 +76,24 @@ extern struct task_struct *__switch_to(struct task_struct *,
 static inline bool switch_to_should_flush_icache(struct task_struct *task)
 {
 #ifdef CONFIG_SMP
-	bool stale_mm = task->mm && task->mm->context.force_icache_flush;
-	bool stale_thread = task->thread.force_icache_flush;
+	bool stale_mm = false;
 	bool thread_migrated = smp_processor_id() != task->thread.prev_cpu;
+	bool stale_thread = thread_migrated && task->thread.force_icache_flush;
 
-	return thread_migrated && (stale_mm || stale_thread);
+	if (task->mm) {
+		/*
+		 * The mm is only stale if the respective CPU bit in
+		 * icache_stale_mask is set. force_icache_flush indicates that
+		 * icache_stale_mask should be set again before returning to userspace.
+		 */
+		stale_mm = cpumask_test_cpu(smp_processor_id(),
+					    &task->mm->context.icache_stale_mask);
+		cpumask_assign_cpu(smp_processor_id(),
+				   &task->mm->context.icache_stale_mask,
+				   task->mm->context.force_icache_flush);
+	}
+
+	return stale_mm || stale_thread;
 #else
 	return false;
 #endif

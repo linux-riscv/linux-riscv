@@ -230,6 +230,7 @@ int riscv_set_icache_flush_ctx(unsigned long ctx, unsigned long scope)
 		switch (scope) {
 		case PR_RISCV_SCOPE_PER_PROCESS:
 			current->mm->context.force_icache_flush = true;
+			cpumask_setall(&current->mm->context.icache_stale_mask);
 			break;
 		case PR_RISCV_SCOPE_PER_THREAD:
 			current->thread.force_icache_flush = true;

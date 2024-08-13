@@ -306,11 +306,7 @@ static inline void flush_icache_deferred(struct mm_struct *mm, unsigned int cpu,
 		 */
 		smp_mb();
 
-		/*
-		 * If cache will be flushed in switch_to, no need to flush here.
-		 */
-		if (!(task && switch_to_should_flush_icache(task)))
-			local_flush_icache_all();
+		local_flush_icache_all();
 	}
 #endif
 }
