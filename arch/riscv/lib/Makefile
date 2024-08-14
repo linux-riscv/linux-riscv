@@ -18,3 +18,5 @@ lib-$(CONFIG_RISCV_ISA_ZBC)	+= crc32.o
 obj-$(CONFIG_FUNCTION_ERROR_INJECTION) += error-inject.o
 lib-$(CONFIG_RISCV_ISA_V)	+= xor.o
 lib-$(CONFIG_RISCV_ISA_V)	+= riscv_v_helpers.o
+
+obj-$(CONFIG_KASAN_SW_TAGS) += kasan_sw_tags.o

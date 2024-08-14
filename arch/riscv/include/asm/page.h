@@ -89,6 +89,16 @@ typedef struct page *pgtable_t;
 #define PTE_FMT "%08lx"
 #endif
 
+#ifdef CONFIG_KASAN_SW_TAGS
+#define __tag_set(addr, tag)	((void *)((((u64)(addr) << 7) >> 7) | ((u64)(tag) << 57)))
+#define __tag_reset(addr)	((void *)((s64)((u64)(addr) << 7) >> 7))
+#define __tag_get(addr)		((u8)((u64)(addr) >> 57))
+#else
+#define __tag_set(addr, tag)	(addr)
+#define __tag_reset(addr)	(addr)
+#define __tag_get(addr)		0
+#endif
+
 #if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
 /*
  * We override this value as its generic definition uses __pa too early in
@@ -155,7 +165,7 @@ phys_addr_t linear_mapping_va_to_pa(unsigned long x);
 	})
 
 #define __va_to_pa_nodebug(x)	({						\
-	unsigned long _x = x;							\
+	unsigned long _x = (unsigned long)__tag_reset(x);			\
 	is_linear_mapping(_x) ?							\
 		linear_mapping_va_to_pa(_x) : kernel_mapping_va_to_pa(_x);	\
 	})
@@ -179,7 +189,10 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
 #define pfn_to_virt(pfn)	(__va(pfn_to_phys(pfn)))
 
 #define virt_to_page(vaddr)	(pfn_to_page(virt_to_pfn(vaddr)))
-#define page_to_virt(page)	(pfn_to_virt(page_to_pfn(page)))
+#define page_to_virt(page)	({						\
+	__typeof__(page) __page = page;						\
+	__tag_set(pfn_to_virt(page_to_pfn(__page)), page_kasan_tag(__page));	\
+})
 
 #define page_to_phys(page)	(pfn_to_phys(page_to_pfn(page)))
 #define phys_to_page(paddr)	(pfn_to_page(phys_to_pfn(paddr)))
@@ -196,7 +209,7 @@ static __always_inline void *pfn_to_kaddr(unsigned long pfn)
 #endif /* __ASSEMBLY__ */
 
 #define virt_addr_valid(vaddr)	({						\
-	unsigned long _addr = (unsigned long)vaddr;				\
+	unsigned long _addr = (unsigned long)__tag_reset(vaddr);		\
 	(unsigned long)(_addr) >= PAGE_OFFSET && pfn_valid(virt_to_pfn(_addr));	\
 })
 

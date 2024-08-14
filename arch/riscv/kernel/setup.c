@@ -299,6 +299,12 @@ void __init setup_arch(char **cmdline_p)
 	riscv_user_isa_enable();
 }
 
+void __init smp_prepare_boot_cpu(void)
+{
+	if (kasan_boot_cpu_enabled())
+		kasan_init_sw_tags();
+}
+
 bool arch_cpu_is_hotpluggable(int cpu)
 {
 	return cpu_has_hotplug(cpu);

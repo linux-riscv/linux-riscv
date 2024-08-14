@@ -29,6 +29,7 @@
 #include <asm/cacheflush.h>
 #include <asm/cpu_ops.h>
 #include <asm/irq.h>
+#include <asm/kasan.h>
 #include <asm/mmu_context.h>
 #include <asm/numa.h>
 #include <asm/tlbflush.h>
@@ -210,7 +211,11 @@ void __init smp_cpus_done(unsigned int max_cpus)
 asmlinkage __visible void smp_callin(void)
 {
 	struct mm_struct *mm = &init_mm;
-	unsigned int curr_cpuid = smp_processor_id();
+	unsigned int curr_cpuid;
+
+	/* Must be called first, before referencing any dynamic allocations */
+	if (kasan_boot_cpu_enabled() && kasan_cpu_enable())
+		return;
 
 	if (has_vector()) {
 		/*
@@ -225,6 +230,7 @@ asmlinkage __visible void smp_callin(void)
 	mmgrab(mm);
 	current->active_mm = mm;
 
+	curr_cpuid = smp_processor_id();
 	store_cpu_topology(curr_cpuid);
 	notify_cpu_starting(curr_cpuid);
 

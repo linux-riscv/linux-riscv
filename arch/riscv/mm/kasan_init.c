@@ -11,6 +11,10 @@
 #include <asm/fixmap.h>
 #include <asm/pgalloc.h>
 
+#ifdef CONFIG_KASAN_SW_TAGS
+static bool __kasan_boot_cpu_enabled __ro_after_init;
+#endif
+
 /*
  * Kasan shadow region must lie at a fixed address across sv39, sv48 and sv57
  * which is right before the kernel.
@@ -323,8 +327,11 @@ asmlinkage void __init kasan_early_init(void)
 {
 	uintptr_t i;
 
-	BUILD_BUG_ON(KASAN_SHADOW_OFFSET !=
-		KASAN_SHADOW_END - (1UL << (64 - KASAN_SHADOW_SCALE_SHIFT)));
+	if (IS_ENABLED(CONFIG_KASAN_GENERIC))
+		BUILD_BUG_ON(KASAN_SHADOW_OFFSET !=
+			KASAN_SHADOW_END - (1UL << (64 - KASAN_SHADOW_SCALE_SHIFT)));
+	else
+		BUILD_BUG_ON(KASAN_SHADOW_OFFSET != KASAN_SHADOW_END);
 
 	for (i = 0; i < PTRS_PER_PTE; ++i)
 		set_pte(kasan_early_shadow_pte + i,
@@ -356,6 +363,8 @@ asmlinkage void __init kasan_early_init(void)
 				 KASAN_SHADOW_START, KASAN_SHADOW_END);
 
 	local_flush_tlb_all();
+
+	__kasan_boot_cpu_enabled = !kasan_cpu_enable();
 }
 
 void __init kasan_swapper_init(void)
@@ -534,3 +543,20 @@ void __init kasan_init(void)
 	csr_write(CSR_SATP, PFN_DOWN(__pa(swapper_pg_dir)) | satp_mode);
 	local_flush_tlb_all();
 }
+
+#ifdef CONFIG_KASAN_SW_TAGS
+bool kasan_boot_cpu_enabled(void)
+{
+	return __kasan_boot_cpu_enabled;
+}
+
+int kasan_cpu_enable(void)
+{
+	struct sbiret ret;
+
+	/* sbi_fwft_set(POINTER_MASKING_PMLEN, 7, 0); */
+	ret = sbi_ecall(0x46574654, 0, 5, 7, 0, 0, 0, 0);
+
+	return sbi_err_map_linux_errno(ret.error);
+}
+#endif

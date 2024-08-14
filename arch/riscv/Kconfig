@@ -118,6 +118,7 @@ config RISCV
 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL
 	select HAVE_ARCH_JUMP_LABEL_RELATIVE if !XIP_KERNEL
 	select HAVE_ARCH_KASAN if MMU && 64BIT
+	select HAVE_ARCH_KASAN_SW_TAGS if MMU && 64BIT
 	select HAVE_ARCH_KASAN_VMALLOC if MMU && 64BIT
 	select HAVE_ARCH_KFENCE if MMU && 64BIT
 	select HAVE_ARCH_KGDB if !XIP_KERNEL
@@ -278,7 +279,8 @@ config PAGE_OFFSET
 
 config KASAN_SHADOW_OFFSET
 	hex
-	depends on KASAN_GENERIC
+	depends on KASAN
+	default 0xffffffff00000000 if KASAN_SW_TAGS
 	default 0xdfffffff00000000 if 64BIT
 	default 0xffffffff if 32BIT
 

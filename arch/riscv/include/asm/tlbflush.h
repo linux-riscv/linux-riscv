@@ -31,14 +31,14 @@ static inline void local_flush_tlb_all_asid(unsigned long asid)
 /* Flush one page from local TLB */
 static inline void local_flush_tlb_page(unsigned long addr)
 {
-	ALT_SFENCE_VMA_ADDR(addr);
+	ALT_SFENCE_VMA_ADDR(__tag_reset(addr));
 }
 
 static inline void local_flush_tlb_page_asid(unsigned long addr,
 					     unsigned long asid)
 {
 	if (asid != FLUSH_TLB_NO_ASID)
-		ALT_SFENCE_VMA_ADDR_ASID(addr, asid);
+		ALT_SFENCE_VMA_ADDR_ASID(__tag_reset(addr), asid);
 	else
 		local_flush_tlb_page(addr);
 }

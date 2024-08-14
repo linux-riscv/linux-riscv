@@ -8,6 +8,8 @@
 
 phys_addr_t __virt_to_phys(unsigned long x)
 {
+	x = __tag_reset(x);
+
 	/*
 	 * Boundary checking aginst the kernel linear mapping space.
 	 */
@@ -23,6 +25,8 @@ phys_addr_t __phys_addr_symbol(unsigned long x)
 {
 	unsigned long kernel_start = kernel_map.virt_addr;
 	unsigned long kernel_end = kernel_start + kernel_map.size;
+
+	x = __tag_reset(x);
 
 	/*
 	 * Boundary checking aginst the kernel image mapping.
