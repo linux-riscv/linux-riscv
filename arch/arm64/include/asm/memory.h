@@ -82,6 +82,10 @@
  * the mapping. Note that KASAN_SHADOW_OFFSET does not point to the start of
  * the shadow memory region.
  *
+ * For KASAN_GENERIC, addr is treated as unsigned. For KASAN_SW_TAGS, addr is
+ * treated as signed, so in that case KASAN_SHADOW_OFFSET points to the end of
+ * the shadow memory region.
+ *
  * Based on this mapping, we define two constants:
  *
  *     KASAN_SHADOW_START: the start of the shadow memory region;
@@ -100,7 +104,11 @@
  */
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
 #define KASAN_SHADOW_OFFSET	_AC(CONFIG_KASAN_SHADOW_OFFSET, UL)
+#ifdef CONFIG_KASAN_GENERIC
 #define KASAN_SHADOW_END	((UL(1) << (64 - KASAN_SHADOW_SCALE_SHIFT)) + KASAN_SHADOW_OFFSET)
+#else
+#define KASAN_SHADOW_END	KASAN_SHADOW_OFFSET
+#endif
 #define _KASAN_SHADOW_START(va)	(KASAN_SHADOW_END - (UL(1) << ((va) - KASAN_SHADOW_SCALE_SHIFT)))
 #define KASAN_SHADOW_START	_KASAN_SHADOW_START(vabits_actual)
 #define PAGE_END		KASAN_SHADOW_START
