@@ -39,7 +39,6 @@ config RISCV
 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
 	select ARCH_HAS_PMEM_API
 	select ARCH_HAS_PREPARE_SYNC_CORE_CMD
-	select ARCH_HAS_PTE_DEVMAP if 64BIT && MMU
 	select ARCH_HAS_PTE_SPECIAL
 	select ARCH_HAS_SET_DIRECT_MAP if MMU
 	select ARCH_HAS_SET_MEMORY if MMU
@@ -947,6 +946,32 @@ config RANDOMIZE_BASE
           location of the kernel Image as well.
 
           If unsure, say N.
+
+choice
+	prompt "PET RSW Bit(9) used for"
+	default RISCV_HAS_PTE_DEVMEP
+	depends on MMU && 64BIT
+	help
+	  RISC-V PTE bit(9) is reserved for software, and used by more than
+	  one kernel features which cannot be supported at the same time.
+	  So we have to select one for it.
+
+config RISCV_HAS_PTE_DEVMEP
+	bool "DEVMAP mark"
+	select ARCH_HAS_PTE_DEVMAP
+	help
+	  The PTE bit(9) is used for DEVMAP mark. ZONE_DEVICE pages need DEVMAP
+	  PTEs support to function.
+
+	  So if you want to use ZONE_DEVICE, select this.
+
+config RISCV_HAS_SOFT_DIRTY
+	bool "soft dirty"
+	select HAVE_ARCH_SOFT_DIRTY
+	help
+	  The PTE bit(9) is used for soft-dirty tracking.
+
+endchoice
 
 endmenu # "Kernel features"
 
