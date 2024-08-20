@@ -511,8 +511,8 @@ static int plic_probe(struct platform_device *pdev)
 	priv->nr_irqs = nr_irqs;
 
 	priv->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (WARN_ON(!priv->regs))
-		return -EIO;
+	if (WARN_ON(IS_ERR(priv->regs)))
+		return PTR_ERR(priv->regs);
 
 	priv->prio_save = devm_bitmap_zalloc(dev, nr_irqs, GFP_KERNEL);
 	if (!priv->prio_save)
