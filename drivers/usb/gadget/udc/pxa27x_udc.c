@@ -2398,13 +2398,9 @@ static int pxa_udc_probe(struct platform_device *pdev)
 	if (udc->gpiod)
 		gpiod_direction_output(udc->gpiod, 0);
 
-	udc->clk = devm_clk_get(&pdev->dev, NULL);
+	udc->clk = clk_prepare_enable(&pdev->dev, NULL);
 	if (IS_ERR(udc->clk))
 		return PTR_ERR(udc->clk);
-
-	retval = clk_prepare(udc->clk);
-	if (retval)
-		return retval;
 
 	udc->vbus_sensed = 0;
 
