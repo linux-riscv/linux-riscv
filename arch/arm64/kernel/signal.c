@@ -66,6 +66,7 @@ struct rt_sigframe_user_layout {
 
 	unsigned long fpsimd_offset;
 	unsigned long esr_offset;
+	unsigned long gcs_offset;
 	unsigned long sve_offset;
 	unsigned long tpidr2_offset;
 	unsigned long za_offset;
@@ -195,6 +196,8 @@ struct user_ctxs {
 	u32 zt_size;
 	struct fpmr_context __user *fpmr;
 	u32 fpmr_size;
+	struct gcs_context __user *gcs;
+	u32 gcs_size;
 };
 
 static int preserve_fpsimd_context(struct fpsimd_context __user *ctx)
@@ -614,6 +617,81 @@ extern int restore_zt_context(struct user_ctxs *user);
 
 #endif /* ! CONFIG_ARM64_SME */
 
+#ifdef CONFIG_ARM64_GCS
+
+static int preserve_gcs_context(struct gcs_context __user *ctx)
+{
+	int err = 0;
+	u64 gcspr;
+
+	/*
+	 * We will add a cap token to the frame, include it in the
+	 * GCSPR_EL0 we report to support stack switching via
+	 * sigreturn.
+	 */
+	gcs_preserve_current_state();
+	gcspr = current->thread.gcspr_el0 - 8;
+
+	__put_user_error(GCS_MAGIC, &ctx->head.magic, err);
+	__put_user_error(sizeof(*ctx), &ctx->head.size, err);
+	__put_user_error(gcspr, &ctx->gcspr, err);
+	__put_user_error(0, &ctx->reserved, err);
+	__put_user_error(current->thread.gcs_el0_mode,
+			 &ctx->features_enabled, err);
+
+	return err;
+}
+
+static int restore_gcs_context(struct user_ctxs *user)
+{
+	u64 gcspr, enabled;
+	int err = 0;
+
+	if (user->gcs_size != sizeof(*user->gcs))
+		return -EINVAL;
+
+	__get_user_error(gcspr, &user->gcs->gcspr, err);
+	__get_user_error(enabled, &user->gcs->features_enabled, err);
+	if (err)
+		return err;
+
+	/* Don't allow unknown modes */
+	if (enabled & ~PR_SHADOW_STACK_SUPPORTED_STATUS_MASK)
+		return -EINVAL;
+
+	err = gcs_check_locked(current, enabled);
+	if (err != 0)
+		return err;
+
+	/* Don't allow enabling */
+	if (!task_gcs_el0_enabled(current) &&
+	    (enabled & PR_SHADOW_STACK_ENABLE))
+		return -EINVAL;
+
+	/* If we are disabling disable everything */
+	if (!(enabled & PR_SHADOW_STACK_ENABLE))
+		enabled = 0;
+
+	current->thread.gcs_el0_mode = enabled;
+
+	/*
+	 * We let userspace set GCSPR_EL0 to anything here, we will
+	 * validate later in gcs_restore_signal().
+	 */
+	current->thread.gcspr_el0 = gcspr;
+	write_sysreg_s(current->thread.gcspr_el0, SYS_GCSPR_EL0);
+
+	return 0;
+}
+
+#else /* ! CONFIG_ARM64_GCS */
+
+/* Turn any non-optimised out attempts to use these into a link error: */
+extern int preserve_gcs_context(void __user *ctx);
+extern int restore_gcs_context(struct user_ctxs *user);
+
+#endif /* ! CONFIG_ARM64_GCS */
+
 static int parse_user_sigframe(struct user_ctxs *user,
 			       struct rt_sigframe __user *sf)
 {
@@ -631,6 +709,7 @@ static int parse_user_sigframe(struct user_ctxs *user,
 	user->za = NULL;
 	user->zt = NULL;
 	user->fpmr = NULL;
+	user->gcs = NULL;
 
 	if (!IS_ALIGNED((unsigned long)base, 16))
 		goto invalid;
@@ -734,6 +813,17 @@ static int parse_user_sigframe(struct user_ctxs *user,
 
 			user->fpmr = (struct fpmr_context __user *)head;
 			user->fpmr_size = size;
+			break;
+
+		case GCS_MAGIC:
+			if (!system_supports_gcs())
+				goto invalid;
+
+			if (user->gcs)
+				goto invalid;
+
+			user->gcs = (struct gcs_context __user *)head;
+			user->gcs_size = size;
 			break;
 
 		case EXTRA_MAGIC:
@@ -855,6 +945,9 @@ static int restore_sigframe(struct pt_regs *regs,
 			err = restore_fpsimd_context(&user);
 	}
 
+	if (err == 0 && system_supports_gcs() && user.gcs)
+		err = restore_gcs_context(&user);
+
 	if (err == 0 && system_supports_tpidr2() && user.tpidr2)
 		err = restore_tpidr2_context(&user);
 
@@ -873,7 +966,8 @@ static int restore_sigframe(struct pt_regs *regs,
 #ifdef CONFIG_ARM64_GCS
 static int gcs_restore_signal(void)
 {
-	u64 gcspr_el0, cap;
+	unsigned long __user *gcspr_el0;
+	u64 cap;
 	int ret;
 
 	if (!system_supports_gcs())
@@ -882,21 +976,29 @@ static int gcs_restore_signal(void)
 	if (!(current->thread.gcs_el0_mode & PR_SHADOW_STACK_ENABLE))
 		return 0;
 
-	gcspr_el0 = read_sysreg_s(SYS_GCSPR_EL0);
+	gcspr_el0 = (unsigned long __user *)read_sysreg_s(SYS_GCSPR_EL0);
 
 	/*
-	 * GCSPR_EL0 should be pointing at a capped GCS, read the cap...
+	 * Ensure that any changes to the GCS done via GCS operations
+	 * are visible to the normal reads we do to validate the
+	 * token.
 	 */
 	gcsb_dsync();
-	ret = copy_from_user(&cap, (__user void*)gcspr_el0, sizeof(cap));
+
+	/*
+	 * GCSPR_EL0 should be pointing at a capped GCS, read the cap.
+	 * We don't enforce that this is in a GCS page, if it is not
+	 * then faults will be generated on GCS operations - the main
+	 * concern is to protect GCS pages.
+	 */
+	ret = copy_from_user(&cap, gcspr_el0, sizeof(cap));
 	if (ret)
 		return -EFAULT;
 
 	/*
-	 * ...then check that the cap is the actual GCS before
-	 * restoring it.
+	 * Check that the cap is the actual GCS before replacing it.
 	 */
-	if (!gcs_signal_cap_valid(gcspr_el0, cap))
+	if (!gcs_signal_cap_valid((u64)gcspr_el0, cap))
 		return -EINVAL;
 
 	/* Invalidate the token to prevent reuse */
@@ -904,7 +1006,7 @@ static int gcs_restore_signal(void)
 	if (ret != 0)
 		return -EFAULT;
 
-	current->thread.gcspr_el0 = gcspr_el0 + sizeof(cap);
+	current->thread.gcspr_el0 = (u64)gcspr_el0 + sizeof(cap);
 	write_sysreg_s(current->thread.gcspr_el0, SYS_GCSPR_EL0);
 
 	return 0;
@@ -973,6 +1075,13 @@ static int setup_sigframe_layout(struct rt_sigframe_user_layout *user,
 	if (add_all || current->thread.fault_code) {
 		err = sigframe_alloc(user, &user->esr_offset,
 				     sizeof(struct esr_context));
+		if (err)
+			return err;
+	}
+
+	if (add_all || task_gcs_el0_enabled(current)) {
+		err = sigframe_alloc(user, &user->gcs_offset,
+				     sizeof(struct gcs_context));
 		if (err)
 			return err;
 	}
@@ -1075,6 +1184,12 @@ static int setup_sigframe(struct rt_sigframe_user_layout *user,
 		__put_user_error(ESR_MAGIC, &esr_ctx->head.magic, err);
 		__put_user_error(sizeof(*esr_ctx), &esr_ctx->head.size, err);
 		__put_user_error(current->thread.fault_code, &esr_ctx->esr, err);
+	}
+
+	if (system_supports_gcs() && err == 0 && user->gcs_offset) {
+		struct gcs_context __user *gcs_ctx =
+			apply_user_offset(user, user->gcs_offset);
+		err |= preserve_gcs_context(gcs_ctx);
 	}
 
 	/* Scalable Vector Extension state (including streaming), if present */
@@ -1213,8 +1328,6 @@ static int gcs_signal_entry(__sigrestore_t sigtramp, struct ksignal *ksig)
 	put_user_gcs(GCS_SIGNAL_CAP(gcspr_el0 - 1), gcspr_el0 - 1, &ret);
 	if (ret != 0)
 		return ret;
-
-	gcsb_dsync();
 
 	gcspr_el0 -= 2;
 	write_sysreg_s((unsigned long)gcspr_el0, SYS_GCSPR_EL0);
