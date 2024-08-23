@@ -355,6 +355,9 @@ static int starfive_pcie_host_init(struct plda_pcie_rp *plda)
 	 */
 	plda_pcie_set_pref_win_64bit(plda);
 
+	/* Setup the inbound address translation */
+	plda_pcie_setup_inbound_address_translation(plda);
+
 	/*
 	 * Ensure that PERST has been asserted for at least 100 ms,
 	 * the sleep value is T_PVPERL from PCIe CEM spec r2.0 (Table 2-4)
