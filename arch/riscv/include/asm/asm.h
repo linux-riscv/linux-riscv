@@ -109,19 +109,13 @@
 	REG_L \dst, 0(\dst)
 .endm
 
-#ifdef CONFIG_SHADOW_CALL_STACK
-/* gp is used as the shadow call stack pointer instead */
-.macro load_global_pointer
+.macro load_pcpu_off_gp tmp
+	REG_L \tmp, TASK_TI_CPU(tp)
+	slli \tmp, \tmp, 3
+	la gp, __per_cpu_offset
+	add gp, gp, \tmp
+	REG_L gp, 0(gp)
 .endm
-#else
-/* load __global_pointer to gp */
-.macro load_global_pointer
-.option push
-.option norelax
-	la gp, __global_pointer$
-.option pop
-.endm
-#endif /* CONFIG_SHADOW_CALL_STACK */
 
 	/* save all GPs except x1 ~ x5 */
 	.macro save_from_x6_to_x31

@@ -110,9 +110,6 @@ relocate_enable_mmu:
 	la a0, .Lsecondary_park
 	csrw CSR_TVEC, a0
 
-	/* Reload the global pointer */
-	load_global_pointer
-
 	/*
 	 * Switch to kernel page tables.  A full fence is necessary in order to
 	 * avoid using the trampoline translations, which are only correct for
@@ -130,9 +127,6 @@ secondary_start_sbi:
 	/* Mask all interrupts */
 	csrw CSR_IE, zero
 	csrw CSR_IP, zero
-
-	/* Load the global pointer */
-	load_global_pointer
 
 	/*
 	 * Disable FPU & VECTOR to detect illegal usage of
@@ -227,9 +221,6 @@ SYM_CODE_START(_start_kernel)
 	 */
 	csrr a0, CSR_MHARTID
 #endif /* CONFIG_RISCV_M_MODE */
-
-	/* Load the global pointer */
-	load_global_pointer
 
 	/*
 	 * Disable FPU & VECTOR to detect illegal usage of

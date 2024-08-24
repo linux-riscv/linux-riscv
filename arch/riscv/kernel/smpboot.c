@@ -41,6 +41,11 @@
 
 static DECLARE_COMPLETION(cpu_running);
 
+void __init smp_prepare_boot_cpu(void)
+{
+	set_my_cpu_offset(per_cpu_offset(smp_processor_id()));
+}
+
 void __init smp_prepare_cpus(unsigned int max_cpus)
 {
 	int cpuid;
@@ -211,6 +216,8 @@ asmlinkage __visible void smp_callin(void)
 {
 	struct mm_struct *mm = &init_mm;
 	unsigned int curr_cpuid = smp_processor_id();
+
+	set_my_cpu_offset(per_cpu_offset(curr_cpuid));
 
 	if (has_vector()) {
 		/*

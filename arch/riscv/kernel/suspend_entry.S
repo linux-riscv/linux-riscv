@@ -60,8 +60,6 @@ SYM_FUNC_START(__cpu_suspend_enter)
 SYM_FUNC_END(__cpu_suspend_enter)
 
 SYM_TYPED_FUNC_START(__cpu_resume_enter)
-	/* Load the global pointer */
-	load_global_pointer
 
 #ifdef CONFIG_MMU
 	/* Save A0 and A1 */

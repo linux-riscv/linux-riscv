@@ -77,8 +77,8 @@ SYM_CODE_START(handle_exception)
 	 */
 	csrw CSR_SCRATCH, x0
 
-	/* Load the global pointer */
-	load_global_pointer
+	/* load __per_cpu_offset[cpu] to gp*/
+	load_pcpu_off_gp t6
 
 	/* Load the kernel shadow call stack pointer if coming from userspace */
 	scs_load_current_if_task_changed s5
