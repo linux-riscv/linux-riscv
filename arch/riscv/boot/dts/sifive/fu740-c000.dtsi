@@ -4,6 +4,7 @@
 /dts-v1/;
 
 #include <dt-bindings/clock/sifive-fu740-prci.h>
+#include <dt-bindings/reset/sifive-fu740-prci.h>
 
 / {
 	#address-cells = <2>;
@@ -358,7 +359,7 @@
 			clocks = <&prci FU740_PRCI_CLK_PCIE_AUX>;
 			pwren-gpios = <&gpio 5 0>;
 			reset-gpios = <&gpio 8 0>;
-			resets = <&prci 4>;
+			resets = <&prci FU740_PRCI_RST_PCIE_POWER_UP_N>;
 			status = "okay";
 		};
 	};
