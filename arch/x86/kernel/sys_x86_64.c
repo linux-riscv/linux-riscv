@@ -86,7 +86,7 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
 }
 
-static void find_start_end(unsigned long addr, unsigned long flags,
+static void find_start_end(unsigned long addr, unsigned long len, unsigned long flags,
 		unsigned long *begin, unsigned long *end)
 {
 	if (!in_32bit_syscall() && (flags & MAP_32BIT)) {
@@ -106,10 +106,14 @@ static void find_start_end(unsigned long addr, unsigned long flags,
 	}
 
 	*begin	= get_mmap_base(1);
+
 	if (in_32bit_syscall())
 		*end = task_size_32bit();
 	else
 		*end = task_size_64bit(addr > DEFAULT_MAP_WINDOW);
+
+	if (flags & MAP_BELOW_HINT)
+		*end = MIN(*end, addr + len);
 }
 
 static inline unsigned long stack_guard_placement(vm_flags_t vm_flags)
@@ -132,7 +136,7 @@ arch_get_unmapped_area_vmflags(struct file *filp, unsigned long addr, unsigned l
 	if (flags & MAP_FIXED)
 		return addr;
 
-	find_start_end(addr, flags, &begin, &end);
+	find_start_end(addr, len, flags, &begin, &end);
 
 	if (len > end)
 		return -ENOMEM;
@@ -166,6 +170,7 @@ arch_get_unmapped_area_topdown_vmflags(struct file *filp, unsigned long addr0,
 	struct mm_struct *mm = current->mm;
 	unsigned long addr = addr0;
 	struct vm_unmapped_area_info info = {};
+	unsigned long task_size, mmap_base;
 
 	/* requested length too big for entire address space */
 	if (len > TASK_SIZE)
@@ -198,7 +203,8 @@ get_unmapped_area:
 	else
 		info.low_limit = PAGE_SIZE;
 
-	info.high_limit = get_mmap_base(0);
+	mmap_base = get_mmap_base(0);
+	info.high_limit = mmap_base;
 	info.start_gap = stack_guard_placement(vm_flags);
 
 	/*
@@ -210,6 +216,19 @@ get_unmapped_area:
 	 */
 	if (addr > DEFAULT_MAP_WINDOW && !in_32bit_syscall())
 		info.high_limit += TASK_SIZE_MAX - DEFAULT_MAP_WINDOW;
+	if (flags & MAP_BELOW_HINT) {
+#ifdef CONFIG_HAVE_ARCH_COMPAT_MMAP_BASES
+		task_size = task_size_32bit();
+#else
+		task_size = task_size_64bit(0);
+#endif
+		/*
+		 * mmap_base is defined by PAGE_ALIGN(task_size - gap - rnd) so
+		 * subtract out the task_size to isolate the gap + rnd.
+		 */
+		info.high_limit = MIN(info.high_limit,
+				      (addr + len) - (task_size - mmap_base));
+	}
 
 	info.align_offset = pgoff << PAGE_SHIFT;
 	if (filp) {
