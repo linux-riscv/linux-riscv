@@ -10,8 +10,37 @@
 #include <linux/module.h>
 
 #include <dt-bindings/clock/sifive-fu740-prci.h>
+#include <dt-bindings/reset/sifive-fu740-prci.h>
 
 #include "sifive-prci.h"
+
+/**
+ * sifive_fu740_prci_ethernet_release_reset() - Release ethernet reset
+ * @pd: struct __prci_data * for the PRCI containing the Ethernet CLK mux reg
+ *
+ */
+static void sifive_fu740_prci_ethernet_release_reset(struct __prci_data *pd)
+{
+	/* Release GEMGXL reset */
+	pd->reset.rcdev.ops->deassert(&pd->reset.rcdev, FU740_PRCI_RST_GEMGXL_N);
+
+	/* Procmon => core clock */
+	sifive_prci_set_procmoncfg(pd, PRCI_PROCMONCFG_CORE_CLOCK_MASK);
+
+	/* Release Chiplink reset */
+	pd->reset.rcdev.ops->deassert(&pd->reset.rcdev, FU740_PRCI_RST_CLTX_N);
+}
+
+/**
+ * sifive_fu740_prci_cltx_release_reset() - Release cltx reset
+ * @pd: struct __prci_data * for the PRCI containing the Ethernet CLK mux reg
+ *
+ */
+static void sifive_fu740_prci_cltx_release_reset(struct __prci_data *pd)
+{
+	/* Release CLTX reset */
+	pd->reset.rcdev.ops->deassert(&pd->reset.rcdev, FU740_PRCI_RST_CLTX_N);
+}
 
 /* PRCI integration data for each WRPLL instance */
 
@@ -30,6 +59,7 @@ static struct __prci_wrpll_data sifive_fu740_prci_ddrpll_data = {
 static struct __prci_wrpll_data sifive_fu740_prci_gemgxlpll_data = {
 	.cfg0_offs = PRCI_GEMGXLPLLCFG0_OFFSET,
 	.cfg1_offs = PRCI_GEMGXLPLLCFG1_OFFSET,
+	.release_reset = sifive_fu740_prci_ethernet_release_reset,
 };
 
 static struct __prci_wrpll_data sifive_fu740_prci_dvfscorepll_data = {
@@ -49,6 +79,7 @@ static struct __prci_wrpll_data sifive_fu740_prci_hfpclkpll_data = {
 static struct __prci_wrpll_data sifive_fu740_prci_cltxpll_data = {
 	.cfg0_offs = PRCI_CLTXPLLCFG0_OFFSET,
 	.cfg1_offs = PRCI_CLTXPLLCFG1_OFFSET,
+	.release_reset = sifive_fu740_prci_cltx_release_reset,
 };
 
 /* Linux clock framework integration */

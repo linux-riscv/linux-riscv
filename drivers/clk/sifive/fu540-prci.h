@@ -23,8 +23,23 @@
 #include <linux/module.h>
 
 #include <dt-bindings/clock/sifive-fu540-prci.h>
+#include <dt-bindings/reset/sifive-fu540-prci.h>
 
 #include "sifive-prci.h"
+
+/**
+ * sifive_fu540_prci_ethernet_release_reset() - Release ethernet reset
+ * @pd: struct __prci_data * for the PRCI containing the Ethernet CLK mux reg
+ *
+ */
+static void sifive_fu540_prci_ethernet_release_reset(struct __prci_data *pd)
+{
+	/* Release GEMGXL reset */
+	pd->reset.rcdev.ops->deassert(&pd->reset.rcdev, FU540_PRCI_RST_GEMGXL_N);
+
+	/* Procmon => core clock */
+	sifive_prci_set_procmoncfg(pd, PRCI_PROCMONCFG_CORE_CLOCK_MASK);
+}
 
 /* PRCI integration data for each WRPLL instance */
 
@@ -43,6 +58,7 @@ static struct __prci_wrpll_data sifive_fu540_prci_ddrpll_data = {
 static struct __prci_wrpll_data sifive_fu540_prci_gemgxlpll_data = {
 	.cfg0_offs = PRCI_GEMGXLPLLCFG0_OFFSET,
 	.cfg1_offs = PRCI_GEMGXLPLLCFG1_OFFSET,
+	.release_reset = sifive_fu540_prci_ethernet_release_reset,
 };
 
 /* Linux clock framework integration */

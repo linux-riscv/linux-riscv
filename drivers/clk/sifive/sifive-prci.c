@@ -249,6 +249,9 @@ int sifive_prci_clock_enable(struct clk_hw *hw)
 	if (pwd->disable_bypass)
 		pwd->disable_bypass(pd);
 
+	if (pwd->release_reset)
+		pwd->release_reset(pd);
+
 	return 0;
 }
 
@@ -446,6 +449,26 @@ void sifive_prci_hfpclkpllsel_use_hfpclkpll(struct __prci_data *pd)
 	__prci_writel(r, PRCI_HFPCLKPLLSEL_OFFSET, pd);
 
 	r = __prci_readl(pd, PRCI_HFPCLKPLLSEL_OFFSET);	/* barrier */
+}
+
+/*
+ * PROCMONCFG
+ */
+
+/**
+ * sifive_prci_set_procmoncfg() - set PROCMONCFG
+ * @pd: struct __prci_data * PRCI context
+ * @val: u32 value to write to PROCMONCFG register
+ *
+ * Set the PROCMONCFG register to @val
+ *
+ * Context: Any context.  Caller must prevent concurrent changes to the
+ *          PROCMONCFG_OFFSET register.
+ */
+void sifive_prci_set_procmoncfg(struct __prci_data *pd, u32 val)
+{
+	__prci_writel(val, PRCI_PROCMONCFG_OFFSET, pd);
+	__prci_readl(pd, PRCI_PROCMONCFG_OFFSET);	/* barrier */
 }
 
 /* PCIE AUX clock APIs for enable, disable. */

@@ -210,6 +210,9 @@
 
 /* PROCMONCFG */
 #define PRCI_PROCMONCFG_OFFSET			0xf0
+#define PRCI_PROCMONCFG_CORE_CLOCK_SHIFT	24
+#define PRCI_PROCMONCFG_CORE_CLOCK_MASK					\
+		(0x1 << PRCI_PROCMONCFG_CORE_CLOCK_SHIFT)
 
 /*
  * Private structures
@@ -235,6 +238,7 @@ struct __prci_data {
  * @disable_bypass: fn ptr to code to not bypass the WRPLL (or NULL)
  * @cfg0_offs: WRPLL CFG0 register offset (in bytes) from the PRCI base address
  * @cfg1_offs: WRPLL CFG1 register offset (in bytes) from the PRCI base address
+ * @release_reset: fn ptr to code to release clock reset
  *
  * @enable_bypass and @disable_bypass are used for WRPLL instances
  * that contain a separate external glitchless clock mux downstream
@@ -246,6 +250,7 @@ struct __prci_wrpll_data {
 	void (*disable_bypass)(struct __prci_data *pd);
 	u8 cfg0_offs;
 	u8 cfg1_offs;
+	void (*release_reset)(struct __prci_data *pd);
 };
 
 /**
@@ -289,6 +294,9 @@ void sifive_prci_corepllsel_use_dvfscorepll(struct __prci_data *pd);
 void sifive_prci_corepllsel_use_corepll(struct __prci_data *pd);
 void sifive_prci_hfpclkpllsel_use_hfclk(struct __prci_data *pd);
 void sifive_prci_hfpclkpllsel_use_hfpclkpll(struct __prci_data *pd);
+
+/* PROCMONCFG */
+void sifive_prci_set_procmoncfg(struct __prci_data *pd, u32 val);
 
 /* Linux clock framework integration */
 long sifive_prci_wrpll_round_rate(struct clk_hw *hw, unsigned long rate,
