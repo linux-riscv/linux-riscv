@@ -118,6 +118,16 @@ static void __init acpi_parse_and_init_cpus(void)
 #define acpi_parse_and_init_cpus(...)	do { } while (0)
 #endif
 
+static bool __init is_hartid_duplicate(unsigned int cpuid, u64 hart)
+{
+	unsigned int i;
+
+	for (i = 1; (i < cpuid) && (i < NR_CPUS); i++)
+		if (cpuid_to_hartid_map(i) == hart)
+			return true;
+	return false;
+}
+
 static void __init of_parse_and_init_cpus(void)
 {
 	struct device_node *dn;
@@ -130,6 +140,9 @@ static void __init of_parse_and_init_cpus(void)
 		rc = riscv_early_of_processor_hartid(dn, &hart);
 		if (rc < 0)
 			continue;
+
+		if (is_hartid_duplicate(cpuid, hart))
+			BUG_ON(1);
 
 		if (hart == cpuid_to_hartid_map(0)) {
 			BUG_ON(found_boot_cpu);
