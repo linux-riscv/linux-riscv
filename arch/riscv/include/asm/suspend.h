@@ -16,6 +16,10 @@ struct suspend_context {
 	unsigned long envcfg;
 	unsigned long tvec;
 	unsigned long ie;
+#if __riscv_xlen < 64
+	unsigned long stimecmph;
+#endif
+	unsigned long stimecmp;
 #ifdef CONFIG_MMU
 	unsigned long satp;
 #endif
