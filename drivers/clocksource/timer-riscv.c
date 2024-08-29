@@ -32,15 +32,19 @@
 static DEFINE_STATIC_KEY_FALSE(riscv_sstc_available);
 static bool riscv_timer_cannot_wake_cpu;
 
+static void riscv_clock_stop_stimecmp(void)
+{
+	csr_write(CSR_STIMECMP, ULONG_MAX);
+	if (IS_ENABLED(CONFIG_32BIT))
+		csr_write(CSR_STIMECMPH, ULONG_MAX);
+}
+
 static void riscv_clock_event_stop(void)
 {
-	if (static_branch_likely(&riscv_sstc_available)) {
-		csr_write(CSR_STIMECMP, ULONG_MAX);
-		if (IS_ENABLED(CONFIG_32BIT))
-			csr_write(CSR_STIMECMPH, ULONG_MAX);
-	} else {
+	if (static_branch_likely(&riscv_sstc_available))
+		riscv_clock_stop_stimecmp();
+	else
 		sbi_set_timer(U64_MAX);
-	}
 }
 
 static int riscv_clock_next_event(unsigned long delta,
@@ -126,7 +130,11 @@ static int riscv_timer_starting_cpu(unsigned int cpu)
 
 static int riscv_timer_dying_cpu(unsigned int cpu)
 {
-	disable_percpu_irq(riscv_clock_event_irq);
+	if (static_branch_likely(&riscv_sstc_available))
+		riscv_clock_stop_stimecmp();
+	else
+		disable_percpu_irq(riscv_clock_event_irq);
+
 	return 0;
 }
 
