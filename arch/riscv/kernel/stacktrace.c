@@ -72,7 +72,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
 			pc = ftrace_graph_ret_addr(current, &graph_idx, frame->ra,
 						   &frame->ra);
 			if (pc == (unsigned long)handle_exception) {
-				if (unlikely(!__kernel_text_address(pc) || !fn(arg, pc)))
+				if (unlikely(!fn(arg, pc)))
 					break;
 
 				pc = ((struct pt_regs *)sp)->epc;
