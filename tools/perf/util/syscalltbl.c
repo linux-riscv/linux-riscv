@@ -188,4 +188,9 @@ int syscalltbl__strglobmatch_first(struct syscalltbl *tbl, const char *syscall_g
 {
 	return syscalltbl__strglobmatch_next(tbl, syscall_glob, idx);
 }
+
+int syscalltbl__id_at_idx(struct syscalltbl *tbl __always_unused, int idx __always_unused)
+{
+	return -1;
+}
 #endif /* HAVE_SYSCALL_TABLE_SUPPORT */
