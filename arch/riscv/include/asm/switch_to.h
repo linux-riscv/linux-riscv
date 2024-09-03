@@ -76,11 +76,48 @@ extern struct task_struct *__switch_to(struct task_struct *,
 static inline bool switch_to_should_flush_icache(struct task_struct *task)
 {
 #ifdef CONFIG_SMP
-	bool stale_mm = task->mm && task->mm->context.force_icache_flush;
-	bool stale_thread = task->thread.force_icache_flush;
+	bool stale_mm = false;
 	bool thread_migrated = smp_processor_id() != task->thread.prev_cpu;
+	bool stale_thread;
 
-	return thread_migrated && (stale_mm || stale_thread);
+	/*
+	 * This pairs with the smp_wmb() in each case of the switch statement in
+	 * riscv_set_icache_flush_ctx() as well as the smp_wmb() in set_icache_stale_mask().
+	 *
+	 * The pairings with the smp_wmb() in the PR_RISCV_SCOPE_PER_PROCESS
+	 * cases in riscv_set_icache_flush_ctx() synchronizes this hart with the
+	 * updated value of current->mm->context.force_icache_flush.
+	 *
+	 * The pairings with the smp_wmb() in the PR_RISCV_SCOPE_PER_THREAD cases
+	 * in riscv_set_icache_flush_ctx() synchronizes this hart with the
+	 * updated value of task->thread.force_icache_flush.
+	 *
+	 * The pairing with the smp_wmb() in set_icache_stale_mask()
+	 * synchronizes this hart with the updated value of task->mm->context.icache_stale_mask.
+	 */
+	smp_rmb();
+	stale_thread = thread_migrated && task->thread.force_icache_flush;
+
+	if (task->mm) {
+		/*
+		 * The mm is only stale if the respective CPU bit in
+		 * icache_stale_mask is set.
+		 */
+		stale_mm = cpumask_test_cpu(smp_processor_id(),
+					    &task->mm->context.icache_stale_mask);
+
+		/*
+		 * force_icache_flush indicates that icache_stale_mask should be
+		 * set again for this hart before returning to userspace. This
+		 * ensures that next time this mm is switched to on this hart,
+		 * the icache is flushed only if necessary.
+		 */
+		cpumask_assign_cpu(smp_processor_id(),
+				   &task->mm->context.icache_stale_mask,
+				   task->mm->context.force_icache_flush);
+	}
+
+	return stale_mm || stale_thread;
 #else
 	return false;
 #endif

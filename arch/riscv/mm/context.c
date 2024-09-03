@@ -299,18 +299,18 @@ static inline void flush_icache_deferred(struct mm_struct *mm, unsigned int cpu,
 					 struct task_struct *task)
 {
 #ifdef CONFIG_SMP
+	/*
+	 * This pairs with the smp_wmb() in set_icache_stale_mask() to
+	 * synchronize this hart with changes to mm->context.icache_stale_mask.
+	 */
+	smp_rmb();
 	if (cpumask_test_and_clear_cpu(cpu, &mm->context.icache_stale_mask)) {
 		/*
 		 * Ensure the remote hart's writes are visible to this hart.
 		 * This pairs with a barrier in flush_icache_mm.
 		 */
 		smp_mb();
-
-		/*
-		 * If cache will be flushed in switch_to, no need to flush here.
-		 */
-		if (!(task && switch_to_should_flush_icache(task)))
-			local_flush_icache_all();
+		local_flush_icache_all();
 	}
 #endif
 }

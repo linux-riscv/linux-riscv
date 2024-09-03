@@ -158,20 +158,25 @@ void __init riscv_init_cbo_blocksizes(void)
 #ifdef CONFIG_SMP
 static void set_icache_stale_mask(void)
 {
+	/*
+	 * Mark every other hart's icache as needing a flush for
+	 * this MM.
+	 */
 	cpumask_t *mask;
 	bool stale_cpu;
 
-	/*
-	 * Mark every other hart's icache as needing a flush for
-	 * this MM. Maintain the previous value of the current
-	 * cpu to handle the case when this function is called
-	 * concurrently on different harts.
-	 */
 	mask = &current->mm->context.icache_stale_mask;
 	stale_cpu = cpumask_test_cpu(smp_processor_id(), mask);
 
 	cpumask_setall(mask);
 	cpumask_assign_cpu(smp_processor_id(), mask, stale_cpu);
+
+	/*
+	 * This pairs with the smp_rmb() in switch_to_should_flush_icache() and
+	 * flush_icache_deferred() to ensure that the updates to
+	 * icache_stale_mask are visible in other harts.
+	 */
+	smp_wmb();
 }
 #endif
 
@@ -228,9 +233,22 @@ int riscv_set_icache_flush_ctx(unsigned long ctx, unsigned long scope)
 		switch (scope) {
 		case PR_RISCV_SCOPE_PER_PROCESS:
 			current->mm->context.force_icache_flush = true;
+			/*
+			 * This pairs with the smp_rmb() in
+			 * switch_to_should_flush_icache() to ensure that other
+			 * harts using the same mm flush the icache on migration.
+			 */
+			smp_wmb();
+			set_icache_stale_mask();
 			break;
 		case PR_RISCV_SCOPE_PER_THREAD:
 			current->thread.force_icache_flush = true;
+			/*
+			 * This pairs with the smp_rmb() in
+			 * switch_to_should_flush_icache() to ensure that the
+			 * icache is flushed when this thread is migrated.
+			 */
+			smp_wmb();
 			break;
 		default:
 			return -EINVAL;
@@ -240,13 +258,22 @@ int riscv_set_icache_flush_ctx(unsigned long ctx, unsigned long scope)
 		switch (scope) {
 		case PR_RISCV_SCOPE_PER_PROCESS:
 			current->mm->context.force_icache_flush = false;
-
+			/*
+			 * This pairs with the smp_rmb() in
+			 * switch_to_should_flush_icache() to ensure that other
+			 * harts using the same mm stop flushing the icache on migration.
+			 */
+			smp_wmb();
 			set_icache_stale_mask();
 			break;
 		case PR_RISCV_SCOPE_PER_THREAD:
 			current->thread.force_icache_flush = false;
-
-			set_icache_stale_mask();
+			/*
+			 * This pairs with the smp_rmb() in
+			 * switch_to_should_flush_icache() to ensure that the
+			 * icache stops flushing when this thread is migrated.
+			 */
+			smp_wmb();
 			break;
 		default:
 			return -EINVAL;
