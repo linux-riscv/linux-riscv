@@ -61,7 +61,7 @@ void prepare_ftrace_return(unsigned long self_addr,
 	if (ftrace_get_parent_ra_addr(self_addr, &ra_off))
 		goto out;
 
-	if (!function_graph_enter(old, self_addr, 0, NULL))
+	if (!function_graph_enter(old, self_addr, 0, NULL, NULL))
 		*(unsigned long *)(callsite_sp + ra_off) = return_hooker;
 
 	return;

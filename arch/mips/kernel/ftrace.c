@@ -362,7 +362,7 @@ void prepare_ftrace_return(unsigned long *parent_ra_addr, unsigned long self_ra,
 	insns = core_kernel_text(self_ra) ? 2 : MCOUNT_OFFSET_INSNS + 1;
 	self_ra -= (MCOUNT_INSN_SIZE * insns);
 
-	if (function_graph_enter(old_parent_ra, self_ra, fp, NULL))
+	if (function_graph_enter(old_parent_ra, self_ra, fp, NULL, NULL))
 		*parent_ra_addr = old_parent_ra;
 	return;
 out:

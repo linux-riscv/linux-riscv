@@ -156,7 +156,7 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr,
 	old = *parent;
 
 	if (!function_graph_enter(old, self_addr,
-			*(unsigned long *)frame_pointer, parent)) {
+			*(unsigned long *)frame_pointer, parent, NULL)) {
 		/*
 		 * For csky-gcc function has sub-call:
 		 * subi	sp,	sp, 8
