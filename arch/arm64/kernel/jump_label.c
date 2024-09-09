@@ -8,7 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/jump_label.h>
 #include <asm/insn.h>
-#include <asm/patching.h>
+#include <asm/text-patching.h>
 
 void arch_jump_label_transform(struct jump_entry *entry,
 			       enum jump_label_type type)
