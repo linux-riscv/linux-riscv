@@ -14,6 +14,7 @@
 
 #include <asm/ptrace.h>
 #include <asm/hwcap.h>
+#include <asm/usercfi.h>
 
 /*
  * addr is a hint to the maximum userspace address that mmap should provide, so
