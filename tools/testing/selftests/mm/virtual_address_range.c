@@ -64,6 +64,14 @@
 #define NR_CHUNKS_HIGH  NR_CHUNKS_384TB
 #endif
 
+#if defined(__riscv) && (__riscv_xlen == 64)
+static char *hind_addr(void)
+{
+	return NULL;
+}
+
+static void validate_addr(char *ptr, int high_addr) { }
+#else
 static char *hind_addr(void)
 {
 	int bits = HIGH_ADDR_SHIFT + rand() % (63 - HIGH_ADDR_SHIFT);
@@ -81,6 +89,7 @@ static void validate_addr(char *ptr, int high_addr)
 	if (addr > HIGH_ADDR_MARK)
 		ksft_exit_fail_msg("Bad address %lx\n", addr);
 }
+#endif
 
 static int validate_lower_address_hint(void)
 {
