@@ -13,6 +13,7 @@
 #include <vdso/processor.h>
 
 #include <asm/ptrace.h>
+#include <asm/hwcap.h>
 
 /*
  * addr is a hint to the maximum userspace address that mmap should provide, so
