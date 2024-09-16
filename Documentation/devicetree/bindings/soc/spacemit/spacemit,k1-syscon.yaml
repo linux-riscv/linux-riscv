@@ -27,6 +27,10 @@ properties:
   reg:
     maxItems: 1
 
+  clock-controller:
+    $ref: /schemas/clock/spacemit,k1-ccu.yaml#
+    type: object
+
   "#address-cells":
     const: 1
 
