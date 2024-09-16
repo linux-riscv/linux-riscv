@@ -359,7 +359,7 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr)
 		return;
 	}
 
-	if (function_graph_enter(old, self_addr, 0, NULL))
+	if (function_graph_enter(old, self_addr, 0, NULL, NULL))
 		__raw_writel(old, parent);
 }
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */

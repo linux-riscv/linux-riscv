@@ -233,7 +233,7 @@ void prepare_ftrace_return(unsigned long self_addr, unsigned long *parent)
 
 	old = *parent;
 
-	if (!function_graph_enter(old, self_addr, 0, parent))
+	if (!function_graph_enter(old, self_addr, 0, parent, NULL))
 		*parent = return_hooker;
 }
 

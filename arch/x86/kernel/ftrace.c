@@ -637,7 +637,7 @@ void prepare_ftrace_return(unsigned long ip, unsigned long *parent,
 	if (bit < 0)
 		return;
 
-	if (!function_graph_enter(*parent, ip, frame_pointer, parent))
+	if (!function_graph_enter(*parent, ip, frame_pointer, parent, NULL))
 		*parent = return_hooker;
 
 	ftrace_test_recursion_unlock(bit);

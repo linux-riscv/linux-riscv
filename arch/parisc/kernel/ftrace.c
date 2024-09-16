@@ -45,7 +45,7 @@ static void __hot prepare_ftrace_return(unsigned long *parent,
 
 	old = *parent;
 
-	if (!function_graph_enter(old, self_addr, 0, NULL))
+	if (!function_graph_enter(old, self_addr, 0, NULL, NULL))
 		/* activate parisc_return_to_handler() as return point */
 		*parent = (unsigned long) &parisc_return_to_handler;
 }

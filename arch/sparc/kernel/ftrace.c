@@ -125,7 +125,7 @@ unsigned long prepare_ftrace_return(unsigned long parent,
 	if (unlikely(atomic_read(&current->tracing_graph_pause)))
 		return parent + 8UL;
 
-	if (function_graph_enter(parent, self_addr, frame_pointer, NULL))
+	if (function_graph_enter(parent, self_addr, frame_pointer, NULL, NULL))
 		return parent + 8UL;
 
 	return return_hooker;
