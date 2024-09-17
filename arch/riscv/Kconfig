@@ -830,12 +830,21 @@ menu "Kernel features"
 
 source "kernel/Kconfig.hz"
 
-config RISCV_SBI_V01
-	bool "SBI v0.1 support"
+config RISCV_SBI_V01_DEPRECATED
+	bool "SBI v0.1 support (DEPRECATED)"
 	depends on RISCV_SBI
 	help
-	  This config allows kernel to use SBI v0.1 APIs. This will be
-	  deprecated in future once legacy M-mode software are no longer in use.
+	  This config allows kernel to use SBI v0.1 APIs.
+
+	  SBI v0.1 support has been deprecated and will be removed after the
+	  2025 LTS.
+
+	  If unsure what to do here, say N.
+
+config RISCV_SBI_V01
+	bool
+	default y
+	depends on RISCV_SBI_V01_DEPRECATED
 
 config RISCV_BOOT_SPINWAIT
 	bool "Spinwait booting method"
