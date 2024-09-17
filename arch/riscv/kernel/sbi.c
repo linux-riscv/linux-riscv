@@ -686,6 +686,7 @@ void __init sbi_init(void)
 			sbi_debug_console_available = true;
 		}
 	} else {
+		pr_warn("SBI-0.1 is deprecated and scheduled for removal after the 2025 LTS");
 		__sbi_set_timer = __sbi_set_timer_v01;
 		__sbi_send_ipi	= __sbi_send_ipi_v01;
 		__sbi_rfence	= __sbi_rfence_v01;
