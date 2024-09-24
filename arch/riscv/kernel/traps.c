@@ -167,16 +167,56 @@ DO_ERROR_INFO(do_trap_insn_misaligned,
 DO_ERROR_INFO(do_trap_insn_fault,
 	SIGSEGV, SEGV_ACCERR, "instruction access fault");
 
+#define is_system(__i) (((__i) & 0x7f) == RVG_OPCODE_SYSTEM)
+
+static bool riscv_try_csr_fixup_user(struct pt_regs *regs, u32 insn)
+{
+	/* expecting a 4 byte CSR instruction (*/
+	if (unlikely(GET_INSN_LENGTH(insn) != 4))
+		return false;
+
+	if (is_system(insn)) {
+		u32 csr = insn >> RVG_SYSTEM_CSR_OFF;
+		u32 rd = (insn >> RVG_RD_OPOFF) & RVG_RD_MASK;
+		u32 rs = (insn >> RVG_RS1_OPOFF) & RVG_RS1_MASK;
+		u32 funct3 = (insn >> RV_INSN_FUNCT3_OPOFF) & 0x7;
+
+		if (rs == 0 && funct3 == 2 && csr == CSR_CYCLE) {
+			u64 val = csr_read(CSR_TIME);
+			/* we've got a RDCCLYE, emulated it with CSR_TIME */
+
+			printk_ratelimited("PID %d: process using RDCYCLE, emulating with RDTIME\n", current->pid);
+
+			regs_set_register(regs, rd*sizeof(unsigned long), val);
+			regs->epc += 4;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 asmlinkage __visible __trap_section void do_trap_insn_illegal(struct pt_regs *regs)
 {
 	bool handled;
 
 	if (user_mode(regs)) {
+		u32 __user *epc = (u32 __user *)regs->epc;
+		u32 insn = (u32)regs->badaddr;
+
 		irqentry_enter_from_user_mode(regs);
 
 		local_irq_enable();
 
-		handled = riscv_v_first_use_handler(regs);
+		if (!insn) {
+			if (__get_user(insn, epc)) {
+				/* todo */
+			}
+		}
+
+		handled = riscv_v_first_use_handler(regs, insn);
+		if (!handle)
+			handled = riscv_try_csr_fixup_user(regs, insn);
 
 		local_irq_disable();
 

@@ -144,6 +144,26 @@ static inline unsigned long regs_get_register(struct pt_regs *regs,
 }
 
 /**
+ * regs_set_register() - set register value from its offset
+ * @regs:	pt_regs from which register value is gotten
+ * @offset:	offset of the register.
+ * @to:		value to set register to
+ *
+ * regs_set_register sets the value @to to a register whose offset from @regs.
+ * The @offset is the offset of the register in struct pt_regs.
+ * If @offset is bigger than MAX_REG_OFFSET, this will ignore the write.
+ */
+static inline void regs_set_register(struct pt_regs *regs,
+				     unsigned int offset,
+				     unsigned long to)
+{
+	if (unlikely(offset > MAX_REG_OFFSET))
+		return;
+
+	*(unsigned long *)((unsigned long)regs + offset) = to;
+}
+
+/**
  * regs_get_kernel_argument() - get Nth function argument in kernel
  * @regs:       pt_regs of that context
  * @n:          function argument number (start from 0)
