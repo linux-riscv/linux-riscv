@@ -26,16 +26,6 @@
 #include <asm/cacheflush.h>
 #include <asm/cpu_ops.h>
 
-enum ipi_message_type {
-	IPI_RESCHEDULE,
-	IPI_CALL_FUNC,
-	IPI_CPU_STOP,
-	IPI_CPU_CRASH_STOP,
-	IPI_IRQ_WORK,
-	IPI_TIMER,
-	IPI_MAX
-};
-
 unsigned long __cpuid_to_hartid_map[NR_CPUS] __ro_after_init = {
 	[0 ... NR_CPUS-1] = INVALID_HARTID
 };
@@ -94,13 +84,47 @@ static inline void ipi_cpu_crash_stop(unsigned int cpu, struct pt_regs *regs)
 }
 #endif
 
+#ifdef CONFIG_RISCV_ZAWRS_IDLE
+DECLARE_PER_CPU(atomic_t, idle_ipi_mask);
+#endif
+
 static void send_ipi_mask(const struct cpumask *mask, enum ipi_message_type op)
 {
+#ifdef CONFIG_RISCV_ZAWRS_IDLE
+	int cpu, val;
+
+	asm goto(ALTERNATIVE("j %l[no_zawrs]", "nop", 0, RISCV_ISA_EXT_ZAWRS, 1)
+			: : : : no_zawrs);
+
+	for_each_cpu(cpu, mask) {
+		val = atomic_fetch_or_relaxed(BIT(op), per_cpu_ptr(&idle_ipi_mask, cpu));
+		if (likely(!(val & BIT(IPI_MAX))))
+			__ipi_send_mask(ipi_desc[op], cpumask_of(cpu));
+	}
+
+	return;
+
+no_zawrs:
+#endif
 	__ipi_send_mask(ipi_desc[op], mask);
 }
 
 static void send_ipi_single(int cpu, enum ipi_message_type op)
 {
+#ifdef CONFIG_RISCV_ZAWRS_IDLE
+	int val;
+
+	asm goto(ALTERNATIVE("j %l[no_zawrs]", "nop", 0, RISCV_ISA_EXT_ZAWRS, 1)
+			: : : : no_zawrs);
+
+	val = atomic_fetch_or_relaxed(BIT(op), per_cpu_ptr(&idle_ipi_mask, cpu));
+	if (likely(!(val & BIT(IPI_MAX))))
+		__ipi_send_mask(ipi_desc[op], cpumask_of(cpu));
+
+	return;
+
+no_zawrs:
+#endif
 	__ipi_send_mask(ipi_desc[op], cpumask_of(cpu));
 }
 
@@ -111,7 +135,7 @@ void arch_irq_work_raise(void)
 }
 #endif
 
-static irqreturn_t handle_IPI(int irq, void *data)
+irqreturn_t handle_IPI(int irq, void *data)
 {
 	int ipi = irq - ipi_virq_base;
 
@@ -323,3 +347,8 @@ void arch_smp_send_reschedule(int cpu)
 	send_ipi_single(cpu, IPI_RESCHEDULE);
 }
 EXPORT_SYMBOL_GPL(arch_smp_send_reschedule);
+
+int ipi_virq_base_get(void)
+{
+	return ipi_virq_base;
+}
