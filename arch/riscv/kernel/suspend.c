@@ -30,6 +30,9 @@ void suspend_save_csrs(struct suspend_context *context)
 	 */
 
 #ifdef CONFIG_MMU
+	if (riscv_has_extension_unlikely(RISCV_ISA_EXT_SSTC))
+		context->stimecmp = csr_read_hi_lo(CSR_STIMECMP);
+
 	context->satp = csr_read(CSR_SATP);
 #endif
 }
@@ -43,6 +46,9 @@ void suspend_restore_csrs(struct suspend_context *context)
 	csr_write(CSR_IE, context->ie);
 
 #ifdef CONFIG_MMU
+	if (riscv_has_extension_unlikely(RISCV_ISA_EXT_SSTC))
+		csr_write_hi_lo(CSR_STIMECMP, context->stimecmp);
+
 	csr_write(CSR_SATP, context->satp);
 #endif
 }
