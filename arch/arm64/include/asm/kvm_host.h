@@ -448,6 +448,10 @@ enum vcpu_sysreg {
 
 	POR_EL0,	/* Permission Overlay Register 0 (EL0) */
 
+	/* Guarded Control Stack registers */
+	GCSCRE0_EL1,	/* Guarded Control Stack Control (EL0) */
+	GCSPR_EL0,	/* Guarded Control Stack Pointer (EL0) */
+
 	/* FP/SIMD/SVE */
 	SVCR,
 	FPMR,
@@ -524,6 +528,10 @@ enum vcpu_sysreg {
 	VNCR(PIRE0_EL1), /*  Permission Indirection Register 0 (EL1) */
 
 	VNCR(POR_EL1),	/* Permission Overlay Register 1 (EL1) */
+
+	/* Guarded Control Stack registers */
+	VNCR(GCSPR_EL1),	/* Guarded Control Stack Pointer (EL1) */
+	VNCR(GCSCR_EL1),	/* Guarded Control Stack Control (EL1) */
 
 	VNCR(HFGRTR_EL2),
 	VNCR(HFGWTR_EL2),
@@ -1494,5 +1502,9 @@ void kvm_set_vm_id_reg(struct kvm *kvm, u32 reg, u64 val);
 #define kvm_has_fpmr(k)					\
 	(system_supports_fpmr() &&			\
 	 kvm_has_feat((k), ID_AA64PFR2_EL1, FPMR, IMP))
+
+#define kvm_has_gcs(k) 					\
+	(system_supports_gcs() &&			\
+	 kvm_has_feat((k), ID_AA64PFR1_EL1, GCS, IMP))
 
 #endif /* __ARM64_KVM_HOST_H__ */
