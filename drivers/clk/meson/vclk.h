@@ -6,7 +6,7 @@
 #ifndef __VCLK_H
 #define __VCLK_H
 
-#include "clk-regmap.h"
+#include <linux/clk/clk-regmap.h>
 #include "parm.h"
 
 /**

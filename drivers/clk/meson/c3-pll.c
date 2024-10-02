@@ -8,7 +8,7 @@
 
 #include <linux/clk-provider.h>
 #include <linux/platform_device.h>
-#include "clk-regmap.h"
+#include <linux/clk/clk-regmap.h>
 #include "clk-pll.h"
 #include "meson-clkc-utils.h"
 #include <dt-bindings/clock/amlogic,c3-pll-clkc.h>

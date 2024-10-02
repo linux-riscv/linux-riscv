@@ -10,7 +10,7 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 
-#include "clk-regmap.h"
+#include <linux/clk/clk-regmap.h>
 #include "vid-pll-div.h"
 #include "clk-dualdiv.h"
 #include "s4-peripherals.h"

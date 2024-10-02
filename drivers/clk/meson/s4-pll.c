@@ -12,7 +12,7 @@
 
 #include "clk-mpll.h"
 #include "clk-pll.h"
-#include "clk-regmap.h"
+#include <linux/clk/clk-regmap.h>
 #include "s4-pll.h"
 #include "meson-clkc-utils.h"
 #include <dt-bindings/clock/amlogic,s4-pll-clkc.h>
