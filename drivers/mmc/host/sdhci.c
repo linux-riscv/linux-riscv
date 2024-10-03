@@ -3098,6 +3098,10 @@ static bool sdhci_request_done(struct sdhci_host *host)
 		sdhci_reset_for(host, REQUEST_ERROR);
 
 		host->pending_reset = false;
+
+		/* Clear any pending interrupts after reset */
+		sdhci_writel(host, SDHCI_INT_CMD_MASK | SDHCI_INT_DATA_MASK,
+			     SDHCI_INT_STATUS);
 	}
 
 	/*
