@@ -1396,6 +1396,12 @@ static void __init arch_reserve_crashkernel(void)
 
 void __init paging_init(void)
 {
+#ifdef CONFIG_64BIT
+	BUILD_BUG_ON_MSG((VA_BITS == VA_BITS_SV39) &&
+			(((FIXADDR_START & BIT(39)) >> 39)
+			 != ((FIXADDR_START & BIT(38)) >> 38)),
+			"violate SV39 rule: bits[63..39] should be same as bit[38]");
+#endif
 	setup_bootmem();
 	setup_vm_final();
 
