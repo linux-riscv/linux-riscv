@@ -172,11 +172,20 @@ asmlinkage __visible __trap_section void do_trap_insn_illegal(struct pt_regs *re
 	bool handled;
 
 	if (user_mode(regs)) {
+		u32 __user *epc = (u32 __user *)regs->epc;
+		u32 insn = (u32)regs->badaddr;
+
 		irqentry_enter_from_user_mode(regs);
 
 		local_irq_enable();
 
-		handled = riscv_v_first_use_handler(regs);
+		if (!insn) {
+			if (__get_user(insn, epc)) {
+				/* todo */
+			}
+		}
+
+		handled = riscv_v_first_use_handler(regs, insn);
 
 		local_irq_disable();
 
