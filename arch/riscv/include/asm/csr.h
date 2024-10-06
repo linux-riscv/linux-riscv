@@ -501,6 +501,17 @@
 	__v;							\
 })
 
+#if __riscv_xlen < 64
+#define csr_read_hi_lo(csr)					\
+({								\
+	u32 hi = csr_read(csr##H);				\
+	u32 lo = csr_read(csr);					\
+	lo | ((u64)hi << 32);					\
+})
+#else
+#define csr_read_hi_lo	csr_read
+#endif
+
 #define csr_write(csr, val)					\
 ({								\
 	unsigned long __v = (unsigned long)(val);		\
@@ -508,6 +519,17 @@
 			      : : "rK" (__v)			\
 			      : "memory");			\
 })
+
+#if __riscv_xlen < 64
+#define csr_write_hi_lo(csr, val)				\
+({								\
+	u64 _v = (u64)(val);					\
+	csr_write(csr##H, (_v) >> 32);				\
+	csr_write(csr, (_v));					\
+})
+#else
+#define csr_write_hi_lo	csr_write
+#endif
 
 #define csr_read_set(csr, val)					\
 ({								\

@@ -18,6 +18,7 @@ struct suspend_context {
 	unsigned long ie;
 #ifdef CONFIG_MMU
 	unsigned long satp;
+	u64 stimecmp;
 #endif
 };
 
