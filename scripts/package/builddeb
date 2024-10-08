@@ -144,7 +144,7 @@ package=$1
 
 case "${package}" in
 *-dbg)
-	install_linux_image_dbg "${package}";;
+	;;
 linux-image-*|user-mode-linux-*)
 	install_linux_image "${package}";;
 linux-libc-dev)
