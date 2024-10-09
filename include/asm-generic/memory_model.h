@@ -64,6 +64,9 @@ static inline int pfn_valid(unsigned long pfn)
 #define page_to_pfn __page_to_pfn
 #define pfn_to_page __pfn_to_page
 
+#define page_to_phys(page)	__pfn_to_phys(page_to_pfn(page))
+#define phys_to_page(phys)	pfn_to_page(__phys_to_pfn(phys))
+
 #endif /* __ASSEMBLY__ */
 
 #endif
