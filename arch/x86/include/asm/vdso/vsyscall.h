@@ -2,12 +2,13 @@
 #ifndef __ASM_VDSO_VSYSCALL_H
 #define __ASM_VDSO_VSYSCALL_H
 
+#define __VDSO_RND_DATA_OFFSET  640
+
 #ifndef __ASSEMBLY__
 
 #include <linux/timekeeper_internal.h>
 #include <vdso/datapage.h>
 #include <asm/vgtod.h>
-#include <asm/vvar.h>
 
 extern struct vdso_data *vdso_data;
 
