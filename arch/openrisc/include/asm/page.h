@@ -88,5 +88,6 @@ static inline unsigned long virt_to_pfn(const void *kaddr)
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #endif /* __ASM_OPENRISC_PAGE_H */

@@ -92,4 +92,7 @@ static inline unsigned long virt_to_pfn(const void *kaddr)
 #include <asm-generic/getorder.h>
 
 #endif /* !__ASSEMBLY__ */
+
+#include <asm-generic/pgtable-geometry.h>
+
 #endif /* __ASM_CSKY_PAGE_H */

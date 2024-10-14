@@ -173,6 +173,7 @@ extern int npmem_ranges;
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
+#include <asm-generic/pgtable-geometry.h>
 #include <asm/pdc.h>
 
 #define PAGE0   ((struct zeropage *)absolute_pointer(__PAGE_OFFSET))

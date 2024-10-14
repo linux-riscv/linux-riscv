@@ -142,5 +142,6 @@ static inline const void *pfn_to_virt(unsigned long pfn)
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #endif /* _ASM_MICROBLAZE_PAGE_H */

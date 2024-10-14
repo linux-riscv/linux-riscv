@@ -217,5 +217,6 @@ static __always_inline void *pfn_to_kaddr(unsigned long pfn)
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #endif /* _ASM_RISCV_PAGE_H */

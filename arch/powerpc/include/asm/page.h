@@ -300,4 +300,6 @@ static inline unsigned long kaslr_offset(void)
 #include <asm-generic/memory_model.h>
 #endif /* __ASSEMBLY__ */
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif /* _ASM_POWERPC_PAGE_H */

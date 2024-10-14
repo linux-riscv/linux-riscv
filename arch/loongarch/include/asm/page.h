@@ -123,4 +123,6 @@ extern int __virt_addr_valid(volatile void *kaddr);
 
 #endif /* !__ASSEMBLY__ */
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif /* _ASM_PAGE_H */
