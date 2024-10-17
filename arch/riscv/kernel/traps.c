@@ -316,18 +316,25 @@ void do_trap_ecall_u(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
 		long syscall = regs->a7;
+		long res;
 
 		regs->epc += 4;
 		regs->orig_a0 = regs->a0;
-		regs->a0 = -ENOSYS;
 
 		riscv_v_vstate_discard(regs);
 
-		syscall = syscall_enter_from_user_mode(regs, syscall);
+		res = syscall_enter_from_user_mode(regs, syscall);
+		/*
+		 * Call syscall_get_nr() again because syscall_enter_from_user_mode()
+		 * may change a7 register.
+		 */
+		syscall = syscall_get_nr(current, regs);
 
 		add_random_kstack_offset();
 
-		if (syscall >= 0 && syscall < NR_syscalls)
+		if (syscall < 0 || syscall >= NR_syscalls)
+			regs->a0 = -ENOSYS;
+		else if (res != -1)
 			syscall_handler(regs, syscall);
 
 		/*
