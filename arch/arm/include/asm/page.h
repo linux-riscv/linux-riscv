@@ -191,5 +191,6 @@ extern int pfn_valid(unsigned long);
 
 #include <asm-generic/getorder.h>
 #include <asm-generic/memory_model.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #endif

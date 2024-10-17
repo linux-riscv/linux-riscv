@@ -119,4 +119,6 @@ extern unsigned long uml_physmem;
 #define __HAVE_ARCH_GATE_AREA 1
 #endif
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif	/* __UM_PAGE_H */

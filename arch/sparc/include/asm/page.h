@@ -9,4 +9,7 @@
 #else
 #include <asm/page_32.h>
 #endif
+
+#include <asm-generic/pgtable-geometry.h>
+
 #endif

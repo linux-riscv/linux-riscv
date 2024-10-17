@@ -97,4 +97,6 @@ extern struct page *mem_map;
 
 #endif /* !__ASSEMBLY__ */
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif /* _ASM_NIOS2_PAGE_H */

@@ -60,5 +60,6 @@ extern unsigned long _ramend;
 
 #include <asm-generic/getorder.h>
 #include <asm-generic/memory_model.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #endif /* _M68K_PAGE_H */

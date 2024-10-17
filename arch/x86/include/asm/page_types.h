@@ -71,4 +71,6 @@ extern void initmem_init(void);
 
 #endif	/* !__ASSEMBLY__ */
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif	/* _ASM_X86_PAGE_DEFS_H */

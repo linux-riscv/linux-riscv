@@ -139,4 +139,6 @@ static inline unsigned long virt_to_pfn(const void *kaddr)
 #endif /* ifdef __ASSEMBLY__ */
 #endif /* ifdef __KERNEL__ */
 
+#include <asm-generic/pgtable-geometry.h>
+
 #endif

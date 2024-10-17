@@ -6,6 +6,7 @@
 #define __ASM_ARC_PAGE_H
 
 #include <uapi/asm/page.h>
+#include <asm-generic/pgtable-geometry.h>
 
 #ifdef CONFIG_ARC_HAS_PAE40
 

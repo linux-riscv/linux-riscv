@@ -899,6 +899,8 @@ static void __init early_numa_node_init(void)
 #endif
 }
 
+static __init void do_ctors(void);
+
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void)
 {
@@ -909,6 +911,8 @@ void start_kernel(void)
 	smp_setup_processor_id();
 	debug_objects_early_init();
 	init_vmlinux_build_id();
+
+	do_ctors();
 
 	cgroup_init_early();
 
@@ -1362,7 +1366,6 @@ static void __init do_basic_setup(void)
 	cpuset_init_smp();
 	driver_init();
 	init_irq_proc();
-	do_ctors();
 	do_initcalls();
 }
 
