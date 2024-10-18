@@ -68,12 +68,10 @@ static int __init hvc_sbi_init(void)
 		err = PTR_ERR_OR_ZERO(hvc_alloc(0, 0, &hvc_sbi_dbcn_ops, 256));
 		if (err)
 			return err;
-		hvc_instantiate(0, 0, &hvc_sbi_dbcn_ops);
 	} else if (IS_ENABLED(CONFIG_RISCV_SBI_V01)) {
 		err = PTR_ERR_OR_ZERO(hvc_alloc(0, 0, &hvc_sbi_v01_ops, 256));
 		if (err)
 			return err;
-		hvc_instantiate(0, 0, &hvc_sbi_v01_ops);
 	} else {
 		return -ENODEV;
 	}
@@ -81,3 +79,18 @@ static int __init hvc_sbi_init(void)
 	return 0;
 }
 device_initcall(hvc_sbi_init);
+
+static int __init hvc_sbi_console_init(void)
+{
+	int err;
+
+	if (sbi_debug_console_available)
+		err = hvc_instantiate(0, 0, &hvc_sbi_dbcn_ops);
+	else if (IS_ENABLED(CONFIG_RISCV_SBI_V01))
+		err = hvc_instantiate(0, 0, &hvc_sbi_v01_ops);
+	else
+		return -ENODEV;
+
+	return err < 0 ? -ENODEV : 0;
+}
+console_initcall(hvc_sbi_console_init);
